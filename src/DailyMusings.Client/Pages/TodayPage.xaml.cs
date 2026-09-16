@@ -31,8 +31,22 @@ public partial class TodayPage : ContentPage
     private readonly ObservableCollection<TodayRow> _today = [];
 
     private IDispatcherTimer? _elapsedTimer;
+    private IDispatcherTimer? _transcriptionTimer;
+    private int _transcriptionPolls;
     private DateTimeOffset _recordingStartedAt;
     private bool _busy;
+
+    /// <summary>
+    /// How long to keep checking whether a pending transcription has finished.
+    /// <para>
+    /// Bounded on purpose. A server with transcription switched off leaves an entry pending forever, and polling it
+    /// indefinitely would spend the radio to learn nothing — so the screen gives up, says so, and leaves the manual
+    /// sync button in charge.
+    /// </para>
+    /// </summary>
+    private const int MaxTranscriptionPolls = 40;
+
+    private static readonly TimeSpan TranscriptionPollInterval = TimeSpan.FromSeconds(3);
 
     public TodayPage(
         ClientSettings settings,
@@ -69,6 +83,7 @@ public partial class TodayPage : ContentPage
     {
         base.OnDisappearing();
         StopElapsedTimer();
+        StopTranscriptionTimer();
     }
 
     private async void OnRecordClicked(object? sender, EventArgs e)
@@ -134,13 +149,15 @@ public partial class TodayPage : ContentPage
             return;
         }
 
+        PendingCapture capture;
+
         try
         {
             await using var content = recording.Content;
 
             // The promise §9.2 makes: once this returns, the recording is safe on the device, and only then does the
             // UI say so. Whether it reaches the server yet is a separate matter.
-            var capture = await _controller.SaveVoiceCaptureAsync(
+            capture = await _controller.SaveVoiceCaptureAsync(
                 content,
                 recording.FileExtension,
                 recording.ContentType,
@@ -159,6 +176,7 @@ public partial class TodayPage : ContentPage
 
         await RefreshAsync();
         await SyncQuietlyAsync();
+        await ReportCaptureOutcomeAsync(capture.Id);
     }
 
     private async void OnSaveTextClicked(object? sender, EventArgs e)
@@ -171,9 +189,11 @@ public partial class TodayPage : ContentPage
             return;
         }
 
+        PendingCapture capture;
+
         try
         {
-            await _controller.SaveTextCaptureAsync(text, CancellationToken.None);
+            capture = await _controller.SaveTextCaptureAsync(text, CancellationToken.None);
             TextEditor.Text = string.Empty;
             RecordStatus.Text = "已保存到本机，正在上传…";
         }
@@ -185,6 +205,38 @@ public partial class TodayPage : ContentPage
 
         await RefreshAsync();
         await SyncQuietlyAsync();
+        await ReportCaptureOutcomeAsync(capture.Id);
+    }
+
+    /// <summary>
+    /// Replaces "正在上传…" with what actually happened.
+    /// <para>
+    /// Found by testing on a device: the transient line was written when the capture was saved and never updated,
+    /// so the screen went on claiming an upload was in progress long after it had finished. The app's whole promise
+    /// is that it only says what the server has confirmed, and a stale "uploading…" is the same lie in the other
+    /// direction.
+    /// </para>
+    /// </summary>
+    private async Task ReportCaptureOutcomeAsync(string? captureId)
+    {
+        if (string.IsNullOrWhiteSpace(captureId))
+        {
+            return;
+        }
+
+        var queue = await _controller.GetQueueAsync(CancellationToken.None);
+        var capture = queue.FirstOrDefault(item => item.Id == captureId);
+
+        RecordStatus.Text = capture?.State switch
+        {
+            // Gone from the queue: the server took it, which is the only reason the local copy is deleted.
+            null => "已上传到服务器。",
+
+            CaptureUploadState.Failed =>
+                $"已保存到本机，上传失败（{DescribeFailure(capture.FailureCode)}），可在下面重试。",
+
+            _ => "已保存到本机，等待上传。",
+        };
     }
 
     private async void OnSyncClicked(object? sender, EventArgs e) => await SyncQuietlyAsync();
@@ -324,6 +376,66 @@ public partial class TodayPage : ContentPage
         TodayStatus.Text = items.Count == 0
             ? "今天还没有上传任何内容。"
             : $"共 {items.Count} 条。";
+
+        // A freshly uploaded recording is transcribed asynchronously, so the screen has to look again — otherwise it
+        // says "正在转写…" until the user thinks to press sync, which is what testing on a device showed.
+        UpdateTranscriptionPolling(items.Any(IsAwaitingTranscription));
+    }
+
+    private static bool IsAwaitingTranscription(InputDto item) =>
+        item.TranscriptionStatus is TranscriptionStatusNames.Pending or TranscriptionStatusNames.InProgress;
+
+    private void UpdateTranscriptionPolling(bool awaiting)
+    {
+        if (!awaiting)
+        {
+            StopTranscriptionTimer();
+            return;
+        }
+
+        if (_transcriptionTimer is not null)
+        {
+            return;
+        }
+
+        _transcriptionPolls = 0;
+        _transcriptionTimer = Dispatcher.CreateTimer();
+        _transcriptionTimer.Interval = TranscriptionPollInterval;
+        _transcriptionTimer.Tick += OnTranscriptionTick;
+        _transcriptionTimer.Start();
+    }
+
+    private async void OnTranscriptionTick(object? sender, EventArgs e)
+    {
+        _transcriptionPolls++;
+
+        if (_transcriptionPolls > MaxTranscriptionPolls)
+        {
+            StopTranscriptionTimer();
+            TodayStatus.Text = "转写还在进行中；稍后可以点「立即同步」再看。";
+            return;
+        }
+
+        try
+        {
+            await RefreshTodayAsync();
+        }
+        catch (Exception exception)
+        {
+            // A failed poll must not spam the user; the next tick tries again, and the manual sync is always there.
+            StopTranscriptionTimer();
+            TodayStatus.Text = $"刷新转写状态失败：{exception.Message}";
+        }
+    }
+
+    private void StopTranscriptionTimer()
+    {
+        if (_transcriptionTimer is { } timer)
+        {
+            timer.Stop();
+            timer.Tick -= OnTranscriptionTick;
+            _transcriptionTimer = null;
+        }
     }
 
     private static string DescribeTitle(InputDto item)
