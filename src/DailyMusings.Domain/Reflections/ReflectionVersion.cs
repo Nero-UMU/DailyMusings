@@ -79,6 +79,16 @@ public sealed class ReflectionVersion
     /// </summary>
     public IReadOnlyList<UnsourcedClaim> UnsourcedClaims => _unsourcedClaims;
 
+    /// <summary>
+    /// When the second-stage check last ran for this text, or <c>null</c> when it never has.
+    /// <para>
+    /// Without this, an empty <see cref="UnsourcedClaims"/> is ambiguous: "checked and found nothing" and
+    /// "never checked" look identical, and the client would present the reassuring one for both. §8.4 makes the
+    /// check a requirement, so the product must be able to say whether it happened.
+    /// </para>
+    /// </summary>
+    public DateTimeOffset? SourcesCheckedAtUtc { get; private set; }
+
     public WritingSettings Settings { get; private set; }
 
     public ModelInfo? ModelInfo { get; private set; }
@@ -143,7 +153,8 @@ public sealed class ReflectionVersion
         DateTimeOffset createdAtUtc,
         DateTimeOffset? editedAtUtc,
         IEnumerable<string>? tags = null,
-        IEnumerable<string>? categories = null)
+        IEnumerable<string>? categories = null,
+        DateTimeOffset? sourcesCheckedAtUtc = null)
     {
         var version = new ReflectionVersion(id, reflectionId, title, summary, body, settings, createdAtUtc)
         {
@@ -151,6 +162,7 @@ public sealed class ReflectionVersion
             PromptVersion = promptVersion,
             HasManualEdits = hasManualEdits,
             EditedAtUtc = editedAtUtc,
+            SourcesCheckedAtUtc = sourcesCheckedAtUtc,
         };
 
         version.ReplaceTags(tags, categories);
@@ -174,6 +186,10 @@ public sealed class ReflectionVersion
         // the wrong sentence.
         _sources.Clear();
         _unsourcedClaims.Clear();
+
+        // The check result described the old text, so the version goes back to "not checked" rather than
+        // keeping a clean bill of health for a sentence nobody examined.
+        SourcesCheckedAtUtc = null;
     }
 
     public void ReplaceTags(IEnumerable<string>? tags, IEnumerable<string>? categories)
@@ -211,13 +227,21 @@ public sealed class ReflectionVersion
         _sources.AddRange(incoming);
     }
 
-    /// <summary>Attaches the second-stage findings for this version's text.</summary>
-    public void AttachUnsourcedClaims(IEnumerable<UnsourcedClaim> claims)
+    /// <summary>
+    /// Records the second-stage findings for this version's text and stamps the check as done.
+    /// <para>
+    /// The two happen together on purpose: the timestamp is what makes an empty finding list mean "checked and
+    /// clean", so a caller that could attach findings without stamping would be able to produce a version whose
+    /// check state is unreadable.
+    /// </para>
+    /// </summary>
+    public void AttachUnsourcedClaims(IEnumerable<UnsourcedClaim> claims, DateTimeOffset checkedAtUtc)
     {
         ArgumentNullException.ThrowIfNull(claims);
 
         _unsourcedClaims.Clear();
         _unsourcedClaims.AddRange(claims);
+        SourcesCheckedAtUtc = checkedAtUtc;
     }
 
     /// <summary>

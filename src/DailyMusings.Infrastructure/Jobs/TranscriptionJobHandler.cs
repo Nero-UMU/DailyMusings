@@ -1,4 +1,5 @@
 using DailyMusings.Application.Abstractions;
+using DailyMusings.Application.Topics;
 using DailyMusings.Domain.Common;
 using DailyMusings.Domain.Inputs;
 using DailyMusings.Domain.Jobs;
@@ -17,6 +18,12 @@ public enum JobOutcome
     /// Counted as success, because failing would only produce a pointless retry storm.
     /// </summary>
     Skipped = 1,
+
+    /// <summary>
+    /// The work made progress and has more to do. The job returns to the queue without being counted as a failed
+    /// attempt, which is what lets §8.3's batched index rebuild fit inside §14's bounded retry budget.
+    /// </summary>
+    Continue = 2,
 }
 
 /// <summary>
@@ -45,17 +52,23 @@ public sealed class TranscriptionJobHandler : IJobHandler
     private readonly IInputEntryRepository _inputs;
     private readonly IAudioStore _audio;
     private readonly ITranscriptionClient _client;
+    private readonly AssignTopicsAutomaticallyUseCase _assignTopics;
+    private readonly Application.Embeddings.EnsureEmbeddingIndexedUseCase _ensureIndexed;
     private readonly ILogger<TranscriptionJobHandler> _logger;
 
     public TranscriptionJobHandler(
         IInputEntryRepository inputs,
         IAudioStore audio,
         ITranscriptionClient client,
+        AssignTopicsAutomaticallyUseCase assignTopics,
+        Application.Embeddings.EnsureEmbeddingIndexedUseCase ensureIndexed,
         ILogger<TranscriptionJobHandler> logger)
     {
         _inputs = inputs;
         _audio = audio;
         _client = client;
+        _assignTopics = assignTopics;
+        _ensureIndexed = ensureIndexed;
         _logger = logger;
     }
 
@@ -114,6 +127,8 @@ public sealed class TranscriptionJobHandler : IJobHandler
             // The transcript itself is never logged (§16); only the fact that it succeeded.
             _logger.LogInformation("Transcription completed for entry {EntryId}.", entry.Id);
 
+            await RunPostTranscriptionStepsAsync(entry.Id, cancellationToken).ConfigureAwait(false);
+
             return JobOutcome.Completed;
         }
         catch (TransientExternalFailureException exception)
@@ -143,6 +158,36 @@ public sealed class TranscriptionJobHandler : IJobHandler
             await _inputs.UpdateAsync(entry, cancellationToken).ConfigureAwait(false);
             throw;
         }
+    }
+
+    /// <summary>
+    /// §8.2 step 5: 成功后保存原始转写，识别主题并生成 Embedding.
+    /// <para>
+    /// Both steps are deliberately outside the transcription job's failure semantics. The transcript is already
+    /// durable and correct at this point, so a topic-matching bug or an unavailable embedding endpoint must not
+    /// mark the transcription failed — that would tell the user their recording could not be transcribed when it
+    /// was. Each step records its own problem and the entry keeps its transcript either way.
+    /// </para>
+    /// </summary>
+    private async Task RunPostTranscriptionStepsAsync(InputEntryId entryId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _assignTopics.ExecuteAsync(entryId, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            // Topic recognition is a convenience: the input stays usable and unfiled, and the user can file it.
+            _logger.LogWarning(
+                "Topic recognition for entry {EntryId} failed with {ErrorType}.",
+                entryId,
+                exception.GetType().Name);
+        }
+
+        var entry = await _inputs.FindByIdAsync(entryId, cancellationToken).ConfigureAwait(false);
+        await _ensureIndexed
+            .ExecuteAsync(entryId, entry?.TranscriptForGeneration, cancellationToken)
+            .ConfigureAwait(false);
     }
 
     /// <summary>A syntactically valid file name; the endpoint only uses the extension to sniff the container.</summary>

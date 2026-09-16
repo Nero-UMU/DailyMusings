@@ -5,6 +5,7 @@ using DailyMusings.Domain.Publishing;
 using DailyMusings.Domain.Reflections;
 using DailyMusings.Domain.Reflections.Sources;
 using DailyMusings.Domain.Time;
+using DailyMusings.Domain.Topics;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace DailyMusings.Domain.Tests;
@@ -32,6 +33,26 @@ internal static class TestFactory
         var day = contentDate ?? Day(1);
         return InputEntry.CreateText(InputEntryId.New(), Noon, ShanghaiOffsetMinutes, day, text);
     }
+
+    /// <summary>A text entry captured at a specific instant, for ordering and recall-boundary tests.</summary>
+    public static InputEntry TextEntryAt(DateTimeOffset createdAtUtc, ContentDate contentDate, string text)
+    {
+        return InputEntry.CreateText(InputEntryId.New(), createdAtUtc, ShanghaiOffsetMinutes, contentDate, text);
+    }
+
+    /// <summary>A text entry already filed under topics, the shape automatic recognition produces.</summary>
+    public static InputEntry FiledText(
+        ContentDate? contentDate,
+        string text,
+        TopicId? primary = null,
+        params TopicId[] secondary)
+    {
+        var entry = TextEntry(contentDate, text);
+        entry.AssignTopics(primary, secondary);
+        return entry;
+    }
+
+    public static Topic NewTopic(string name = "录音") => Topic.Create(TopicId.New(), name, Noon);
 
     public static InputEntry VoiceEntry(ContentDate? contentDate = null, string audioPath = "media/2026/03/a.m4a")
     {

@@ -148,7 +148,7 @@ public class SourceMappingTests
         var reflection = TestFactory.NewReflection();
         var version = TestFactory.NewVersion(reflection);
 
-        version.AttachUnsourcedClaims([new UnsourcedClaim(0, 0, 5, "没有对应输入")]);
+        version.AttachUnsourcedClaims([new UnsourcedClaim(0, 0, 5, "没有对应输入")], TestFactory.Noon);
 
         Assert.AreEqual(1, version.UnsourcedClaims.Count);
         Assert.AreEqual("没有对应输入", version.UnsourcedClaims[0].Reason);

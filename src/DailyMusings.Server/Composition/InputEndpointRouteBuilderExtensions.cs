@@ -409,7 +409,9 @@ public static class InputEndpointRouteBuilderExtensions
         entry.AudioDuration?.TotalSeconds,
         entry.IsDeleted,
         job is null ? null : ToWireName(job.Status),
-        job?.AttemptCount ?? 0);
+        job?.AttemptCount ?? 0,
+        entry.PrimaryTopicId?.ToString(),
+        entry.SecondaryTopicIds.Select(topicId => topicId.ToString()).ToArray());
 
     private static JobDto ToDto(ProcessingJob job) => new(
         job.Id.ToString(),

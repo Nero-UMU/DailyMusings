@@ -44,7 +44,14 @@ public sealed record InputDto(
     double? AudioDurationSeconds,
     bool IsDeleted,
     string? TranscriptionJobStatus,
-    int TranscriptionJobAttempts);
+    int TranscriptionJobAttempts,
+
+    /// <summary>
+    /// What automatic recognition or the user filed this entry under (§6.2). At most one primary; the client
+    /// shows these rather than making a second request per entry.
+    /// </summary>
+    string? PrimaryTopicId,
+    IReadOnlyList<string> SecondaryTopicIds);
 
 public sealed record InputListResponse(IReadOnlyList<InputDto> Items);
 

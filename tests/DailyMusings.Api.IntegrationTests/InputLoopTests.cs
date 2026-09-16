@@ -413,6 +413,15 @@ public class InputLoopTests
     private static Task<InputDto> WaitForTranscriptionAsync(TestInstance instance, HttpClient device, string inputId)
     {
         _ = instance;
-        return WaitForAsync(device, inputId, view => view.TranscriptionStatus == TranscriptionStatusNames.Succeeded);
+
+        // Waits for the job to be terminal, not just for the transcript to appear. Phase two's post-transcription
+        // steps (topic recognition, embedding enqueue) run after the entry is marked transcribed, so the entry
+        // reaching "succeeded" no longer implies the job has finished — and asserting the job's final state is
+        // what this wait is for.
+        return WaitForAsync(
+            device,
+            inputId,
+            view => view.TranscriptionStatus == TranscriptionStatusNames.Succeeded &&
+                    view.TranscriptionJobStatus is JobStatusNames.Succeeded or JobStatusNames.Failed);
     }
 }

@@ -75,6 +75,15 @@ public sealed class SqliteConnectionAccessor : IAsyncDisposable
             .BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken)
             .ConfigureAwait(false);
 
+        // Foreign keys are checked at commit instead of at each statement, for the length of this transaction.
+        // An aggregate writes its root and its children together, and the schema has a genuine cycle: a draft
+        // points at its initial/previous/working/confirmed versions while each version points back at the draft.
+        // No statement order can satisfy both, so the constraint belongs at commit — where the aggregate is
+        // whole — rather than in the middle of assembling it. Violations are still refused, just one moment
+        // later; the pragma is transaction-scoped and resets on commit or rollback.
+        await ExecutePragmaAsync(connection, "PRAGMA defer_foreign_keys = ON;", cancellationToken)
+            .ConfigureAwait(false);
+
         return _transaction;
     }
 

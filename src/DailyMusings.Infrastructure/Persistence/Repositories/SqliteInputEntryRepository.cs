@@ -83,6 +83,55 @@ public sealed class SqliteInputEntryRepository : IInputEntryRepository
             ("$limit", limit));
     }
 
+    /// <summary>
+    /// Everything a reflection on <paramref name="upToInclusive"/> could cite (docs/开发指导.md §8.3).
+    /// <para>
+    /// The day boundary is in the SQL, not in the caller. §8.3's "only material from the article's day or
+    /// earlier" is the rule that keeps a reflection from describing something as having happened before it did,
+    /// and a boundary that lives only in application code is one a later caller can forget to apply.
+    /// </para>
+    /// </summary>
+    public Task<IReadOnlyList<InputEntry>> ListRecallCandidatesAsync(
+        ContentDate upToInclusive,
+        int limit,
+        CancellationToken cancellationToken) =>
+        LoadAsync(
+            $"""
+             SELECT {Columns} FROM input_entry
+              WHERE deleted_at_utc IS NULL
+                AND allow_future_recall = 1
+                AND content_date <= $upTo
+                AND (COALESCE(revised_transcript, original_transcript) IS NOT NULL)
+              ORDER BY content_date, created_at_utc, id
+              LIMIT $limit;
+             """,
+            cancellationToken,
+            ("$upTo", SqliteValues.ContentDay(upToInclusive)),
+            ("$limit", limit));
+
+    /// <summary>
+    /// The days that have material, newest first. The catch-up scan walks this rather than a date range so that a
+    /// day with nothing in it is never even considered — which is how §7's "当天无输入时不得创建空文章" is kept
+    /// true by construction instead of by a check that has to remember to run.
+    /// </summary>
+    public async Task<IReadOnlyList<ContentDate>> ListContentDatesWithInputsAsync(
+        ContentDate upToInclusive,
+        int limit,
+        CancellationToken cancellationToken) =>
+        await _accessor.QueryAsync(
+            """
+            SELECT DISTINCT content_date FROM input_entry
+             WHERE deleted_at_utc IS NULL
+               AND content_date <= $upTo
+               AND (COALESCE(revised_transcript, original_transcript) IS NOT NULL)
+             ORDER BY content_date DESC
+             LIMIT $limit;
+            """,
+            reader => SqliteValues.ReadContentDay(reader, 0),
+            cancellationToken,
+            ("$upTo", SqliteValues.ContentDay(upToInclusive)),
+            ("$limit", limit)).ConfigureAwait(false);
+
     public async Task AddAsync(InputEntry entry, CancellationToken cancellationToken)
     {
         await _accessor.ExecuteAsync(
@@ -117,6 +166,8 @@ public sealed class SqliteInputEntryRepository : IInputEntryRepository
             ("$deletedAt", SqliteValues.InstantOrNull(entry.DeletedAtUtc)),
             ("$clientKey", SqliteValues.TextOrNull(entry.ClientIdempotencyKey)),
             ("$deviceId", SqliteValues.GuidOrNull(entry.DeviceId?.Value))).ConfigureAwait(false);
+
+        await SaveSecondaryTopicsAsync(entry, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task UpdateAsync(InputEntry entry, CancellationToken cancellationToken)
@@ -150,6 +201,36 @@ public sealed class SqliteInputEntryRepository : IInputEntryRepository
             ("$allowRecall", entry.AllowFutureRecall ? 1 : 0),
             ("$primaryTopic", SqliteValues.GuidOrNull(entry.PrimaryTopicId?.Value)),
             ("$deletedAt", SqliteValues.InstantOrNull(entry.DeletedAtUtc))).ConfigureAwait(false);
+
+        await SaveSecondaryTopicsAsync(entry, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Mirrors the entry's secondary topics into the join table.
+    /// <para>
+    /// Replace rather than merge: the domain value is the whole assignment, so anything the caller removed must
+    /// disappear. Without this the assignment would live only in memory, and a restart would silently file every
+    /// input under nothing — which would take the degraded retrieval signal with it.
+    /// </para>
+    /// </summary>
+    private async Task SaveSecondaryTopicsAsync(InputEntry entry, CancellationToken cancellationToken)
+    {
+        await _accessor.ExecuteAsync(
+            "DELETE FROM input_entry_secondary_topic WHERE input_entry_id = $id;",
+            cancellationToken,
+            ("$id", entry.Id.ToString())).ConfigureAwait(false);
+
+        foreach (var topicId in entry.SecondaryTopicIds)
+        {
+            await _accessor.ExecuteAsync(
+                """
+                INSERT INTO input_entry_secondary_topic (input_entry_id, topic_id)
+                VALUES ($id, $topicId);
+                """,
+                cancellationToken,
+                ("$id", entry.Id.ToString()),
+                ("$topicId", topicId.ToString())).ConfigureAwait(false);
+        }
     }
 
     /// <summary>Reads entries plus their secondary topics in two queries, never one per row.</summary>

@@ -90,12 +90,23 @@ public sealed class GetInputUseCase
 /// Stores the user's correction to a transcript. The original is never overwritten (§6.1), and — per §7 —
 /// revising a past day's transcript must not make that day's reflection regenerable. This use case therefore
 /// touches only the entry; regeneration eligibility stays where it belongs, in the reflection rules.
+/// <para>
+/// It does queue a re-embedding, because §7 also says 修改后的内容可参与未来主题检索: a stored vector describes the
+/// wording the user just replaced, and semantic retrieval would otherwise keep matching against it.
+/// </para>
 /// </summary>
 public sealed class ReviseTranscriptUseCase
 {
     private readonly IInputEntryRepository _inputs;
+    private readonly Embeddings.EnsureEmbeddingIndexedUseCase _ensureIndexed;
 
-    public ReviseTranscriptUseCase(IInputEntryRepository inputs) => _inputs = inputs;
+    public ReviseTranscriptUseCase(
+        IInputEntryRepository inputs,
+        Embeddings.EnsureEmbeddingIndexedUseCase ensureIndexed)
+    {
+        _inputs = inputs;
+        _ensureIndexed = ensureIndexed;
+    }
 
     public async Task<InputEntry> ExecuteAsync(
         InputEntryId id,
@@ -107,6 +118,11 @@ public sealed class ReviseTranscriptUseCase
 
         entry.ReviseTranscript(revisedTranscript);
         await _inputs.UpdateAsync(entry, cancellationToken).ConfigureAwait(false);
+
+        // Keyed by the text itself, so re-saving the same revision is still a no-op while a real change is not.
+        await _ensureIndexed
+            .ExecuteAsync(entry.Id, entry.TranscriptForGeneration, cancellationToken)
+            .ConfigureAwait(false);
 
         return entry;
     }

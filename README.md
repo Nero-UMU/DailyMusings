@@ -14,25 +14,31 @@
 
 ## 当前进度
 
-**阶段一（领域骨架与部署）与阶段二（Android 输入闭环）已完成**，阶段三到阶段五未开始。
+**阶段一（领域骨架与部署）、阶段二（Android 输入闭环）与阶段三（主题与每日生成）已完成**，阶段四到阶段五未开始。
 
 已实现：
 
-- `DailyMusings.Domain` —— §6 全部领域实体与规则：内容日与「晚到」判定、历史检索的时间边界、三版本轮换不覆盖手工编辑、稿件与发布状态机、失败任务的有界指数退避、主题合并留墓碑等。
-- `DailyMusings.Application` —— 端口与用例：管理员初始化 / 登录 / 强制改密、配对码签发与兑换、设备列表 / 撤销 / 令牌轮换、设备令牌认证、系统健康聚合、输入接收与维护、任务查询与重试。
-- `DailyMusings.Infrastructure` —— SQLite 自动向前迁移（嵌入式 SQL）、仓储、Docker Secrets 读取、目录约定、PBKDF2-SHA256 密码哈希、随机令牌与配对码、健康探针、音频文件存储、OpenAI 兼容转写适配器、**真正消费任务的后台执行器**（独占认领、指数退避、重启恢复）。
-- `DailyMusings.Server` —— ASP.NET Core 宿主：启动即迁移与初始化管理员、Cookie 登录、设备 Bearer 令牌认证、强制改密闸门、结构化错误码、异常统一处理、输入接收与任务状态 API。
+- `DailyMusings.Domain` —— §6 全部领域实体与规则：内容日与「晚到」判定、历史检索的时间边界、三版本轮换不覆盖手工编辑、稿件与发布状态机、失败任务的有界指数退避、主题合并留墓碑等。阶段三补充：检索的降级与排序策略（`RetrievalPolicy`）、主题自动识别（`TopicMatcher`）、生成资格与暂缓规则（`GenerationRules`）、引文定位（`SourceQuoteLocator`）、向量余弦与文本相似度。
+- `DailyMusings.Application` —— 端口与用例：管理员初始化 / 登录 / 强制改密、配对码签发与兑换、设备管理、设备令牌认证、系统健康聚合、输入接收与维护、任务查询与重试；阶段三补充主题增删改并与归属调整、历史检索、生成编排与版本轮换、无来源陈述检查、Embedding 索引与分批重建、任务幂等入队（`JobEnqueuer`）。
+- `DailyMusings.Infrastructure` —— SQLite 自动向前迁移（嵌入式 SQL）、仓储、Docker Secrets 读取、目录约定、PBKDF2-SHA256 密码哈希、随机令牌与配对码、健康探针、音频文件存储、OpenAI 兼容转写 / 生成 / Embedding 适配器、**真正消费任务的后台执行器**（独占认领、指数退避、重启恢复、分批续跑），以及**调度器**（按内容时区在 23:00 触发、停机后逐日补跑、Embedding 指纹变化时自动重建）。
+- `DailyMusings.Server` —— ASP.NET Core 宿主：启动即迁移与初始化管理员、Cookie 登录、设备 Bearer 令牌认证、强制改密闸门、结构化错误码、统一异常处理、输入与任务 API，以及主题 / 稿件 / 来源 / 语义检索状态 API。
 - `DailyMusings.Admin` —— Blazor 管理页：登录、强制改密、实例状态（健康 + 生成配对码）、设备管理（轮换 / 撤销）。
 - `DailyMusings.Client.Core` —— 平台中立的客户端逻辑：**离线队列**（先安全落盘再报告保存成功）、幂等上传、失败原因与手动重试、面向服务端的 HTTP 客户端。不依赖 MAUI，因此可完整单测，Windows 客户端将来可原样复用。
 - `DailyMusings.Client` —— MAUI Android 应用：录音（MediaRecorder → AAC/MP4）、文字输入、待上传队列与失败重试、今天的输入、设置（服务器地址、测试连接、配对、解除配对）。最低 Android 8.0 / API 26。
 - `deploy/` —— Dockerfile、Compose、环境与 Secrets 示例。
 
-尚未实现（阶段三到五）：主题识别与 Embedding 语义检索、每日随想生成与来源映射、SMTP 通知、WordPress 与 Hexo 发布、导出与备份恢复、Windows 客户端、音频保留清理任务。
+尚未实现（阶段四到五）：SMTP 通知、WordPress 与 Hexo 发布、导出与备份恢复、Windows 客户端、音频保留清理任务。客户端也还没有主题页、日历页和草稿页（§9.3），目前只有今日页与设置页。
 
 两个已知的实现取舍：
 
-- **模型配置目前通过部署配置（环境变量 + Docker Secrets）提供**，还没有管理页编辑界面。§8.1 要求的界面属于后续阶段；现在配置的字段形状已经是那个界面将要写入的形状（`Transcription:BaseUrl` / `Model` / `SecretName` / `TimeoutSeconds`）。转写默认**关闭**，未配置时不会把音频发往任何地方。
-- **录音路径尚未在真实 Android 设备上验证**。已在本机模拟器上验证应用能安装、启动、渲染、配对并完成一次文字输入的完整闭环；录音依赖平台 `MediaRecorder`，需要一台真实设备做最终确认（§19 的完成定义对此有明确要求）。
+- **模型配置目前通过部署配置（环境变量 + Docker Secrets）提供**，还没有管理页编辑界面。§8.1 要求的界面属于后续阶段；现在配置的字段形状已经是那个界面将要写入的形状（`Transcription:` / `Generation:` / `Embedding:` 下的 `BaseUrl` / `Model` / `SecretName` / `TimeoutSeconds`，另有 `Retrieval:MaxMaterials` 等检索参数）。转写、生成、Embedding 三项默认**全部关闭**，未配置时不会把任何内容发往任何地方；生成关闭时调度器不会往队列里塞任务。
+- **§13 的接口表里没有「创建主题」**，但没有它主题功能无法使用（自动识别只把内容归入已存在的主题）。因此增加了 `POST /api/topics`，按名称创建且幂等（忽略大小写、空格与标点）。这是对事实源的补充，已在此说明。
+
+已在真实环境验证过的路径：
+
+- **阶段一**：在远程 Docker 主机上完成两轮 Compose 部署验收，包括从空目录起服务、自动迁移与管理员初始化，以及 A.14 的密钥环独立卷（重建容器后同一 Cookie 仍有效）。
+- **阶段二**：在真实 Android 设备（Xiaomi 23127PN0CC / Android 16）上跑通录音 → 上传 → 转写 → 中文转写结果回到界面并显示「已转写」，上传的 312,237 字节与落盘文件逐字节一致。
+- **阶段三**：以真实服务进程 + 桩模型端点跑通采集 → 主题自动归属 → Embedding 建索引 → 生成 → 来源映射 → 无来源陈述检查 → 确认。其中特意让被引用的历史记录与当天记录**既无共同主题也无共同措辞，只有向量相近**，因此它出现在来源映射里，就只可能来自语义检索。同一轮还验证了两处拒绝（任意历史日期不可生成、未确认存疑句不可确认）、当日新增素材把已确认草稿转为过期并重新生成（最初版本仍永久保留）、以及停机期间遗留的过去日被调度器自动补跑。
 
 
 ## 本地运行
@@ -51,13 +57,26 @@ dotnet run --project src/DailyMusings.Server
 Storage__RootPath=/var/lib/dailymusings dotnet run --project src/DailyMusings.Server
 ```
 
+要真正生成草稿，需要指向一个 OpenAI 兼容端点：
+
+```bash
+Generation__Enabled=true \
+Generation__BaseUrl=https://api.example.com/v1 \
+Generation__Model=gpt-4o-mini \
+Generation__SecretName=openai-api-key \
+Storage__SecretsPath=/run/secrets \
+dotnet run --project src/DailyMusings.Server
+```
+
+`Embedding__Enabled=true` 需另行开启；关掉它产品照常工作，历史检索退化为主题标签与全文匹配（§8.3）。
+
 ## 运行测试
 
 ```bash
 dotnet test
 ```
 
-覆盖范围：§17.1 列出的领域规则；迁移与仓储的原子性（含配对码只能被兑换一次的并发用例、一个真实的外键顺序回归，以及文件存储的「先落盘后引用」）；用例层；客户端离线队列（含「本地副本只在服务端确认后才删除」的顺序断言与幂等键复用）；以及走真实 HTTP 的端到端流程——阶段一的完整流程，加上阶段二的上传 → 执行器认领 → 转写端点 → 结果落库（用一个可控的桩端点冒充 OpenAI 兼容服务），覆盖瞬时失败退避重试与永久失败后的人工恢复。
+覆盖范围：§17.1 列出的领域规则；迁移与仓储的原子性（含配对码只能被兑换一次的并发用例、一个真实的外键顺序回归，以及文件存储的「先落盘后引用」）；用例层；客户端离线队列（含「本地副本只在服务端确认后才删除」的顺序断言与幂等键复用）；以及走真实 HTTP 的端到端流程——阶段一的完整流程，阶段二的上传 → 执行器认领 → 转写端点 → 结果落库，阶段三的采集 → 主题识别 → 语义检索 → 生成 → 来源映射 → 无来源陈述检查 → 确认，以及两项拒绝（任意历史日期不可生成、未确认存疑句不可确认）。外部服务一律使用可控桩端点。
 
 ## 构建 Android 客户端
 

@@ -3,6 +3,7 @@ using DailyMusings.Application.Configuration;
 using DailyMusings.Domain.Common;
 using DailyMusings.Domain.Inputs;
 using DailyMusings.Domain.Jobs;
+using DailyMusings.Domain.Reflections;
 using DailyMusings.Domain.Time;
 
 namespace DailyMusings.Application.Inputs;
@@ -29,12 +30,14 @@ public abstract class InputIngestionUseCaseBase
         IJobRepository jobs,
         IUnitOfWork unitOfWork,
         IContentCalendarProvider calendars,
+        IReflectionRepository reflections,
         IClock clock)
     {
         Inputs = inputs;
         Jobs = jobs;
         UnitOfWork = unitOfWork;
         Calendars = calendars;
+        Reflections = reflections;
         Clock = clock;
     }
 
@@ -45,6 +48,9 @@ public abstract class InputIngestionUseCaseBase
     protected IUnitOfWork UnitOfWork { get; }
 
     protected IContentCalendarProvider Calendars { get; }
+
+    /// <summary>Needed because a capture can invalidate an already-produced draft for its content day (§7).</summary>
+    protected IReflectionRepository Reflections { get; }
 
     protected IClock Clock { get; }
 
@@ -65,6 +71,12 @@ public abstract class InputIngestionUseCaseBase
     /// <summary>
     /// Records the entry and its transcription job in one transaction. Committing them together is what prevents
     /// an entry that can never be transcribed because the process died between the two writes.
+    /// <para>
+    /// The same transaction also invalidates the day's draft if it had already been produced. That belongs here,
+    /// next to the write that caused it: §7's staleness rule is about material arriving after the draft exists,
+    /// and doing it anywhere else would leave a window in which a new capture is stored but the draft still looks
+    /// finished.
+    /// </para>
     /// </summary>
     protected async Task<ProcessingJob?> PersistAsync(
         InputEntry entry,
@@ -88,8 +100,31 @@ public abstract class InputIngestionUseCaseBase
             await Jobs.AddAsync(job, cancellationToken).ConfigureAwait(false);
         }
 
+        await MarkDayStaleIfNeededAsync(entry.ContentDate, cancellationToken).ConfigureAwait(false);
+
         await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
         return job;
+    }
+
+    /// <summary>
+    /// §7's two staleness paths, which are really one rule: material whose own content day already has a draft
+    /// invalidates that draft. Path ① is a same-day capture arriving after the nightly run; path ② is yesterday's
+    /// capture arriving today. Because the rule keys off the entry's immutable content day (A.5), neither path
+    /// needs a special case.
+    /// </summary>
+    private async Task MarkDayStaleIfNeededAsync(ContentDate contentDate, CancellationToken cancellationToken)
+    {
+        var reflection = await Reflections
+            .FindByContentDateAsync(contentDate, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (reflection is null || !GenerationRules.ShouldMarkStale(reflection.Status))
+        {
+            return;
+        }
+
+        reflection.MarkStaleByLateInput(Clock.UtcNow);
+        await Reflections.UpdateAsync(reflection, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -115,9 +150,10 @@ public sealed class IngestVoiceInputUseCase : InputIngestionUseCaseBase
         IJobRepository jobs,
         IUnitOfWork unitOfWork,
         IContentCalendarProvider calendars,
+        IReflectionRepository reflections,
         IAudioStore audio,
         IClock clock)
-        : base(inputs, jobs, unitOfWork, calendars, clock)
+        : base(inputs, jobs, unitOfWork, calendars, reflections, clock)
     {
         _audio = audio;
     }
@@ -163,17 +199,29 @@ public sealed class IngestVoiceInputUseCase : InputIngestionUseCaseBase
     }
 }
 
-/// <summary>Records a typed note. There is nothing to transcribe, so no job is queued.</summary>
+/// <summary>
+/// Records a typed note. There is nothing to transcribe, so no job is queued — but the note is filed under the
+/// user's topics straight away, because §8.2's recognition step exists to make material findable and a typed note
+/// is material from the moment it arrives.
+/// </summary>
 public sealed class IngestTextInputUseCase : InputIngestionUseCaseBase
 {
+    private readonly Topics.AssignTopicsAutomaticallyUseCase _assignTopics;
+    private readonly Embeddings.EnsureEmbeddingIndexedUseCase _ensureIndexed;
+
     public IngestTextInputUseCase(
         IInputEntryRepository inputs,
         IJobRepository jobs,
         IUnitOfWork unitOfWork,
         IContentCalendarProvider calendars,
+        IReflectionRepository reflections,
+        Topics.AssignTopicsAutomaticallyUseCase assignTopics,
+        Embeddings.EnsureEmbeddingIndexedUseCase ensureIndexed,
         IClock clock)
-        : base(inputs, jobs, unitOfWork, calendars, clock)
+        : base(inputs, jobs, unitOfWork, calendars, reflections, clock)
     {
+        _assignTopics = assignTopics;
+        _ensureIndexed = ensureIndexed;
     }
 
     public async Task<IngestResult> ExecuteAsync(
@@ -200,6 +248,23 @@ public sealed class IngestTextInputUseCase : InputIngestionUseCaseBase
             context.DeviceId);
 
         var job = await PersistAsync(entry, enqueueTranscription: false, cancellationToken).ConfigureAwait(false);
+
+        try
+        {
+            await _assignTopics.ExecuteAsync(entry.Id, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            // Filing is a convenience: a capture the user typed must never be lost because topic matching failed.
+            // The caller sees the entry as captured, and the note simply stays unfiled until they file it.
+            _ = exception;
+        }
+
+        // The vector for this text is what lets a later day retrieve it semantically (§8.3), so the same capture
+        // that produced the text queues the embedding.
+        await _ensureIndexed
+            .ExecuteAsync(entry.Id, entry.TranscriptForGeneration, cancellationToken)
+            .ConfigureAwait(false);
 
         return new IngestResult(entry, WasAlreadyStored: false, job);
     }

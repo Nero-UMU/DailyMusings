@@ -165,8 +165,17 @@ public sealed class JobExecutorService : BackgroundService
             }
             else
             {
-                await handler.ExecuteAsync(job, cancellationToken).ConfigureAwait(false);
-                job.Succeed(_clock.UtcNow);
+                var outcome = await handler.ExecuteAsync(job, cancellationToken).ConfigureAwait(false);
+
+                if (outcome == JobOutcome.Continue)
+                {
+                    // Batched work that made progress: back in the queue shortly, without spending an attempt.
+                    job.Reschedule(_clock.UtcNow + Interval);
+                }
+                else
+                {
+                    job.Succeed(_clock.UtcNow);
+                }
             }
         }
         catch (TransientExternalFailureException exception)

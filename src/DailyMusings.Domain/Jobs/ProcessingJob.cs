@@ -79,7 +79,31 @@ public static class IdempotencyKeys
 {
     public static string Transcription(InputEntryId inputId) => $"transcription:{inputId}";
 
-    public static string ReflectionGeneration(ContentDate contentDate) => $"reflection-generation:{contentDate}";
+    /// <summary>
+    /// One key per generation round of a day.
+    /// <para>
+    /// The round is the number of versions the day has already produced, which is what makes a day
+    /// "generate once, then regenerate when it goes stale" expressible as two distinct keys. Without it the
+    /// unique index would refuse the second generation of a day forever — the first job row still holds the
+    /// key — and §7's catch-up path would be impossible to implement.
+    /// </para>
+    /// </summary>
+    public static string ReflectionGeneration(ContentDate contentDate, int round = 0) =>
+        $"reflection-generation:{contentDate}#{round}";
+
+    public static string UnsourcedStatementCheck(ReflectionVersionId versionId) =>
+        $"unsourced-check:{versionId}";
+
+    /// <summary>
+    /// Indexing one entry is per configuration fingerprint <em>and</em> per exact text.
+    /// <para>
+    /// The text is part of the key because §7 says 修改后的内容可参与未来主题检索: a revision changes what the entry
+    /// should match, and a key that only named the entry would find the already-succeeded job and decline to
+    /// re-embed it — leaving semantic retrieval answering with the wording the user replaced.
+    /// </para>
+    /// </summary>
+    public static string EmbeddingIndex(InputEntryId inputId, string embeddingConfigVersion, string textHash) =>
+        $"embedding-index:{inputId}:{embeddingConfigVersion}:{textHash}";
 
     public static string Publication(ReflectionVersionId versionId, PublishTargetId targetId) =>
         $"publication:{versionId}:{targetId}";
@@ -97,13 +121,15 @@ public sealed class ProcessingJob
         JobType jobType,
         string targetId,
         string? idempotencyKey,
-        DateTimeOffset scheduledAtUtc)
+        DateTimeOffset scheduledAtUtc,
+        string? payload)
     {
         Id = id;
         JobType = jobType;
         TargetId = targetId;
         IdempotencyKey = idempotencyKey;
         ScheduledAtUtc = scheduledAtUtc;
+        Payload = payload;
         Status = JobStatus.Pending;
     }
 
@@ -127,6 +153,17 @@ public sealed class ProcessingJob
     /// <summary>Unique across the job table, so a replayed request cannot enqueue a second copy (§14).</summary>
     public string? IdempotencyKey { get; }
 
+    /// <summary>
+    /// Optional request parameters, stored as JSON.
+    /// <para>
+    /// Exists because some work cannot be described by its target alone: regenerating a day needs to know
+    /// whether the user already accepted losing a hand-edited working version (§6.4), and that decision has to
+    /// survive a restart just like the job does. Encoding it into <see cref="IdempotencyKey"/> would work but
+    /// would put meaning into a string that is supposed to be opaque.
+    /// </para>
+    /// </summary>
+    public string? Payload { get; }
+
     public string? ErrorCode { get; private set; }
 
     /// <summary>Redacted, log-safe summary. Never contains private content (§16).</summary>
@@ -141,10 +178,13 @@ public sealed class ProcessingJob
         JobType jobType,
         string targetId,
         string? idempotencyKey,
-        DateTimeOffset scheduledAtUtc)
+        DateTimeOffset scheduledAtUtc,
+        string? payload = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(targetId);
-        return new ProcessingJob(id, jobType, targetId, idempotencyKey, scheduledAtUtc);
+        ValidatePayload(payload);
+
+        return new ProcessingJob(id, jobType, targetId, idempotencyKey, scheduledAtUtc, payload);
     }
 
     public static ProcessingJob Rehydrate(
@@ -159,9 +199,10 @@ public sealed class ProcessingJob
         string? idempotencyKey,
         string? errorCode,
         string? errorSummary,
-        DateTimeOffset? nextAttemptAtUtc)
+        DateTimeOffset? nextAttemptAtUtc,
+        string? payload = null)
     {
-        var job = new ProcessingJob(id, jobType, targetId, idempotencyKey, scheduledAtUtc)
+        var job = new ProcessingJob(id, jobType, targetId, idempotencyKey, scheduledAtUtc, payload)
         {
             Status = status,
             AttemptCount = attemptCount,
@@ -173,6 +214,29 @@ public sealed class ProcessingJob
         };
 
         return job;
+    }
+
+    /// <summary>
+    /// Returns a running job to the queue because it made progress and has more to do, without recording a
+    /// failure.
+    /// <para>
+    /// Batched work needs this: §8.3 requires the embedding rebuild to run in batches, and treating every
+    /// batch boundary as a failed attempt would exhaust §14's budget part way through a large index. The
+    /// attempt counter is refunded, because the attempt did not fail — it did exactly what it was asked to do.
+    /// </para>
+    /// </summary>
+    public void Reschedule(DateTimeOffset at)
+    {
+        if (Status != JobStatus.Running)
+        {
+            throw new DomainException("job.bad_state", $"Only a running job can be rescheduled (status is {Status}).");
+        }
+
+        Status = JobStatus.Pending;
+        AttemptCount = Math.Max(0, AttemptCount - 1);
+        ScheduledAtUtc = at;
+        NextAttemptAtUtc = at;
+        StartedAtUtc = null;
     }
 
     public void Start(DateTimeOffset at)
@@ -275,5 +339,17 @@ public sealed class ProcessingJob
 
         Start(nowUtc);
         return true;
+    }
+
+    /// <summary>
+    /// A payload is stored in the job row and travels through the database, so it is bounded: an unbounded
+    /// one would let a caller turn the queue into a blob store. 4 KiB is far more than any current job needs.
+    /// </summary>
+    private static void ValidatePayload(string? payload)
+    {
+        if (payload is { Length: > 4096 })
+        {
+            throw new DomainException("job.payload.too_long", "A job payload may not exceed 4096 characters.");
+        }
     }
 }

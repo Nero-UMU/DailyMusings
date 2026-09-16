@@ -17,7 +17,7 @@ public sealed class SqliteJobRepository : IJobRepository
 {
     private const string Columns = """
         id, job_type, target_id, status, attempt_count, scheduled_at_utc, started_at_utc, completed_at_utc,
-        idempotency_key, error_code, error_summary, next_attempt_at_utc
+        idempotency_key, error_code, error_summary, next_attempt_at_utc, payload_json
         """;
 
     private readonly SqliteConnectionAccessor _accessor;
@@ -29,10 +29,10 @@ public sealed class SqliteJobRepository : IJobRepository
             """
             INSERT INTO processing_job
                 (id, job_type, target_id, status, attempt_count, scheduled_at_utc, started_at_utc, completed_at_utc,
-                 idempotency_key, error_code, error_summary, next_attempt_at_utc)
+                 idempotency_key, error_code, error_summary, next_attempt_at_utc, payload_json)
             VALUES
                 ($id, $jobType, $targetId, $status, $attempts, $scheduledAt, $startedAt, $completedAt,
-                 $idempotencyKey, $errorCode, $errorSummary, $nextAttemptAt);
+                 $idempotencyKey, $errorCode, $errorSummary, $nextAttemptAt, $payload);
             """,
             cancellationToken,
             ("$id", job.Id.ToString()),
@@ -46,7 +46,8 @@ public sealed class SqliteJobRepository : IJobRepository
             ("$idempotencyKey", SqliteValues.TextOrNull(job.IdempotencyKey)),
             ("$errorCode", SqliteValues.TextOrNull(job.ErrorCode)),
             ("$errorSummary", SqliteValues.TextOrNull(job.ErrorSummary)),
-            ("$nextAttemptAt", SqliteValues.InstantOrNull(job.NextAttemptAtUtc))).ConfigureAwait(false);
+            ("$nextAttemptAt", SqliteValues.InstantOrNull(job.NextAttemptAtUtc)),
+            ("$payload", SqliteValues.TextOrNull(job.Payload))).ConfigureAwait(false);
 
     public async Task<ProcessingJob?> FindByIdAsync(JobId id, CancellationToken cancellationToken) =>
         await _accessor.QuerySingleAsync(
@@ -54,6 +55,15 @@ public sealed class SqliteJobRepository : IJobRepository
             Map,
             cancellationToken,
             ("$id", id.ToString())).ConfigureAwait(false);
+
+    public async Task<ProcessingJob?> FindByIdempotencyKeyAsync(
+        string idempotencyKey,
+        CancellationToken cancellationToken) =>
+        await _accessor.QuerySingleAsync(
+            $"SELECT {Columns} FROM processing_job WHERE idempotency_key = $key LIMIT 1;",
+            Map,
+            cancellationToken,
+            ("$key", idempotencyKey)).ConfigureAwait(false);
 
     public async Task<ProcessingJob?> FindByTypeAndTargetAsync(
         JobType jobType,
@@ -171,5 +181,6 @@ public sealed class SqliteJobRepository : IJobRepository
             reader.IsDBNull(8) ? null : reader.GetString(8),
             reader.IsDBNull(9) ? null : reader.GetString(9),
             reader.IsDBNull(10) ? null : reader.GetString(10),
-            SqliteValues.ReadInstant(reader, 11));
+            SqliteValues.ReadInstant(reader, 11),
+            reader.IsDBNull(12) ? null : reader.GetString(12));
 }

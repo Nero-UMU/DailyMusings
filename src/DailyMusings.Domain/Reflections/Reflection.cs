@@ -164,6 +164,66 @@ public sealed class Reflection
     }
 
     /// <summary>
+    /// Moves a version the user already has back into the working slot (§9.3 版本切换, §13 PATCH
+    /// .../working-version).
+    /// <para>
+    /// Only the slots' own versions can be selected, because §6.4 keeps exactly three positions: the first
+    /// version ever produced, the previous one, and the current one. The displaced version takes the previous
+    /// slot, which makes a switch reversible by switching again.
+    /// </para>
+    /// <para>
+    /// Note that <see cref="InitialVersionId"/> is never re-pointed even when the first version moves into or
+    /// out of the working slot: it is the permanent record of what the model first produced, which is the whole
+    /// reason a user can come back later and see how far the text has travelled.
+    /// </para>
+    /// </summary>
+    public void SwitchWorkingVersion(ReflectionVersionId versionId, DateTimeOffset at)
+    {
+        if (versionId.IsEmpty)
+        {
+            throw new DomainException("reflection.version.empty_id", "A version id is required.");
+        }
+
+        if (WorkingVersionId is null)
+        {
+            throw new DomainException(
+                "reflection.version.none",
+                "This day has no version to switch between yet.");
+        }
+
+        if (Status == ReflectionStatus.Generating)
+        {
+            // The generation in flight will install its own version into the working slot; switching now
+            // would either be overwritten or would silently discard the result.
+            throw new DomainException(
+                "reflection.version.switch_while_generating",
+                "Versions cannot be switched while a generation is in progress.");
+        }
+
+        if (versionId == WorkingVersionId)
+        {
+            return; // idempotent: switching to the version already in the slot is a no-op
+        }
+
+        if (versionId != InitialVersionId && versionId != PreviousVersionId)
+        {
+            throw new DomainException(
+                "reflection.version.not_in_slots",
+                "Only the initial, previous or current version can be made the working version.");
+        }
+
+        var displaced = WorkingVersionId;
+        WorkingVersionId = versionId;
+
+        if (displaced != InitialVersionId)
+        {
+            PreviousVersionId = displaced;
+        }
+
+        UpdatedAtUtc = at;
+    }
+
+    /// <summary>
     /// Marks the draft stale because same-day material arrived after it was produced.
     /// Only reachable from <see cref="ReflectionStatus.ReviewRequired"/> or
     /// <see cref="ReflectionStatus.Confirmed"/>.

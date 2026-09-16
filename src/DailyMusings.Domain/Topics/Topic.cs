@@ -38,6 +38,28 @@ public sealed class Topic
         return new Topic(id, name.Trim(), createdAtUtc);
     }
 
+    /// <summary>
+    /// Rehydrates a persisted topic, including a merge tombstone. The name is validated exactly as on creation:
+    /// a topic that could not have been created should not appear to exist.
+    /// </summary>
+    public static Topic Rehydrate(
+        TopicId id,
+        string name,
+        DateTimeOffset createdAtUtc,
+        TopicId? mergedIntoId,
+        DateTimeOffset? mergedAtUtc)
+    {
+        var topic = Create(id, name, createdAtUtc);
+
+        if (mergedIntoId is { IsEmpty: false } target)
+        {
+            topic.MergedIntoId = target;
+            topic.MergedAtUtc = mergedAtUtc;
+        }
+
+        return topic;
+    }
+
     /// <summary>Renaming changes the display label only — never <see cref="Id"/>.</summary>
     public void Rename(string name)
     {

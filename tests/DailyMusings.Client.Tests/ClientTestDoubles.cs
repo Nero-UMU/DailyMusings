@@ -134,6 +134,8 @@ internal sealed class FakeCaptureApiClient : ICaptureApiClient
                 null,
                 false,
                 sourceType == InputSourceNames.Voice ? JobStatusNames.Pending : null,
-                0));
+                0,
+                null,
+                []));
     }
 }

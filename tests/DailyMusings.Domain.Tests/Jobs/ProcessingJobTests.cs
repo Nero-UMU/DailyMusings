@@ -127,7 +127,11 @@ public class ProcessingJobTests
         Assert.AreEqual(TimeSpan.FromMinutes(1024), policy.DelayFor(40));
     }
 
-    /// <summary>§14 names exactly three operations that must be idempotent; their keys must stay stable.</summary>
+    /// <summary>
+    /// §14 names exactly three operations that must be idempotent; their keys must stay stable. The generation
+    /// key also carries a round, because §7 needs a day to be generatable again once it goes stale — without it
+    /// the unique index would refuse the second generation of that day forever.
+    /// </summary>
     [TestMethod]
     public void Idempotency_keys_are_stable_and_distinct_per_operation()
     {
@@ -137,10 +141,16 @@ public class ProcessingJobTests
         var day = TestFactory.Day(3);
 
         Assert.AreEqual($"transcription:{inputId}", IdempotencyKeys.Transcription(inputId));
-        Assert.AreEqual("reflection-generation:2026-03-03", IdempotencyKeys.ReflectionGeneration(day));
+        Assert.AreEqual("reflection-generation:2026-03-03#0", IdempotencyKeys.ReflectionGeneration(day));
         Assert.AreEqual($"publication:{versionId}:{targetId}", IdempotencyKeys.Publication(versionId, targetId));
 
-        // Same day → same key, so a replayed generation request collides instead of duplicating.
+        // A first draft and the draft after new material arrived are different rounds of the same day.
+        Assert.AreEqual("reflection-generation:2026-03-03#1", IdempotencyKeys.ReflectionGeneration(day, round: 1));
+        Assert.AreNotEqual(
+            IdempotencyKeys.ReflectionGeneration(day),
+            IdempotencyKeys.ReflectionGeneration(day, round: 1));
+
+        // Same day and round → same key, so a replayed request collides instead of duplicating.
         Assert.AreEqual(
             IdempotencyKeys.ReflectionGeneration(day),
             IdempotencyKeys.ReflectionGeneration(TestFactory.Day(3)));

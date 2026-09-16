@@ -19,6 +19,30 @@ public interface IInputEntryRepository
 
     Task<IReadOnlyList<InputEntry>> ListByContentDateAsync(ContentDate contentDate, CancellationToken cancellationToken);
 
+    /// <summary>
+    /// Everything that could be cited by a reflection on <paramref name="upToInclusive"/>: not deleted, opted
+    /// into future recall, with text to work from, oldest first.
+    /// <para>
+    /// The boundary is expressed here, in the query, rather than left to the caller to filter afterwards — §8.3
+    /// forbids citing material from after the article's day, and a rule enforced only by the code that happens
+    /// to call this method is a rule a future caller can forget.
+    /// </para>
+    /// </summary>
+    Task<IReadOnlyList<InputEntry>> ListRecallCandidatesAsync(
+        ContentDate upToInclusive,
+        int limit,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Content days that have at least one usable input, newest first. This is what the catch-up scan walks
+    /// after downtime (§7: 按每条输入的实际创建日期逐日补跑) — enumerating days from the input side means a day
+    /// with no input is never considered at all, so an empty article cannot be produced by accident.
+    /// </summary>
+    Task<IReadOnlyList<ContentDate>> ListContentDatesWithInputsAsync(
+        ContentDate upToInclusive,
+        int limit,
+        CancellationToken cancellationToken);
+
     /// <summary>Most recent entries across days, newest first. Used by the client's timeline.</summary>
     Task<IReadOnlyList<InputEntry>> ListRecentAsync(int limit, CancellationToken cancellationToken);
 
@@ -67,6 +91,13 @@ public interface IJobRepository
     /// idempotent rather than additive.
     /// </summary>
     Task<ProcessingJob?> FindByTypeAndTargetAsync(JobType jobType, string targetId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Looks a job up by the key a caller derived from the work it wants done. Combined with the table's unique
+    /// index this is what lets "generate the third draft of this day" be requested repeatedly without ever
+    /// queueing the work twice (§14).
+    /// </summary>
+    Task<ProcessingJob?> FindByIdempotencyKeyAsync(string idempotencyKey, CancellationToken cancellationToken);
 
     Task<IReadOnlyList<ProcessingJob>> ListDueAsync(DateTimeOffset nowUtc, int limit, CancellationToken cancellationToken);
 
