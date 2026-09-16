@@ -61,6 +61,9 @@ public sealed class InputEntry
 
     public string? AudioPath { get; private set; }
 
+    /// <summary>MIME type of the stored blob, handed back to the transcription endpoint verbatim.</summary>
+    public string? AudioContentType { get; private set; }
+
     public TimeSpan? AudioDuration { get; private set; }
 
     /// <summary>When the audio blob was physically purged. The entry and its transcript survive.</summary>
@@ -73,6 +76,18 @@ public sealed class InputEntry
     public string? RevisedTranscript { get; private set; }
 
     public TranscriptionStatus TranscriptionStatus { get; private set; }
+
+    /// <summary>Stable code of the last transcription failure, or <c>null</c>. Never carries content (§16).</summary>
+    public string? TranscriptionErrorCode { get; private set; }
+
+    /// <summary>
+    /// The client-generated key that makes a replayed upload a no-op instead of a duplicate (§9.2, §14).
+    /// <c>null</c> for entries the server created on its own.
+    /// </summary>
+    public string? ClientIdempotencyKey { get; private set; }
+
+    /// <summary>The paired device that captured this entry, when a client captured it.</summary>
+    public DeviceId? DeviceId { get; private set; }
 
     /// <summary>Whether this entry may be cited as historical material in later reflections (§8.3).</summary>
     public bool AllowFutureRecall { get; private set; }
@@ -100,10 +115,14 @@ public sealed class InputEntry
         int createdOffsetMinutes,
         ContentDate contentDate,
         string audioPath,
-        TimeSpan? audioDuration)
+        TimeSpan? audioDuration,
+        string? audioContentType = null,
+        string? clientIdempotencyKey = null,
+        DeviceId? deviceId = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(audioPath);
         ValidateOffset(createdOffsetMinutes);
+        ValidateIdempotencyKey(clientIdempotencyKey);
 
         if (audioDuration is { } duration && duration < TimeSpan.Zero)
         {
@@ -113,7 +132,10 @@ public sealed class InputEntry
         return new InputEntry(id, InputSourceType.Voice, createdAtUtc, createdOffsetMinutes, contentDate, TranscriptionStatus.Pending)
         {
             AudioPath = audioPath,
+            AudioContentType = audioContentType,
             AudioDuration = audioDuration,
+            ClientIdempotencyKey = clientIdempotencyKey,
+            DeviceId = deviceId,
         };
     }
 
@@ -122,15 +144,66 @@ public sealed class InputEntry
         DateTimeOffset createdAtUtc,
         int createdOffsetMinutes,
         ContentDate contentDate,
-        string text)
+        string text,
+        string? clientIdempotencyKey = null,
+        DeviceId? deviceId = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(text);
         ValidateOffset(createdOffsetMinutes);
+        ValidateIdempotencyKey(clientIdempotencyKey);
 
         return new InputEntry(id, InputSourceType.Text, createdAtUtc, createdOffsetMinutes, contentDate, TranscriptionStatus.NotApplicable)
         {
             OriginalTranscript = text.Trim(),
+            ClientIdempotencyKey = clientIdempotencyKey,
+            DeviceId = deviceId,
         };
+    }
+
+    /// <summary>Rehydrates a persisted entry without replaying creation rules.</summary>
+    public static InputEntry Rehydrate(
+        InputEntryId id,
+        InputSourceType sourceType,
+        DateTimeOffset createdAtUtc,
+        int createdOffsetMinutes,
+        ContentDate contentDate,
+        string? audioPath,
+        string? audioContentType,
+        TimeSpan? audioDuration,
+        DateTimeOffset? audioDeletedAtUtc,
+        string? originalTranscript,
+        string? revisedTranscript,
+        TranscriptionStatus transcriptionStatus,
+        string? transcriptionErrorCode,
+        bool allowFutureRecall,
+        TopicId? primaryTopicId,
+        IEnumerable<TopicId>? secondaryTopicIds,
+        DateTimeOffset? deletedAtUtc,
+        string? clientIdempotencyKey,
+        DeviceId? deviceId)
+    {
+        var entry = new InputEntry(id, sourceType, createdAtUtc, createdOffsetMinutes, contentDate, transcriptionStatus)
+        {
+            AudioPath = audioPath,
+            AudioContentType = audioContentType,
+            AudioDuration = audioDuration,
+            AudioDeletedAtUtc = audioDeletedAtUtc,
+            OriginalTranscript = originalTranscript,
+            RevisedTranscript = revisedTranscript,
+            TranscriptionErrorCode = transcriptionErrorCode,
+            AllowFutureRecall = allowFutureRecall,
+            PrimaryTopicId = primaryTopicId,
+            DeletedAtUtc = deletedAtUtc,
+            ClientIdempotencyKey = clientIdempotencyKey,
+            DeviceId = deviceId,
+        };
+
+        if (secondaryTopicIds is not null)
+        {
+            entry._secondaryTopicIds.AddRange(secondaryTopicIds.Where(topicId => !topicId.IsEmpty).Distinct());
+        }
+
+        return entry;
     }
 
     public void BeginTranscription()
@@ -165,10 +238,11 @@ public sealed class InputEntry
 
         OriginalTranscript = originalTranscript.Trim();
         TranscriptionStatus = TranscriptionStatus.Succeeded;
+        TranscriptionErrorCode = null;
     }
 
     /// <summary>Records a transcription failure. The entry and its audio are always kept (§20).</summary>
-    public void FailTranscription()
+    public void FailTranscription(string? errorCode = null)
     {
         EnsureNotDeleted();
         if (TranscriptionStatus == TranscriptionStatus.Succeeded)
@@ -179,20 +253,30 @@ public sealed class InputEntry
         }
 
         TranscriptionStatus = TranscriptionStatus.Failed;
+        TranscriptionErrorCode = errorCode;
     }
 
-    /// <summary>Puts a failed transcription back in the queue.</summary>
+    /// <summary>
+    /// Puts a failed — or stuck — transcription back in the queue.
+    /// <para>
+    /// <see cref="TranscriptionStatus.InProgress"/> is accepted on purpose. Found by running the real pipeline: an
+    /// internal error after the attempt had started left the entry in progress forever, and refusing to retry it
+    /// turned one defect into a permanently unusable capture. Re-running a transcription is safe — the audio is
+    /// still there and the job is the same — so being generous here costs nothing and rescues the entry.
+    /// </para>
+    /// </summary>
     public void RetryTranscription()
     {
         EnsureNotDeleted();
-        if (TranscriptionStatus != TranscriptionStatus.Failed)
+        if (TranscriptionStatus is not (TranscriptionStatus.Failed or TranscriptionStatus.InProgress))
         {
             throw new DomainException(
                 "input.transcription.bad_state",
-                $"Only failed transcriptions can be retried (status is {TranscriptionStatus}).");
+                $"Only a failed or stuck transcription can be retried (status is {TranscriptionStatus}).");
         }
 
         TranscriptionStatus = TranscriptionStatus.Pending;
+        TranscriptionErrorCode = null;
     }
 
     /// <summary>
@@ -321,6 +405,25 @@ public sealed class InputEntry
             throw new DomainException(
                 "input.offset.out_of_range",
                 $"UTC offset {createdOffsetMinutes} minutes is outside the real-world range of ±14 hours.");
+        }
+    }
+
+    /// <summary>
+    /// A client key must be short and opaque. Bounded because it comes from an untrusted client and is stored;
+    /// a client that wants a longer identifier can hash it.
+    /// </summary>
+    private static void ValidateIdempotencyKey(string? clientIdempotencyKey)
+    {
+        if (clientIdempotencyKey is null)
+        {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(clientIdempotencyKey) || clientIdempotencyKey.Length > 128)
+        {
+            throw new DomainException(
+                "input.idempotency_key.invalid",
+                "A client idempotency key must be between 1 and 128 characters.");
         }
     }
 

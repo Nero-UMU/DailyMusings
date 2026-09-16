@@ -76,3 +76,21 @@ public sealed class AppSettingContentSettingsProvider : IContentSettingsProvider
         return ContentSettings.FromValues(values);
     }
 }
+
+/// <summary>
+/// Supplies a calendar bound to the configured content time zone. It resolves the time zone per call rather than
+/// caching it, so an operator changing the content time zone takes effect on the next capture — while already
+/// stored content days stay exactly as they were (decision A.5).
+/// </summary>
+public sealed class AppSettingContentCalendarProvider : IContentCalendarProvider
+{
+    private readonly IContentSettingsProvider _settings;
+
+    public AppSettingContentCalendarProvider(IContentSettingsProvider settings) => _settings = settings;
+
+    public async Task<DailyMusings.Domain.Time.ContentCalendar> GetCalendarAsync(CancellationToken cancellationToken)
+    {
+        var settings = await _settings.GetAsync(cancellationToken).ConfigureAwait(false);
+        return settings.CreateCalendar();
+    }
+}

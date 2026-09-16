@@ -1,0 +1,64 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<!-- Android first, as §18 requires. The Windows client is phase five; adding its target framework then is a
+		     one-line change plus the maui-windows workload, and nothing in this project assumes Android. -->
+		<TargetFrameworks>net10.0-android</TargetFrameworks>
+
+		<!-- Directory.Build.props applies a net10.0 default to every project. It is evaluated before this project
+		     body, so it cannot see TargetFrameworks and must be cleared here or the build would try a bare net10.0
+		     inner target. -->
+		<TargetFramework></TargetFramework>
+
+		<OutputType>Exe</OutputType>
+		<RootNamespace>DailyMusings.Client</RootNamespace>
+		<UseMaui>true</UseMaui>
+		<SingleProject>true</SingleProject>
+
+		<!-- The MAUI template's package versions ride $(MauiVersion), which is not defined when the central package
+		     file is evaluated, so this project manages its own versions. -->
+		<ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
+
+		<!-- XAML and platform analyzers are noisier than the server-side projects and cannot be fixed here. -->
+		<TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+
+		<MauiXamlInflator>SourceGen</MauiXamlInflator>
+
+		<ApplicationTitle>每日随想</ApplicationTitle>
+		<ApplicationId>dev.dailymusings.client</ApplicationId>
+
+		<ApplicationDisplayVersion>1.0</ApplicationDisplayVersion>
+		<ApplicationVersion>1</ApplicationVersion>
+
+		<!-- Android 8.0 / API 26, per decision A.11: the runtime permission model is settled by then and it avoids
+		     the legacy storage-permission branches that older targets drag in. -->
+		<SupportedOSPlatformVersion>26.0</SupportedOSPlatformVersion>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<!-- App Icon -->
+		<MauiIcon Include="Resources\AppIcon\appicon.svg" ForegroundFile="Resources\AppIcon\appiconfg.svg" Color="#512BD4" />
+
+		<!-- Splash Screen -->
+		<MauiSplashScreen Include="Resources\Splash\splash.svg" Color="#512BD4" BaseSize="128,128" />
+
+		<!-- Images -->
+		<MauiImage Include="Resources\Images\*" />
+
+		<!-- Custom Fonts -->
+		<MauiFont Include="Resources\Fonts\*" />
+
+		<!-- Raw Assets (also remove the "Resources\Raw" prefix) -->
+		<MauiAsset Include="Resources\Raw\**" LogicalName="%(RecursiveDir)%(Filename)%(Extension)" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<PackageReference Include="Microsoft.Maui.Controls" Version="$(MauiVersion)" />
+		<PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="10.0.0" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<ProjectReference Include="..\DailyMusings.Client.Core\DailyMusings.Client.Core.csproj" />
+	</ItemGroup>
+
+</Project>

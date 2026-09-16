@@ -27,6 +27,7 @@ public static class EndpointRouteBuilderExtensions
         MapPairingEndpoints(endpoints);
         MapDeviceEndpoints(endpoints);
         MapSystemEndpoints(endpoints);
+        endpoints.MapInputEndpoints();
 
         return endpoints;
     }

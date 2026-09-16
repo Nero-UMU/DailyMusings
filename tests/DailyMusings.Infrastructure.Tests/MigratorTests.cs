@@ -33,7 +33,14 @@ public class MigratorTests
         var appliedNow = await migrator.MigrateAsync(CancellationToken.None);
 
         Assert.AreEqual(0, appliedNow.Count, "A second run must not reapply anything.");
-        Assert.AreEqual(1, (await migrator.GetAppliedAsync(CancellationToken.None)).Count);
+
+        // The applied set must be stable and complete, without hard-coding how many migrations happen to exist.
+        var applied = await migrator.GetAppliedAsync(CancellationToken.None);
+        CollectionAssert.Contains(applied.ToArray(), "0001_initial");
+        CollectionAssert.Contains(applied.ToArray(), "0002_input_ingestion");
+
+        var again = await migrator.GetAppliedAsync(CancellationToken.None);
+        CollectionAssert.AreEqual(applied.ToArray(), again.ToArray());
     }
 
     [TestMethod]

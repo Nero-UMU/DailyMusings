@@ -145,6 +145,30 @@ public class InputEntryTests
         Assert.AreEqual(TranscriptionStatus.Pending, entry.TranscriptionStatus);
     }
 
+    /// <summary>
+    /// A stuck attempt must stay recoverable. Found by running the real pipeline: an internal error after the
+    /// attempt started left the entry in progress forever, and refusing to retry it made the capture unusable.
+    /// </summary>
+    [TestMethod]
+    public void A_stuck_in_progress_transcription_can_be_retried()
+    {
+        var entry = TestFactory.VoiceEntry();
+        entry.BeginTranscription();
+
+        entry.RetryTranscription();
+
+        Assert.AreEqual(TranscriptionStatus.Pending, entry.TranscriptionStatus);
+        Assert.IsNull(entry.TranscriptionErrorCode);
+    }
+
+    [TestMethod]
+    public void A_transcription_that_never_started_cannot_be_retried()
+    {
+        var entry = TestFactory.VoiceEntry();
+
+        TestFactory.ThrowsDomain("input.transcription.bad_state", () => entry.RetryTranscription());
+    }
+
     [TestMethod]
     public void Transcription_state_machine_rejects_out_of_order_calls()
     {

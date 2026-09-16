@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+	<!-- usesCleartextTraffic is deliberate. §10.3 permits reaching a self-hosted instance over plain HTTP on a
+	     trusted network, and Android blocks cleartext by default. The app compensates on the product side: it warns
+	     on every screen while such a connection is configured, and says plainly that acknowledging the warning did
+	     not make the connection safe. -->
+	<application
+		android:allowBackup="true"
+		android:icon="@mipmap/appicon"
+		android:roundIcon="@mipmap/appicon_round"
+		android:supportsRtl="true"
+		android:usesCleartextTraffic="true"></application>
+	<uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+	<uses-permission android:name="android.permission.INTERNET" />
+	<uses-permission android:name="android.permission.RECORD_AUDIO" />
+</manifest>

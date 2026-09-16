@@ -1,5 +1,7 @@
 using DailyMusings.Application.Admin;
 using DailyMusings.Application.Devices;
+using DailyMusings.Application.Inputs;
+using DailyMusings.Application.Jobs;
 using DailyMusings.Application.System;
 using DailyMusings.Contracts;
 using DailyMusings.Infrastructure.Composition;
@@ -9,6 +11,7 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.Http.Features;
 
 namespace DailyMusings.Server.Composition;
 
@@ -19,6 +22,12 @@ namespace DailyMusings.Server.Composition;
 /// </summary>
 public static class ServerServiceCollectionExtensions
 {
+    /// <summary>
+    /// Largest accepted audio upload. A short voice note is far below this; the cap exists so that a hostile or
+    /// broken client cannot fill the media volume with one request.
+    /// </summary>
+    public const long MaxAudioUploadBytes = 25L * 1024 * 1024;
+
     public static IServiceCollection AddDailyMusingsServer(
         this IServiceCollection services,
         IConfiguration configuration)
@@ -43,6 +52,25 @@ public static class ServerServiceCollectionExtensions
         services.AddScoped<RotateDeviceTokenUseCase>();
         services.AddScoped<AuthenticateDeviceUseCase>();
         services.AddScoped<SystemHealthUseCase>();
+
+        // The capture loop (§8.2, §9.2).
+        services.AddScoped<IngestVoiceInputUseCase>();
+        services.AddScoped<IngestTextInputUseCase>();
+        services.AddScoped<ListInputsUseCase>();
+        services.AddScoped<GetInputUseCase>();
+        services.AddScoped<ReviseTranscriptUseCase>();
+        services.AddScoped<DeleteInputAudioUseCase>();
+        services.AddScoped<DeleteInputUseCase>();
+        services.AddScoped<RetryTranscriptionUseCase>();
+        services.AddScoped<ListJobsUseCase>();
+        services.AddScoped<RetryJobUseCase>();
+
+        // Upload limits. A short voice note is measured in seconds, so an unbounded body is pure risk.
+        services.Configure<FormOptions>(options =>
+        {
+            options.MultipartBodyLengthLimit = MaxAudioUploadBytes;
+            options.ValueLengthLimit = 8 * 1024;
+        });
 
         services
             .AddAuthentication(ServerAuthenticationPolicies.AdminCookie)

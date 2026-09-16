@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\DailyMusings.Contracts\DailyMusings.Contracts.csproj" />
+  </ItemGroup>
+
+  <!-- Platform-neutral client logic: the offline queue, the idempotent upload, and the capture controller the UI
+       calls. Deliberately free of MAUI so it can be built and tested without an Android toolchain, and shared
+       verbatim by the Windows client later. -->
+
+</Project>

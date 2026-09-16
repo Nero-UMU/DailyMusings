@@ -117,3 +117,13 @@ public interface IContentSettingsProvider
 {
     Task<ContentSettings> GetAsync(CancellationToken cancellationToken);
 }
+
+/// <summary>
+/// Supplies a calendar bound to the configured content time zone. Exposed separately from the settings record so
+/// that ingestion does not have to re-parse the time zone on every upload, and so that reading it is one
+/// well-named call at the point where the §7 rules apply.
+/// </summary>
+public interface IContentCalendarProvider
+{
+    Task<ContentCalendar> GetCalendarAsync(CancellationToken cancellationToken);
+}

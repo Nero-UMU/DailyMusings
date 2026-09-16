@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage
+    x:Class="DailyMusings.Client.Pages.SettingsPage"
+    xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+    Title="设置">
+
+    <ScrollView>
+        <VerticalStackLayout Padding="16" Spacing="14">
+
+            <!-- §10.3: 设置页持续显示不安全连接状态. -->
+            <Border
+                x:Name="InsecureBanner"
+                IsVisible="False"
+                Stroke="#B42318"
+                StrokeThickness="1"
+                BackgroundColor="#FFEBE9"
+                Padding="12">
+                <Border.StrokeShape>
+                    <RoundRectangle CornerRadius="8" />
+                </Border.StrokeShape>
+                <Label
+                    TextColor="#7A271A"
+                    FontSize="13"
+                    Text="当前使用未加密的 HTTP 连接。密码、设备令牌、录音与文章都可能被截获。请改用 HTTPS、局域网或 VPN。确认过风险提示并不等于连接变安全了。" />
+            </Border>
+
+            <Label Text="服务器" FontAttributes="Bold" />
+
+            <Entry
+                x:Name="ServerUrlEntry"
+                Placeholder="https://example.com 或 http://192.168.1.10:8080"
+                Keyboard="Url" />
+
+            <Label
+                Text="也可以填写局域网地址或 VPN 内的地址。推荐使用 HTTPS。"
+                FontSize="12"
+                TextColor="#656D76" />
+
+            <HorizontalStackLayout Spacing="8">
+                <Button Text="保存地址" Clicked="OnSaveServerClicked" />
+                <Button Text="测试连接" Clicked="OnTestConnectionClicked" />
+            </HorizontalStackLayout>
+
+            <Label x:Name="ServerStatus" FontSize="13" TextColor="#656D76" />
+
+            <BoxView HeightRequest="1" Color="#E1E4E8" />
+
+            <Label Text="设备配对" FontAttributes="Bold" />
+
+            <Label
+                x:Name="PairingState"
+                FontSize="13"
+                TextColor="#656D76" />
+
+            <Entry
+                x:Name="PairingCodeEntry"
+                Placeholder="在管理页生成配对码后填到这里"
+                MaxLength="32" />
+
+            <HorizontalStackLayout Spacing="8">
+                <Button Text="配对" Clicked="OnPairClicked" />
+                <Button Text="解除配对" Clicked="OnUnpairClicked" />
+            </HorizontalStackLayout>
+
+            <Label x:Name="PairingStatus" FontSize="13" TextColor="#656D76" />
+
+            <BoxView HeightRequest="1" Color="#E1E4E8" />
+
+            <Label Text="本机信息" FontAttributes="Bold" />
+            <Label x:Name="DeviceInfoLabel" FontSize="12" TextColor="#656D76" />
+
+            <Label
+                Text="客户端只保存服务器地址和设备令牌，不保存模型密钥或发布凭据。"
+                FontSize="12"
+                TextColor="#656D76" />
+
+        </VerticalStackLayout>
+    </ScrollView>
+
+</ContentPage>

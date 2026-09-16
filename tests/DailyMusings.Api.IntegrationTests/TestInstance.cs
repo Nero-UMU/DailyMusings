@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.RegularExpressions;
+using DailyMusings.Contracts;
 using DailyMusings.Server.Composition;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -57,11 +58,15 @@ internal sealed class TestInstance : IAsyncDisposable
         }
     }
 
-    public static Task<TestInstance> StartAsync() =>
-        StartAtAsync(Path.Combine(Path.GetTempPath(), "dailymusings-api", Guid.CreateVersion7().ToString("N")));
+    public static Task<TestInstance> StartAsync(IReadOnlyDictionary<string, string?>? extraSettings = null) =>
+        StartAtAsync(
+            Path.Combine(Path.GetTempPath(), "dailymusings-api", Guid.CreateVersion7().ToString("N")),
+            extraSettings);
 
     /// <summary>Starts against a specific instance directory, so a test can simulate a restart.</summary>
-    public static async Task<TestInstance> StartAtAsync(string rootPath)
+    public static async Task<TestInstance> StartAtAsync(
+        string rootPath,
+        IReadOnlyDictionary<string, string?>? extraSettings = null)
     {
         Directory.CreateDirectory(rootPath);
 
@@ -73,7 +78,7 @@ internal sealed class TestInstance : IAsyncDisposable
             ContentRootPath = root,
         });
 
-        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+        var settings = new Dictionary<string, string?>(StringComparer.Ordinal)
         {
             ["Storage:RootPath"] = root,
             ["Storage:SecretsPath"] = Path.Combine(root, "secrets"),
@@ -81,7 +86,17 @@ internal sealed class TestInstance : IAsyncDisposable
             // Kept beside the instance root, mirroring production: the key ring must outlive a restart but stay
             // out of the backup set.
             ["Storage:KeyRingPath"] = Path.Combine(root, "keys"),
-        });
+        };
+
+        if (extraSettings is not null)
+        {
+            foreach (var (key, value) in extraSettings)
+            {
+                settings[key] = value;
+            }
+        }
+
+        builder.Configuration.AddInMemoryCollection(settings);
 
         // Keep the test output readable; failures are asserted, not read from logs.
         builder.Logging.ClearProviders();
@@ -141,6 +156,36 @@ internal sealed class TestInstance : IAsyncDisposable
     /// <summary>Plants a previously issued auth cookie, simulating a browser that kept its session.</summary>
     public void SetAdminCookie(string value) =>
         _cookies.Add(Client.BaseAddress!, new Cookie("dailymusings.admin", value, "/"));
+
+    /// <summary>Provisions a secret the way a mounted Docker secret would appear to the app (§10.4).</summary>
+    public void WriteSecret(string name, string value)
+    {
+        var directory = Path.Combine(RootPath, "secrets");
+        Directory.CreateDirectory(directory);
+        File.WriteAllText(Path.Combine(directory, name), value);
+    }
+
+    /// <summary>
+    /// Pairs a device through the real pairing flow and returns an HTTP client authenticated as that device —
+    /// which is exactly how a phone will talk to this server, rather than an admin shortcut.
+    /// </summary>
+    public async Task<(string DeviceId, HttpClient Client)> PairDeviceAsync(string deviceName = "Pixel 8")
+    {
+        var issued = await PostForJsonAsync<PairingCodeResponse>(ApiRoutes.PairingCodes);
+
+        using var redemption = await Client.PostAsJsonAsync(
+            ApiRoutes.PairingRedeem,
+            new RedeemPairingCodeRequest(issued!.Code, deviceName, "android"));
+
+        redemption.EnsureSuccessStatusCode();
+
+        var device = await redemption.Content.ReadFromJsonAsync<RedeemPairingCodeResponse>();
+
+        var client = new HttpClient { BaseAddress = Client.BaseAddress };
+        client.DefaultRequestHeaders.Authorization = new("Bearer", device!.Token);
+
+        return (device.DeviceId, client);
+    }
 
     /// <summary>Signs in through the real form endpoint, acknowledging the plain-HTTP risk notice.</summary>
     public async Task<HttpResponseMessage> SignInAsync(string username, string password)

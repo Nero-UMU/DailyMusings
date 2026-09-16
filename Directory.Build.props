@@ -1,7 +1,8 @@
 <Project>
 
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <!-- Multi-targeted projects (the MAUI client) set TargetFrameworks and must not be overridden by this default. -->
+    <TargetFramework Condition="'$(TargetFrameworks)' == ''">net10.0</TargetFramework>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
