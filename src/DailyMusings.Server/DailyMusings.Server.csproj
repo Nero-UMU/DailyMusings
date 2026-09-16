@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <ItemGroup>
+    <ProjectReference Include="..\DailyMusings.Application\DailyMusings.Application.csproj" />
+    <ProjectReference Include="..\DailyMusings.Contracts\DailyMusings.Contracts.csproj" />
+    <ProjectReference Include="..\DailyMusings.Infrastructure\DailyMusings.Infrastructure.csproj" />
+    <ProjectReference Include="..\DailyMusings.Admin\DailyMusings.Admin.csproj" />
+  </ItemGroup>
+
+</Project>

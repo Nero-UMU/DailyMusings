@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- API DTOs and shared validation rules. Dependency-free on purpose: both the server
+       and the (future) MAUI clients compile against this project. -->
+
+</Project>

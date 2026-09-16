@@ -1,0 +1,72 @@
+@page "/login"
+@attribute [AllowAnonymous]
+@inject IHttpContextAccessor HttpContextAccessor
+
+<h1>管理员登录</h1>
+
+@if (Message is not null)
+{
+    <p class="notice error">@Message</p>
+}
+
+@if (Changed)
+{
+    <p class="notice ok">凭据已更新，请重新登录。</p>
+}
+
+@* A plain browser POST, not an interactive round trip: the cookie can only be issued by an HTTP response, and
+   a Blazor circuit has no way to set one. data-enhance="false" keeps enhanced navigation out of it. *@
+<form method="post" action="@ApiRoutes.AdminSignIn" data-enhance="false" class="form">
+    @if (IsInsecure)
+    {
+        @* §10.3: the risk must be stated before the credentials are sent, and the user must actively confirm
+           before continuing. This checkbox is a one-time acknowledgement, not a security measure — the text
+           below says so explicitly, so nobody can read it as "confirmed, therefore safe". *@
+        <div class="notice error">
+            <strong>你正在通过未加密的 HTTP 连接访问。</strong>
+            <p>
+                密码、设备令牌、录音和文章都可能被同一网络中的其他人截获。
+                请优先使用 HTTPS、局域网或 VPN。
+            </p>
+            <p class="hint">
+                确认本提示不会使连接变安全，它只是说明风险。设置页会持续显示不安全连接状态。
+            </p>
+            <label class="checkbox">
+                <input type="checkbox" name="acknowledgeRisk" value="yes" required />
+                我已了解上述风险，仍要继续
+            </label>
+        </div>
+    }
+
+    <label>
+        账号
+        <input name="username" autocomplete="username" required autofocus />
+    </label>
+    <label>
+        密码
+        <input name="password" type="password" autocomplete="current-password" required />
+    </label>
+    <button type="submit">登录</button>
+</form>
+
+@code {
+    [SupplyParameterFromQuery(Name = "error")]
+    public string? Error { get; set; }
+
+    [SupplyParameterFromQuery(Name = "changed")]
+    public bool Changed { get; set; }
+
+    private bool IsInsecure { get; set; }
+
+    private string? Message => Error switch
+    {
+        "invalid" => "账号或密码不正确。",
+        "notinitialized" => "实例尚未初始化管理员账号，请查看服务启动日志。",
+        "required" => "请填写账号和密码。",
+        "risk" => "请先勾选确认你了解未加密连接的风险。",
+        _ => null,
+    };
+
+    protected override void OnParametersSet() =>
+        IsInsecure = HttpContextAccessor.HttpContext?.Request.IsHttps == false;
+}

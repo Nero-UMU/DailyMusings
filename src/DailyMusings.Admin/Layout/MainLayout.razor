@@ -1,0 +1,62 @@
+@inherits LayoutComponentBase
+@inject IHttpContextAccessor HttpContextAccessor
+
+<div class="shell">
+    <header class="shell-header">
+        <a class="brand" href="/">每日随想 · 管理</a>
+        @if (IsAuthenticated)
+        {
+            <nav class="shell-nav">
+                <a href="/">状态</a>
+                <a href="/devices">设备</a>
+                <a href="/change-credentials">账号</a>
+            </nav>
+            <form method="post" action="@ApiRoutes.AdminSignOut" data-enhance="false" class="inline">
+                <button type="submit">退出</button>
+            </form>
+        }
+    </header>
+
+    @if (IsInsecure)
+    {
+        @* §10.3: this indicator must persist for as long as the insecure connection is in use, and must never
+           imply that acknowledging the risk made the connection safe. *@
+        <p class="notice error">
+            <strong>当前连接未加密（HTTP）。</strong>
+            密码、设备令牌、录音与文章都可能被同一网络中的其他人截获。
+            建议改用 HTTPS、局域网或 VPN 访问。本提示只说明风险，不提供任何保护。
+        </p>
+    }
+
+    <main class="shell-main">
+        @Body
+    </main>
+
+    <footer class="shell-footer">
+        <span>单用户自托管实例。管理页不承担日常创作。</span>
+    </footer>
+</div>
+
+@code {
+    [CascadingParameter]
+    private Task<AuthenticationState>? AuthenticationState { get; set; }
+
+    private bool IsAuthenticated { get; set; }
+
+    /// <summary>
+    /// Read once from the request. The shell is rendered statically, so the request context is present; the
+    /// value is cached in the field so a re-render cannot silently drop the warning.
+    /// </summary>
+    private bool IsInsecure { get; set; }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        IsInsecure = HttpContextAccessor.HttpContext?.Request.IsHttps == false;
+
+        if (AuthenticationState is not null)
+        {
+            var state = await AuthenticationState;
+            IsAuthenticated = state.User.Identity?.IsAuthenticated == true;
+        }
+    }
+}

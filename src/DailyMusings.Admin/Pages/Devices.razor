@@ -1,0 +1,113 @@
+@page "/devices"
+@rendermode InteractiveServer
+@attribute [Authorize]
+@inject IServiceScopeFactory ScopeFactory
+
+<h1>已配对设备</h1>
+
+@if (_rotated is not null)
+{
+    <p class="notice ok">
+        设备 <strong>@_rotated.DeviceId</strong> 的新令牌：
+        <code class="code">@_rotated.Token</code>
+        <br />
+        旧令牌已立即失效。此值只显示这一次，请立刻填入客户端。
+    </p>
+}
+
+@if (_devices is null)
+{
+    <p>正在读取…</p>
+}
+else if (_devices.Count == 0)
+{
+    <p>尚未配对任何设备。回到<a href="/">状态</a>页生成配对码。</p>
+}
+else
+{
+    <table class="table">
+        <thead>
+            <tr>
+                <th>名称</th>
+                <th>平台</th>
+                <th>配对时间（UTC）</th>
+                <th>最近活动（UTC）</th>
+                <th>状态</th>
+                <th>操作</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var device in _devices)
+            {
+                <tr>
+                    <td>@device.Name</td>
+                    <td>@(device.Platform ?? "—")</td>
+                    <td>@device.CreatedAtUtc.ToString("u")</td>
+                    <td>@(device.LastSeenAtUtc?.ToString("u") ?? "—")</td>
+                    <td>@(device.IsRevoked ? "已撤销" : "有效")</td>
+                    <td>
+                        @if (!device.IsRevoked)
+                        {
+                            <button @onclick="() => RotateAsync(device.Id)" disabled="@_busy">轮换令牌</button>
+                            <button @onclick="() => RevokeAsync(device.Id)" disabled="@_busy">撤销</button>
+                        }
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    private IReadOnlyList<Device>? _devices;
+    private RotatedDeviceToken? _rotated;
+    private bool _busy;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        await using var scope = ScopeFactory.CreateAsyncScope();
+        _devices = await scope.ServiceProvider
+            .GetRequiredService<ListDevicesUseCase>()
+            .ExecuteAsync(CancellationToken.None);
+    }
+
+    private async Task RevokeAsync(DeviceId deviceId)
+    {
+        _busy = true;
+
+        try
+        {
+            await using var scope = ScopeFactory.CreateAsyncScope();
+            await scope.ServiceProvider
+                .GetRequiredService<RevokeDeviceUseCase>()
+                .ExecuteAsync(deviceId, CancellationToken.None);
+
+            await LoadAsync();
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task RotateAsync(DeviceId deviceId)
+    {
+        _busy = true;
+
+        try
+        {
+            await using var scope = ScopeFactory.CreateAsyncScope();
+            _rotated = await scope.ServiceProvider
+                .GetRequiredService<RotateDeviceTokenUseCase>()
+                .ExecuteAsync(deviceId, CancellationToken.None);
+
+            await LoadAsync();
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

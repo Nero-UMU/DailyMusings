@@ -1,0 +1,157 @@
+:root {
+    color-scheme: light dark;
+    --bg: #ffffff;
+    --fg: #1f2328;
+    --muted: #656d76;
+    --line: #d0d7de;
+    --accent: #0969da;
+    --ok-bg: #dafbe1;
+    --err-bg: #ffebe9;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --bg: #0d1117;
+        --fg: #e6edf3;
+        --muted: #8b949e;
+        --line: #30363d;
+        --accent: #4493f8;
+        --ok-bg: #12261e;
+        --err-bg: #2d1418;
+    }
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+    line-height: 1.6;
+}
+
+.shell {
+    max-width: 60rem;
+    margin: 0 auto;
+    padding: 1.5rem;
+}
+
+.shell-header {
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 0.75rem;
+}
+
+.brand {
+    font-weight: 600;
+    color: var(--fg);
+    text-decoration: none;
+}
+
+.shell-nav {
+    display: flex;
+    gap: 1rem;
+}
+
+.shell-nav a {
+    color: var(--accent);
+    text-decoration: none;
+}
+
+.shell-footer {
+    margin-top: 3rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--line);
+    color: var(--muted);
+    font-size: 0.875rem;
+}
+
+.inline {
+    margin-left: auto;
+}
+
+.form {
+    display: grid;
+    gap: 0.75rem;
+    max-width: 26rem;
+}
+
+.form label {
+    display: grid;
+    gap: 0.25rem;
+}
+
+input {
+    padding: 0.5rem;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--bg);
+    color: var(--fg);
+    font: inherit;
+}
+
+button {
+    padding: 0.5rem 0.9rem;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--bg);
+    color: var(--fg);
+    font: inherit;
+    cursor: pointer;
+}
+
+button[disabled] {
+    opacity: 0.5;
+    cursor: default;
+}
+
+.table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1rem 0;
+}
+
+.table th,
+.table td {
+    text-align: left;
+    padding: 0.5rem;
+    border-bottom: 1px solid var(--line);
+    vertical-align: top;
+}
+
+.notice {
+    padding: 0.75rem;
+    border-radius: 6px;
+    border: 1px solid var(--line);
+}
+
+.notice.ok {
+    background: var(--ok-bg);
+}
+
+.notice.error {
+    background: var(--err-bg);
+}
+
+.hint,
+.muted {
+    color: var(--muted);
+    font-size: 0.875rem;
+}
+
+code {
+    font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+
+.code {
+    font-size: 1.125rem;
+    letter-spacing: 0.08em;
+    padding: 0.15rem 0.4rem;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+}

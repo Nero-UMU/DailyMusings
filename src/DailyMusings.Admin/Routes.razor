@@ -1,0 +1,23 @@
+@* Routing and the authentication gate for the whole admin UI.
+   The admin surface is not the primary writing experience (§4.1): it configures and operates the instance. *@
+<Router AppAssembly="@typeof(Routes).Assembly">
+    <Found Context="routeData">
+        <AuthorizeRouteView RouteData="@routeData" DefaultLayout="@typeof(MainLayout)">
+            <NotAuthorized>
+                @if (context.User.Identity?.IsAuthenticated != true)
+                {
+                    <p>需要登录。<a href="/login">前往登录</a></p>
+                }
+                else
+                {
+                    <p>当前账号无权访问该页面。</p>
+                }
+            </NotAuthorized>
+        </AuthorizeRouteView>
+    </Found>
+    <NotFound>
+        <LayoutView Layout="@typeof(MainLayout)">
+            <p>页面不存在。</p>
+        </LayoutView>
+    </NotFound>
+</Router>

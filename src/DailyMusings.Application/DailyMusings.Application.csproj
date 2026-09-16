@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\DailyMusings.Domain\DailyMusings.Domain.csproj" />
+  </ItemGroup>
+
+  <!-- Application depends on Domain only. Ports (interfaces) and use cases live here;
+       Infrastructure implements the ports, hosts and UI compose them. -->
+
+</Project>

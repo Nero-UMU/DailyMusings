@@ -1,0 +1,31 @@
+## Build output
+**/bin/
+**/obj/
+artifacts/
+
+## Version control and editors
+.git/
+.gitignore
+.vs/
+.idea/
+*.user
+
+## Local runtime state — never bake a developer's data into an image
+.tmp-*/
+data/
+media/
+exports/
+markdown/
+backups/
+*.db
+*.db-shm
+*.db-wal
+
+## Local secrets
+deploy/secrets/
+.env
+
+## Not needed to build the server
+tests/
+docs/
+*.md

@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="MSTest.TestAdapter" />
+    <PackageReference Include="MSTest.TestFramework" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The tests compose a real WebApplication, so they need the ASP.NET Core shared framework themselves. -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\DailyMusings.Server\DailyMusings.Server.csproj" />
+  </ItemGroup>
+
+  <!-- Drives the real HTTP surface by composing the same wiring the server host uses
+       (Server/Configuration/ServiceCollectionExtensions + EndpointRouteBuilderExtensions)
+       against a throwaway SQLite file. No Microsoft.AspNetCore.Mvc.Testing needed. -->
+
+</Project>

@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+  <PropertyGroup>
+    <AddRazorSupportForMvc>false</AddRazorSupportForMvc>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- A Razor class library does not get the ASP.NET Core shared framework by default, but the admin UI
+         legitimately needs components, authorization and the HTTP context. Referencing the framework keeps
+         this project package-free. -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DailyMusings.Application\DailyMusings.Application.csproj" />
+    <ProjectReference Include="..\DailyMusings.Contracts\DailyMusings.Contracts.csproj" />
+  </ItemGroup>
+
+  <!-- Blazor Server admin UI. Deliberately not the primary创作 experience (see §4.1):
+       configuration, device management, job/backup operations and system status only. -->
+
+</Project>

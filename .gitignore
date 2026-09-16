@@ -1,0 +1,40 @@
+## Build output
+[Bb]in/
+[Oo]bj/
+[Dd]ebug/
+[Rr]elease/
+artifacts/
+*.user
+*.suo
+.vs/
+.idea/
+*.binlog
+
+## Test / coverage
+[Tt]est[Rr]esult*/
+coverage*.json
+coverage*.xml
+*.coverage
+*.trx
+
+## Local runtime data (self-hosted instance state; never commit)
+data/
+media/
+exports/
+markdown/
+keys/
+*.db
+*.db-shm
+*.db-wal
+
+## Local secrets and environment overrides
+.env
+deploy/secrets/
+deploy/*.local.yaml
+
+## Scratch
+.tmp-*/
+*.tmp
+
+## Agent working memory (local tooling state, not product source)
+.dsh-project-memory/

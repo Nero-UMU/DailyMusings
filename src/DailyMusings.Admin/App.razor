@@ -1,0 +1,21 @@
+@* The document shell for the admin UI. Kept in the Admin project so the RCL owns its own host page. *@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>每日随想 · 管理</title>
+    <base href="/" />
+    <link rel="stylesheet" href="_content/DailyMusings.Admin/admin.css" />
+    <HeadOutlet @rendermode="InteractiveServer" />
+</head>
+
+<body>
+    @* Static SSR for the shell: the forms post to real endpoints and need the HTTP request context, while the
+       data pages opt into interactivity themselves. *@
+    <Routes />
+    <script src="_framework/blazor.web.js"></script>
+</body>
+
+</html>

@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Domain depends on nothing. Enforced by tests/DailyMusings.Domain.Tests/ArchitectureTests.cs -->
+
+</Project>

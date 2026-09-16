@@ -1,0 +1,91 @@
+@page "/"
+@rendermode InteractiveServer
+@attribute [Authorize]
+@inject IServiceScopeFactory ScopeFactory
+
+<h1>实例状态</h1>
+
+@if (_health is null)
+{
+    <p>正在读取…</p>
+}
+else
+{
+    <p class="@(_health.Healthy ? "notice ok" : "notice error")">
+        @(_health.Healthy ? "基础健康检查全部通过。" : "存在失败的检查项，请按下表处理。")
+        <span class="muted">检查时间 @_health.CheckedAtUtc.ToString("u")</span>
+    </p>
+
+    <table class="table">
+        <thead>
+            <tr><th>检查项</th><th>结果</th><th>说明</th></tr>
+        </thead>
+        <tbody>
+            @foreach (var probe in _health.Probes)
+            {
+                <tr>
+                    <td><code>@probe.Name</code></td>
+                    <td>@(probe.Healthy ? "通过" : "失败")</td>
+                    <td class="muted">@probe.Detail</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+
+    <p class="hint">
+        基础检查只覆盖本实例能控制的部分（数据库可写、媒体目录可写、任务执行器存活）。
+        外部模型、SMTP 与 WordPress 的连通性不使用此处，它们各自有“测试连接”。
+    </p>
+}
+
+<h2>设备配对</h2>
+
+@if (_code is null)
+{
+    <p>生成一个十分钟有效、仅可使用一次的配对码，在客户端输入即可完成配对。</p>
+}
+else
+{
+    <p class="notice ok">
+        配对码 <code class="code">@_code.Code</code>
+        <br />
+        有效期至 @_code.ExpiresAtUtc.ToString("u")（UTC）。此码只显示这一次，关闭页面后无法再次查看。
+    </p>
+}
+
+<button @onclick="IssueCodeAsync" disabled="@(_issuing)">生成配对码</button>
+
+@code {
+    private HealthReport? _health;
+    private IssuedPairingCode? _code;
+    private bool _issuing;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        // A fresh scope per data load: the circuit outlives a request, so resolving scoped services into the
+        // component would hold a database connection open for as long as the browser tab lives.
+        await using var scope = ScopeFactory.CreateAsyncScope();
+        _health = await scope.ServiceProvider
+            .GetRequiredService<SystemHealthUseCase>()
+            .ExecuteAsync(CancellationToken.None);
+    }
+
+    private async Task IssueCodeAsync()
+    {
+        _issuing = true;
+
+        try
+        {
+            await using var scope = ScopeFactory.CreateAsyncScope();
+            _code = await scope.ServiceProvider
+                .GetRequiredService<IssuePairingCodeUseCase>()
+                .ExecuteAsync(CancellationToken.None);
+        }
+        finally
+        {
+            _issuing = false;
+        }
+    }
+}
