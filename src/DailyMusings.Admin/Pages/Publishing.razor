@@ -1,0 +1,372 @@
+@page "/publishing"
+@rendermode InteractiveServer
+@attribute [Authorize]
+@inject IServiceScopeFactory ScopeFactory
+
+<h1>发布目标</h1>
+
+<p class="hint">
+    发布默认只把文章作为<strong>私人草稿</strong>上传，等你在客户端确认后才公开。
+    「自动公开」是唯一一种无人确认也会公开的路径，因此它只能在这里开启，且需要重新输入管理员密码。
+</p>
+
+@if (_error is not null)
+{
+    <p class="notice error">@_error</p>
+}
+
+@if (_enabled is not null)
+{
+    <p class="notice ok">
+        已为 <strong>@_enabled.Name</strong> 开启自动公开，开启人：@_enabled.AutomaticPublishEnabledBy。
+        <br />
+        此后该目标在每个发布时刻会<strong>无人确认地公开</strong>当天已确认的草稿。
+    </p>
+}
+
+@if (_disabled is not null)
+{
+    <p class="notice ok">已为 <strong>@_disabled</strong> 关闭自动公开。</p>
+}
+
+@if (_targets is null)
+{
+    <p>正在读取…</p>
+}
+else if (_targets.Count == 0)
+{
+    <p>还没有发布目标。用下面的表单添加一个 WordPress 站点或一个 Markdown 目录。</p>
+}
+else
+{
+    <table class="table">
+        <thead>
+            <tr>
+                <th>名称</th>
+                <th>类型</th>
+                <th>目标</th>
+                <th>自动公开</th>
+                <th>操作</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var target in _targets)
+            {
+                <tr>
+                    <td>@target.Name</td>
+                    <td>@(target.Type == PublishTargetType.Markdown ? "Markdown" : "WordPress")</td>
+                    <td>@(target.DestinationReference ?? "（默认）")</td>
+                    <td>
+                        @if (target.AutomaticPublishEnabled)
+                        {
+                            <strong>已开启</strong>
+                            <br />
+                            <span class="hint">
+                                @target.AutomaticPublishEnabledBy
+                                @(target.AutomaticPublishEnabledAtUtc?.ToString("u"))
+                            </span>
+                        }
+                        else
+                        {
+                            <span>关闭（只上传草稿）</span>
+                        }
+                    </td>
+                    <td>
+                        @if (_confirming == target.Id)
+                        {
+                            <div class="risk">
+                                <strong>开启后，@target.Name 会在无人确认的情况下公开文章。</strong>
+                                <p>
+                                    只有在你有意让这个目标自动公开时才继续。请重新输入管理员密码以确认：
+                                </p>
+                                <input type="password" @bind="_password" placeholder="当前密码" />
+                                <button @onclick="() => EnableAsync(target)" disabled="@_busy">确认开启</button>
+                                <button @onclick="CancelConfirm" disabled="@_busy">取消</button>
+                            </div>
+                        }
+                        else if (target.AutomaticPublishEnabled)
+                        {
+                            <button @onclick="() => DisableAsync(target)" disabled="@_busy">关闭自动公开</button>
+                        }
+                        else
+                        {
+                            <button @onclick="() => BeginConfirm(target)" disabled="@_busy">开启自动公开…</button>
+                        }
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+<h2>添加目标</h2>
+
+<div class="form">
+    <label>
+        名称
+        <input @bind="_newName" placeholder="blog" />
+    </label>
+    <label>
+        类型
+        <select @bind="_newType">
+            <option value="wordPress">WordPress</option>
+            <option value="markdown">Markdown（Hexo）</option>
+        </select>
+    </label>
+    <label>
+        目标
+        <input @bind="_newDestination" placeholder="WordPress 用配置键，Markdown 用相对目录" />
+    </label>
+    <button @onclick="CreateAsync" disabled="@_busy">添加</button>
+</div>
+
+<p class="hint">
+    WordPress 目标填<strong>配置键</strong>（对应 <code>Publishing:WordPress:Targets:&lt;键&gt;</code>），
+    密码以 Docker Secrets 的名称引用，不写进数据库。Markdown 目标填<strong>相对目录</strong>，
+    相对于实例的 markdown 目录；导出永远只写这个目录之内。
+</p>
+
+<h2>内容与时间</h2>
+
+<p class="hint">
+    时间都是内容时区里的本地时刻。生成时刻决定当晚何时成稿；发布时刻决定次日何时进入发布队列，
+    而执行窗口决定「错过了多久就不许再自动执行」。
+</p>
+
+@if (_scheduleError is not null)
+{
+    <p class="notice error">@_scheduleError</p>
+}
+
+@if (_scheduleSaved is not null)
+{
+    <p class="notice ok">已保存：@_scheduleSaved</p>
+}
+
+@if (_settings is null)
+{
+    <p>正在读取…</p>
+}
+else
+{
+    <div class="form">
+        <label>
+            内容时区
+            <input @bind="_timeZoneId" />
+        </label>
+        <label>
+            生成时刻
+            <input @bind="_generationTime" placeholder="23:00" />
+        </label>
+        <label>
+            发布时刻
+            <input @bind="_publishTime" placeholder="08:00" />
+        </label>
+        <label>
+            执行窗口（分钟）
+            <input type="number" @bind="_publishWindow" />
+        </label>
+        <label>
+            音频保留天数
+            <input type="number" @bind="_audioRetentionDays" />
+        </label>
+        <button @onclick="SaveSettingsAsync" disabled="@_busy">保存</button>
+    </div>
+
+    <p class="hint">
+        音频保留填 <code>-1</code> 表示永久保留。改时区<strong>不会</strong>重算既有记录的内容日——
+        内容日一经写入即不可变，这正是「一天一篇」「补跑资格」与已发布文章日期能够稳定的原因；
+        新时区只影响之后的采集。
+    </p>
+}
+
+@code {
+    private IReadOnlyList<PublishTarget>? _targets;
+    private PublishTargetId? _confirming;
+    private string _password = string.Empty;
+    private string _newName = string.Empty;
+    private string _newType = "wordPress";
+    private string _newDestination = string.Empty;
+    private string? _error;
+    private PublishTarget? _enabled;
+    private string? _disabled;
+    private bool _busy;
+
+    private ContentSettings? _settings;
+    private string _timeZoneId = string.Empty;
+    private string _generationTime = string.Empty;
+    private string _publishTime = string.Empty;
+    private int _publishWindow;
+    private int _audioRetentionDays;
+    private string? _scheduleError;
+    private string? _scheduleSaved;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+        await LoadSettingsAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        await using var scope = ScopeFactory.CreateAsyncScope();
+        _targets = await scope.ServiceProvider
+            .GetRequiredService<ListPublishTargetsUseCase>()
+            .ExecuteAsync(CancellationToken.None);
+    }
+
+    private async Task LoadSettingsAsync()
+    {
+        await using var scope = ScopeFactory.CreateAsyncScope();
+        _settings = await scope.ServiceProvider
+            .GetRequiredService<IContentSettingsProvider>()
+            .GetAsync(CancellationToken.None);
+
+        _timeZoneId = _settings.TimeZoneId;
+        _generationTime = ContentSettings.FormatTime(_settings.GenerationLocalTime);
+        _publishTime = ContentSettings.FormatTime(_settings.PublishLocalTime);
+        _publishWindow = _settings.PublishWindowMinutes;
+        _audioRetentionDays = _settings.AudioRetentionDays;
+    }
+
+    /// <summary>
+    /// Parses the two times here rather than in the use case, so a typo is reported next to the field that has it.
+    /// The use case validates everything else — the time zone above all, since a bad zone id would otherwise only
+    /// surface when a capture failed.
+    /// </summary>
+    private async Task SaveSettingsAsync()
+    {
+        _busy = true;
+        _scheduleError = null;
+        _scheduleSaved = null;
+
+        try
+        {
+            if (!TimeOnly.TryParseExact(_generationTime, "HH:mm", CultureInfo.InvariantCulture, DateTimeStyles.None, out var generation) ||
+                !TimeOnly.TryParseExact(_publishTime, "HH:mm", CultureInfo.InvariantCulture, DateTimeStyles.None, out var publish))
+            {
+                _scheduleError = "时刻需要写成 HH:mm，例如 23:00。";
+                return;
+            }
+
+            await using var scope = ScopeFactory.CreateAsyncScope();
+            var saved = await scope.ServiceProvider
+                .GetRequiredService<UpdateContentSettingsUseCase>()
+                .ExecuteAsync(
+                    new ContentSettingsUpdate(_timeZoneId, generation, publish, _publishWindow, _audioRetentionDays),
+                    CancellationToken.None);
+
+            _settings = saved;
+            _scheduleSaved = $"时区 {saved.TimeZoneId}，生成 {ContentSettings.FormatTime(saved.GenerationLocalTime)}，" +
+                             $"发布 {ContentSettings.FormatTime(saved.PublishLocalTime)}，窗口 {saved.PublishWindowMinutes} 分钟。";
+        }
+        catch (Exception exception) when (exception is DomainException or UseCaseException)
+        {
+            _scheduleError = exception.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void BeginConfirm(PublishTarget target)
+    {
+        _confirming = target.Id;
+        _password = string.Empty;
+        _error = null;
+        _enabled = null;
+        _disabled = null;
+    }
+
+    private void CancelConfirm()
+    {
+        _confirming = null;
+        _password = string.Empty;
+    }
+
+    private async Task CreateAsync()
+    {
+        _busy = true;
+        _error = null;
+
+        try
+        {
+            var type = _newType == "markdown" ? PublishTargetType.Markdown : PublishTargetType.WordPress;
+
+            await using var scope = ScopeFactory.CreateAsyncScope();
+            await scope.ServiceProvider
+                .GetRequiredService<CreatePublishTargetUseCase>()
+                .ExecuteAsync(
+                    _newName,
+                    type,
+                    string.IsNullOrWhiteSpace(_newDestination) ? null : _newDestination,
+                    CancellationToken.None);
+
+            _newName = string.Empty;
+            _newDestination = string.Empty;
+            await LoadAsync();
+        }
+        catch (Exception exception) when (exception is DomainException or UseCaseException)
+        {
+            _error = exception.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task EnableAsync(PublishTarget target)
+    {
+        _busy = true;
+        _error = null;
+
+        try
+        {
+            await using var scope = ScopeFactory.CreateAsyncScope();
+            _enabled = await scope.ServiceProvider
+                .GetRequiredService<SetAutomaticPublishUseCase>()
+                .ExecuteAsync(target.Id, enabled: true, _password, CancellationToken.None);
+
+            _confirming = null;
+            _password = string.Empty;
+            await LoadAsync();
+        }
+        catch (Exception exception) when (exception is DomainException or UseCaseException)
+        {
+            // §11.1: a rejected password is reported here rather than being treated as a generic failure, because
+            // the operator has to know that the switch is still off.
+            _error = exception.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task DisableAsync(PublishTarget target)
+    {
+        _busy = true;
+        _error = null;
+
+        try
+        {
+            await using var scope = ScopeFactory.CreateAsyncScope();
+            await scope.ServiceProvider
+                .GetRequiredService<SetAutomaticPublishUseCase>()
+                .ExecuteAsync(target.Id, enabled: false, _password, CancellationToken.None);
+
+            _disabled = target.Name;
+            await LoadAsync();
+        }
+        catch (Exception exception) when (exception is DomainException or UseCaseException)
+        {
+            _error = exception.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

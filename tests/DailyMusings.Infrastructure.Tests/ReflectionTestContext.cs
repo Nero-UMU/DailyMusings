@@ -218,7 +218,16 @@ internal sealed class ReflectionTestContext : IAsyncDisposable
             UnitOfWork,
             clock,
             ThisRetrieval,
-            Enqueuer);
+            Enqueuer,
+            // Notifications are exercised in the publishing tests; here every event is off, so a generation test
+            // never depends on mail settings.
+            new Application.Notifications.QueueNotificationUseCase(
+                new TestNotificationSettings
+                {
+                    Settings = new NotificationSettings("owner@example.test", null),
+                },
+                new TestSmtpSettings { Settings = SmtpSettings.Default },
+                Enqueuer));
 
         Check = new RunUnsourcedStatementCheckUseCase(Reflections, Inputs, client, clock);
         GetReflection = new GetReflectionUseCase(Reflections, ThisRetrieval);
@@ -332,6 +341,7 @@ internal sealed class ReflectionTestContext : IAsyncDisposable
     {
         var database = await TestDatabase.CreateAsync();
         var clock = new TestClock(now ?? DefaultNow);
+
 
         return new ReflectionTestContext(
             database,

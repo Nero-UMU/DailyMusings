@@ -2,6 +2,7 @@ using DailyMusings.Application.Abstractions;
 using DailyMusings.Application.Configuration;
 using DailyMusings.Application.Embeddings;
 using DailyMusings.Application.Jobs;
+using DailyMusings.Application.Publishing;
 using DailyMusings.Application.Reflections;
 using DailyMusings.Domain.Jobs;
 using DailyMusings.Domain.Reflections;
@@ -122,6 +123,29 @@ public sealed class ReflectionSchedulerService : BackgroundService
 
         await ScheduleGenerationsAsync(cancellationToken).ConfigureAwait(false);
         await ScheduleEmbeddingRebuildAsync(cancellationToken).ConfigureAwait(false);
+        await SchedulePublicationsAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The publish half of the clock (§11.1): the 08:00 slot, the execution window, and the invalidation of a
+    /// pending version when the draft moves on. It enqueues and records; the rules it applies live in the domain.
+    /// </summary>
+    private async Task SchedulePublicationsAsync(CancellationToken cancellationToken)
+    {
+        await using var scope = _scopeFactory.CreateAsyncScope();
+        var schedule = scope.ServiceProvider.GetRequiredService<SchedulePublicationsUseCase>();
+
+        var result = await schedule.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+        if (result.Queued > 0 || result.Expired > 0 || result.Superseded > 0)
+        {
+            // Counts only — never a title, a target's credentials or an article id (§16).
+            _logger.LogInformation(
+                "Publish schedule: {QueuedCount} queued, {ExpiredCount} expired, {SupersededCount} superseded.",
+                result.Queued,
+                result.Expired,
+                result.Superseded);
+        }
     }
 
     private async Task ScheduleGenerationsAsync(CancellationToken cancellationToken)

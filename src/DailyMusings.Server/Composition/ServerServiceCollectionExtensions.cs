@@ -109,9 +109,15 @@ public static class ServerServiceCollectionExtensions
 
         services.AddAuthorization(options =>
         {
+            // The role requirement is what actually distinguishes an administrator. Requiring only an
+            // authenticated user would be satisfied by *any* credential the scheme list happens to accept — and
+            // when an endpoint's own policy is combined with a group's, ASP.NET Core merges the authentication
+            // schemes, so a device token would authenticate under its own scheme and pass. Naming the role makes
+            // "administrator" mean administrator regardless of how the endpoint was grouped.
             options.AddPolicy(ServerAuthenticationPolicies.AdminOnly, policy => policy
                 .AddAuthenticationSchemes(ServerAuthenticationPolicies.AdminCookie)
-                .RequireAuthenticatedUser());
+                .RequireAuthenticatedUser()
+                .RequireRole(ServerAuthenticationPolicies.AdminRole));
 
             options.AddPolicy(ServerAuthenticationPolicies.DeviceOnly, policy => policy
                 .AddAuthenticationSchemes(ServerAuthenticationPolicies.DeviceToken)

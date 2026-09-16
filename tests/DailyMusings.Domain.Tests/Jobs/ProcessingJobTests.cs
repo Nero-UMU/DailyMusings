@@ -142,7 +142,13 @@ public class ProcessingJobTests
 
         Assert.AreEqual($"transcription:{inputId}", IdempotencyKeys.Transcription(inputId));
         Assert.AreEqual("reflection-generation:2026-03-03#0", IdempotencyKeys.ReflectionGeneration(day));
-        Assert.AreEqual($"publication:{versionId}:{targetId}", IdempotencyKeys.Publication(versionId, targetId));
+        Assert.AreEqual($"publication:{versionId}:{targetId}#0", IdempotencyKeys.Publication(versionId, targetId));
+
+        // A re-export of the same version to the same target is a new round, or the job that already succeeded
+        // would answer for it and §11.2's "export again as a new file" could never run.
+        Assert.AreEqual(
+            $"publication:{versionId}:{targetId}#1",
+            IdempotencyKeys.Publication(versionId, targetId, round: 1));
 
         // A first draft and the draft after new material arrived are different rounds of the same day.
         Assert.AreEqual("reflection-generation:2026-03-03#1", IdempotencyKeys.ReflectionGeneration(day, round: 1));

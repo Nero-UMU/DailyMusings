@@ -199,6 +199,7 @@ public sealed class GenerateReflectionUseCase
     private readonly IClock _clock;
     private readonly HistoryRetrievalUseCase _retrieval;
     private readonly JobEnqueuer _jobs;
+    private readonly Notifications.QueueNotificationUseCase _notifications;
 
     public GenerateReflectionUseCase(
         IInputEntryRepository inputs,
@@ -209,7 +210,8 @@ public sealed class GenerateReflectionUseCase
         IUnitOfWork unitOfWork,
         IClock clock,
         HistoryRetrievalUseCase retrieval,
-        JobEnqueuer jobs)
+        JobEnqueuer jobs,
+        Notifications.QueueNotificationUseCase notifications)
     {
         _inputs = inputs;
         _reflections = reflections;
@@ -220,6 +222,7 @@ public sealed class GenerateReflectionUseCase
         _clock = clock;
         _retrieval = retrieval;
         _jobs = jobs;
+        _notifications = notifications;
     }
 
     public async Task<ReflectionGenerationResult> ExecuteAsync(
@@ -347,6 +350,12 @@ public sealed class GenerateReflectionUseCase
 
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
         }
+
+        // §12's "新草稿待确认". Queued after the draft is durable, so a mail can never announce something that a
+        // failed transaction rolled back; a mail failure, in turn, cannot touch the draft (§12).
+        await _notifications
+            .QueueDraftReadyAsync(contentDate, version.Id, version.Title, cancellationToken)
+            .ConfigureAwait(false);
 
         return new ReflectionGenerationResult(
             ReflectionGenerationOutcome.Generated,

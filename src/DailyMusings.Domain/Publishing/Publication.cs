@@ -89,6 +89,7 @@ public sealed class Publication
         ReflectionVersionId reflectionVersionId,
         PublishTargetId publishTargetId,
         PublicationTrigger trigger,
+        PublicationVisibility requestedVisibility,
         DateTimeOffset scheduledAtUtc)
     {
         Id = id;
@@ -96,6 +97,7 @@ public sealed class Publication
         ReflectionVersionId = reflectionVersionId;
         PublishTargetId = publishTargetId;
         Trigger = trigger;
+        RequestedVisibility = requestedVisibility;
         ScheduledAtUtc = scheduledAtUtc;
         Status = PublicationStatus.Queued;
     }
@@ -111,18 +113,51 @@ public sealed class Publication
 
     public PublicationTrigger Trigger { get; }
 
+    /// <summary>
+    /// What was asked for when this record was created. For an automatic request it is recorded rather than
+    /// implied, so "the slot ran and uploaded a draft because the target never opted in" and "the slot ran and
+    /// published publicly" stay distinguishable after the fact.
+    /// </summary>
+    public PublicationVisibility RequestedVisibility { get; private set; }
+
     public PublicationStatus Status { get; private set; }
 
     /// <summary>Remote article id, kept so local edits never blindly clobber the remote (§11.1).</summary>
     public string? RemoteId { get; private set; }
 
+    /// <summary>
+    /// Content hash of what was actually sent to the remote.
+    /// <para>
+    /// This is what makes a later difference check answerable. Without it, "the remote changed" and "our draft
+    /// changed" cannot be told apart from "nothing happened", and §11.1's pull / overwrite / keep-both choice
+    /// would be presented to the user with no evidence behind it.
+    /// </para>
+    /// </summary>
+    public string? PublishedContentHash { get; private set; }
+
+    /// <summary>Content hash the last remote check observed, or <c>null</c> when the remote has never been read.</summary>
+    public string? RemoteContentHash { get; private set; }
+
+    public DateTimeOffset? RemoteCheckedAtUtc { get; private set; }
+
+    /// <summary>
+    /// When the user last chose to keep both sides as they are (§11.1). Recorded so that a difference they have
+    /// already accepted is not rediscovered on every check and presented as if it were news.
+    /// </summary>
+    public DateTimeOffset? RemoteDivergenceAcknowledgedAtUtc { get; private set; }
+
     public int AttemptCount { get; private set; }
+
+    /// <summary>
+    /// How many times this version has been sent to this target. Part of the job's idempotency key, so that a
+    /// re-export is a new job instead of colliding with the one that already succeeded (§11.2, §14).
+    /// </summary>
+    public int ExportRound { get; private set; }
 
     public DateTimeOffset ScheduledAtUtc { get; private set; }
 
     /// <summary>Audit: who caused this attempt (administrator or device name).</summary>
     public string? TriggeredBy { get; private set; }
-
     public DateTimeOffset? TriggeredAtUtc { get; private set; }
 
     public DateTimeOffset? CompletedAtUtc { get; private set; }
@@ -133,14 +168,37 @@ public sealed class Publication
 
     public bool IsTerminal => Status is PublicationStatus.Published or PublicationStatus.Superseded;
 
+    /// <param name="requestedBy">
+    /// Who asked for this publication, recorded at request time rather than when the attempt runs. §11.1 requires
+    /// the trail, and an automatic slot has no human to name — so it stays <c>null</c> and the attempt attributes
+    /// itself to the scheduler.
+    /// </param>
     public static Publication Create(
         PublicationId id,
         ReflectionId reflectionId,
         ReflectionVersionId reflectionVersionId,
         PublishTargetId publishTargetId,
         PublicationTrigger trigger,
-        DateTimeOffset scheduledAtUtc) =>
-        new(id, reflectionId, reflectionVersionId, publishTargetId, trigger, scheduledAtUtc);
+        DateTimeOffset scheduledAtUtc,
+        PublicationVisibility requestedVisibility = PublicationVisibility.Draft,
+        string? requestedBy = null)
+    {
+        var publication = new Publication(
+            id,
+            reflectionId,
+            reflectionVersionId,
+            publishTargetId,
+            trigger,
+            requestedVisibility,
+            scheduledAtUtc);
+
+        if (!string.IsNullOrWhiteSpace(requestedBy))
+        {
+            publication.TriggeredBy = requestedBy.Trim();
+        }
+
+        return publication;
+    }
 
     public static Publication Rehydrate(
         PublicationId id,
@@ -156,8 +214,14 @@ public sealed class Publication
         DateTimeOffset? triggeredAtUtc,
         DateTimeOffset? completedAtUtc,
         string? errorCode,
-        string? errorSummary) =>
-        new(id, reflectionId, reflectionVersionId, publishTargetId, trigger, scheduledAtUtc)
+        string? errorSummary,
+        PublicationVisibility requestedVisibility = PublicationVisibility.Draft,
+        string? publishedContentHash = null,
+        string? remoteContentHash = null,
+        DateTimeOffset? remoteCheckedAtUtc = null,
+        DateTimeOffset? remoteDivergenceAcknowledgedAtUtc = null,
+        int exportRound = 0) =>
+        new(id, reflectionId, reflectionVersionId, publishTargetId, trigger, requestedVisibility, scheduledAtUtc)
         {
             Status = status,
             RemoteId = remoteId,
@@ -167,6 +231,11 @@ public sealed class Publication
             CompletedAtUtc = completedAtUtc,
             ErrorCode = errorCode,
             ErrorSummary = errorSummary,
+            PublishedContentHash = publishedContentHash,
+            RemoteContentHash = remoteContentHash,
+            RemoteCheckedAtUtc = remoteCheckedAtUtc,
+            RemoteDivergenceAcknowledgedAtUtc = remoteDivergenceAcknowledgedAtUtc,
+            ExportRound = exportRound,
         };
 
     /// <summary>
@@ -219,18 +288,20 @@ public sealed class Publication
     }
 
     /// <summary>Uploaded as a remote draft — the default, human-confirmable outcome.</summary>
-    public void CompleteAsDraft(string remoteId, DateTimeOffset at)
+    public void CompleteAsDraft(string remoteId, string publishedContentHash, DateTimeOffset at)
     {
         RemoteId = RequireRemoteId(remoteId);
+        RecordPublishedContent(publishedContentHash, at);
         Transition(PublicationStatus.DraftUploaded, at);
         CompletedAtUtc = at;
         ErrorCode = null;
         ErrorSummary = null;
     }
 
-    public void CompleteAsPublished(string remoteId, DateTimeOffset at)
+    public void CompleteAsPublished(string remoteId, string publishedContentHash, DateTimeOffset at)
     {
         RemoteId = RequireRemoteId(remoteId);
+        RecordPublishedContent(publishedContentHash, at);
         Transition(PublicationStatus.Published, at);
         CompletedAtUtc = at;
         ErrorCode = null;
@@ -243,6 +314,50 @@ public sealed class Publication
         Transition(PublicationStatus.Published, at);
         CompletedAtUtc = at;
     }
+
+    /// <summary>
+    /// Records what the remote holds, as observed by a remote check. Also refreshes the baseline when the remote
+    /// turns out to match what we sent, so a later check compares against the freshest known state.
+    /// </summary>
+    public void RecordRemoteObservation(string remoteContentHash, DateTimeOffset at)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(remoteContentHash);
+
+        RemoteContentHash = remoteContentHash;
+        RemoteCheckedAtUtc = at;
+    }
+
+    /// <summary>
+    /// How the local draft and the remote have diverged since the last publish (§11.1).
+    /// </summary>
+    /// <param name="currentLocalContentHash">
+    /// Hash of the draft as it stands now. The caller passes it because only it knows which version is being
+    /// compared — and the comparison must be against what was published, not against the working slot's pointer.
+    /// </param>
+    public RemoteComparison CompareWithRemote(string? currentLocalContentHash)
+    {
+        if (PublishedContentHash is null || RemoteContentHash is null)
+        {
+            return RemoteComparison.Unknown;
+        }
+
+        var localChanged = currentLocalContentHash is not null &&
+                           !string.Equals(PublishedContentHash, currentLocalContentHash, StringComparison.Ordinal);
+
+        var remoteChanged = !string.Equals(PublishedContentHash, RemoteContentHash, StringComparison.Ordinal);
+
+        // Acknowledging the difference clears it, so the user stops being asked about a decision they made.
+        if (RemoteDivergenceAcknowledgedAtUtc is not null && RemoteCheckedAtUtc <= RemoteDivergenceAcknowledgedAtUtc)
+        {
+            localChanged = false;
+            remoteChanged = false;
+        }
+
+        return new RemoteComparison(RemoteChecked: true, localChanged, remoteChanged);
+    }
+
+    /// <summary>Records the user's decision to keep both sides as they are (§11.1).</summary>
+    public void AcknowledgeRemoteDivergence(DateTimeOffset at) => RemoteDivergenceAcknowledgedAtUtc = at;
 
     public void Fail(string errorCode, string? errorSummary, DateTimeOffset at, RetryPolicy policy)
     {
@@ -287,10 +402,70 @@ public sealed class Publication
         TriggeredAtUtc = at;
     }
 
+    /// <summary>
+    /// Queues an export of a version that is already on the remote as a draft (§11.2: 再次导出默认创建带版本号的新文件).
+    /// <para>
+    /// Only reachable from <see cref="PublicationStatus.DraftUploaded"/>, and <see cref="RemoteId"/> is kept on
+    /// purpose: re-running a WordPress upload must find the post it made before rather than create a second one,
+    /// and a Markdown re-export needs to know which file it wrote in order to tell "ours, untouched" from
+    /// "somebody edited this".
+    /// </para>
+    /// </summary>
+    public void RequeueForReExport(PublicationVisibility visibility, string actor, DateTimeOffset at)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(actor);
+
+        Transition(PublicationStatus.Queued, at);
+        AttemptCount = 0;
+        ExportRound++;
+        ScheduledAtUtc = at;
+        CompletedAtUtc = null;
+        ErrorCode = null;
+        ErrorSummary = null;
+        TriggeredBy = actor.Trim();
+        TriggeredAtUtc = at;
+        RequestedVisibility = visibility;
+    }
+
+    /// <summary>
+    /// Re-enters a publication that a failed attempt left marked failed, because the job still has attempts left.
+    /// <para>
+    /// The alternative — leaving it InProgress between attempts — would tell the user nothing while the retries
+    /// ran, and the alternative of a terminal Failed would be a lie while the system was still trying. So the
+    /// status follows reality at every moment, and a manual retry is still the only way back once the job has
+    /// genuinely given up (§14).
+    /// </para>
+    /// </summary>
+    public void ResumeAfterFailedAttempt(string actor, DateTimeOffset at)
+    {
+        Transition(PublicationStatus.InProgress, at);
+        AttemptCount++;
+        TriggeredBy = string.IsNullOrWhiteSpace(actor) ? "system:retry" : actor.Trim();
+        TriggeredAtUtc = at;
+        ErrorCode = null;
+        ErrorSummary = null;
+        CompletedAtUtc = null;
+    }
+
     private static string RequireRemoteId(string remoteId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(remoteId);
         return remoteId;
+    }
+
+    /// <summary>
+    /// Remembers the content we put on the remote. Called from both completion paths so no path can publish
+    /// without leaving behind the evidence a later difference check depends on.
+    /// </summary>
+    private void RecordPublishedContent(string contentHash, DateTimeOffset at)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(contentHash);
+
+        PublishedContentHash = contentHash;
+
+        // The remote now holds exactly this, so it is also the freshest observation of the remote.
+        RemoteContentHash = contentHash;
+        RemoteCheckedAtUtc = at;
     }
 
     private void Transition(PublicationStatus to, DateTimeOffset at)
@@ -321,10 +496,15 @@ public static class PublicationStatusTransitions
         [
             PublicationStatus.Published,
             PublicationStatus.Superseded,
+
+            // A re-export of a version that is already on the remote as a draft. Explicitly a human action: the
+            // automatic path never revisits a completed publication (11.2).
+            PublicationStatus.Queued,
         ],
 
-        // Failed and Expired are both recoverable, but only by an explicit human retry.
-        [PublicationStatus.Failed] = [PublicationStatus.Queued],
+        // Failed and Expired are both recoverable, but only by an explicit human retry — apart from Failed being
+        // re-entered by the job's own bounded retry, which is not a recovery but the same attempt continuing.
+        [PublicationStatus.Failed] = [PublicationStatus.Queued, PublicationStatus.InProgress],
         [PublicationStatus.Expired] = [PublicationStatus.Queued],
         [PublicationStatus.Published] = [],
         [PublicationStatus.Superseded] = [],

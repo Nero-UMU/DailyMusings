@@ -1,11 +1,14 @@
 using DailyMusings.Application.Abstractions;
 using DailyMusings.Application.Configuration;
+using DailyMusings.Application.Publishing;
 using DailyMusings.Application.Reflections;
 using DailyMusings.Infrastructure.Diagnostics;
 using DailyMusings.Infrastructure.Generation;
 using DailyMusings.Infrastructure.Jobs;
+using DailyMusings.Infrastructure.Notifications;
 using DailyMusings.Infrastructure.Persistence;
 using DailyMusings.Infrastructure.Persistence.Repositories;
+using DailyMusings.Infrastructure.Publishing;
 using DailyMusings.Infrastructure.Security;
 using DailyMusings.Infrastructure.Storage;
 using DailyMusings.Infrastructure.Time;
@@ -63,6 +66,8 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<ITopicRepository, SqliteTopicRepository>();
         services.AddScoped<IReflectionRepository, SqliteReflectionRepository>();
         services.AddScoped<IEmbeddingIndexRepository, SqliteEmbeddingIndexRepository>();
+        services.AddScoped<IPublishTargetRepository, SqlitePublishTargetRepository>();
+        services.AddScoped<IPublicationRepository, SqlitePublicationRepository>();
         services.AddScoped<IAppSettingStore, SqliteAppSettingStore>();
         services.AddScoped<IContentSettingsProvider, AppSettingContentSettingsProvider>();
         services.AddScoped<IContentCalendarProvider, AppSettingContentCalendarProvider>();
@@ -92,6 +97,15 @@ public static class InfrastructureServiceCollectionExtensions
             provider.GetRequiredService<OpenAiCompatibleGenerationClient>());
         services.AddSingleton<IEmbeddingClient, OpenAiCompatibleEmbeddingClient>();
 
+        // Publishing and mail. Each is a singleton because they hold no per-call state: the site and the secret
+        // are parameters of every call, so two publications can run without sharing anything.
+        services.AddSingleton<IPublishDestinationProvider, ConfigurationPublishDestinationProvider>();
+        services.AddSingleton<IRemotePublisher, WordPressRestPublisher>();
+        services.AddSingleton<IMarkdownWriter, FileMarkdownWriter>();
+        services.AddSingleton<ISmtpSettingsProvider, ConfigurationSmtpSettingsProvider>();
+        services.AddSingleton<INotificationSettingsProvider, ConfigurationNotificationSettingsProvider>();
+        services.AddSingleton<IEmailSender, SmtpEmailSender>();
+
         // Use cases. They hold repositories (scoped) and clients (singletons), so they belong to the scope.
         services.AddScoped<Application.Jobs.JobEnqueuer>();
         services.AddScoped<Application.Topics.CreateTopicUseCase>();
@@ -115,12 +129,30 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<RequestReflectionGenerationUseCase>();
         services.AddScoped<GenerateReflectionUseCase>();
 
+        // Phase four: publishing and notifications.
+        services.AddScoped<Application.Notifications.QueueNotificationUseCase>();
+        services.AddScoped<Application.Notifications.SendNotificationUseCase>();
+        services.AddScoped<Application.Configuration.UpdateContentSettingsUseCase>();
+        services.AddScoped<Application.Publishing.ListPublishTargetsUseCase>();
+        services.AddScoped<Application.Publishing.ListPublicationsUseCase>();
+        services.AddScoped<Application.Publishing.CreatePublishTargetUseCase>();
+        services.AddScoped<Application.Publishing.UpdatePublishTargetUseCase>();
+        services.AddScoped<Application.Publishing.SetAutomaticPublishUseCase>();
+        services.AddScoped<Application.Publishing.RequestPublicationUseCase>();
+        services.AddScoped<Application.Publishing.RunPublicationUseCase>();
+        services.AddScoped<Application.Publishing.RetryPublicationUseCase>();
+        services.AddScoped<Application.Publishing.CheckRemoteUseCase>();
+        services.AddScoped<Application.Publishing.ResolveRemoteDivergenceUseCase>();
+        services.AddScoped<Application.Publishing.SchedulePublicationsUseCase>();
+
         // Job handlers are scoped because they use repositories, which hold a scoped connection.
         services.AddScoped<IJobHandler, TranscriptionJobHandler>();
         services.AddScoped<IJobHandler, ReflectionGenerationJobHandler>();
         services.AddScoped<IJobHandler, UnsourcedStatementCheckJobHandler>();
         services.AddScoped<IJobHandler, EmbeddingIndexJobHandler>();
         services.AddScoped<IJobHandler, EmbeddingRebuildJobHandler>();
+        services.AddScoped<IJobHandler, PublicationJobHandler>();
+        services.AddScoped<IJobHandler, NotificationJobHandler>();
 
         // The nightly generation slot and the catch-up scan (§7). One instance only, like the executor.
         services.AddHostedService<ReflectionSchedulerService>();

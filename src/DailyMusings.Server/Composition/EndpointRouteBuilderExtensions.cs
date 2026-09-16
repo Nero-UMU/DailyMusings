@@ -29,6 +29,8 @@ public static class EndpointRouteBuilderExtensions
         MapSystemEndpoints(endpoints);
         endpoints.MapInputEndpoints();
         endpoints.MapReflectionEndpoints();
+        endpoints.MapPublishingEndpoints();
+        endpoints.MapContentSettingsEndpoints();
 
         return endpoints;
     }

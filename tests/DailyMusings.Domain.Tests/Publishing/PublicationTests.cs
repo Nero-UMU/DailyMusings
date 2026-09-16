@@ -100,7 +100,7 @@ public class PublicationTests
         Assert.AreEqual(1, publication.AttemptCount);
         Assert.AreEqual("pixel-8", publication.TriggeredBy);
 
-        publication.CompleteAsDraft("wp-42", TestFactory.Noon);
+        publication.CompleteAsDraft("wp-42", "content-hash", TestFactory.Noon);
         Assert.AreEqual(PublicationStatus.DraftUploaded, publication.Status);
         Assert.AreEqual("wp-42", publication.RemoteId);
 
@@ -164,7 +164,7 @@ public class PublicationTests
         var uploaded = TestFactory.NewPublication(target, PublicationTrigger.Automatic);
 
         uploaded.Begin("system:scheduler", TestFactory.Noon);
-        uploaded.CompleteAsDraft("wp-7", TestFactory.Noon);
+        uploaded.CompleteAsDraft("wp-7", "content-hash", TestFactory.Noon);
 
         queued.Supersede(TestFactory.Noon);
         uploaded.Supersede(TestFactory.Noon);
@@ -179,7 +179,7 @@ public class PublicationTests
         var target = TestFactory.NewTarget();
         var publication = TestFactory.NewPublication(target, PublicationTrigger.Manual);
         publication.Begin("admin", TestFactory.Noon);
-        publication.CompleteAsPublished("wp-1", TestFactory.Noon);
+        publication.CompleteAsPublished("wp-1", "content-hash", TestFactory.Noon);
 
         Assert.IsTrue(publication.IsTerminal);
         TestFactory.ThrowsDomain(
@@ -194,7 +194,12 @@ public class PublicationTests
         var publication = TestFactory.NewPublication(target, PublicationTrigger.Manual);
         publication.Begin("admin", TestFactory.Noon);
 
-        Assert.ThrowsException<ArgumentException>(() => publication.CompleteAsDraft("   ", TestFactory.Noon));
+        Assert.ThrowsException<ArgumentException>(() => publication.CompleteAsDraft("   ", "content-hash", TestFactory.Noon));
+        Assert.AreEqual(PublicationStatus.InProgress, publication.Status);
+
+        // The content hash is what a later difference check compares against, so a completion without one would
+        // silently create a publication whose remote state can never be verified (11.1).
+        Assert.ThrowsException<ArgumentException>(() => publication.CompleteAsDraft("wp-9", "  ", TestFactory.Noon));
         Assert.AreEqual(PublicationStatus.InProgress, publication.Status);
     }
 

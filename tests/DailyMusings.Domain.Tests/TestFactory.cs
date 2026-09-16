@@ -142,12 +142,14 @@ internal static class TestFactory
     public static Publication NewPublication(
         PublishTarget target,
         PublicationTrigger trigger = PublicationTrigger.Automatic,
-        DateTimeOffset? scheduledAtUtc = null) =>
+        DateTimeOffset? scheduledAtUtc = null,
+        PublicationVisibility visibility = PublicationVisibility.Draft) =>
         Publication.Create(
             PublicationId.New(),
             ReflectionId.New(),
             ReflectionVersionId.New(),
             target.Id,
             trigger,
-            scheduledAtUtc ?? Noon);
+            scheduledAtUtc ?? Noon,
+            visibility);
 }

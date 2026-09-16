@@ -105,8 +105,8 @@ public static class IdempotencyKeys
     public static string EmbeddingIndex(InputEntryId inputId, string embeddingConfigVersion, string textHash) =>
         $"embedding-index:{inputId}:{embeddingConfigVersion}:{textHash}";
 
-    public static string Publication(ReflectionVersionId versionId, PublishTargetId targetId) =>
-        $"publication:{versionId}:{targetId}";
+    public static string Publication(ReflectionVersionId versionId, PublishTargetId targetId, int round = 0) =>
+        $"publication:{versionId}:{targetId}#{round}";
 
     public static string Notification(string eventKey, string targetId) => $"notification:{eventKey}:{targetId}";
 

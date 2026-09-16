@@ -228,12 +228,34 @@ public sealed class JobExecutorService : BackgroundService
 
         if (job.Status == JobStatus.Failed)
         {
-            // Notification of a terminal failure is itself a job (§12), enqueued by the phase that owns mail.
+            // §12/§14: a terminal failure is mailed. Queued from here rather than from each handler so that every
+            // kind of job reports its own final failure exactly once, and a mail failure cannot touch the work.
+            // Notification jobs themselves are excluded: a failed notification must not mail about its own failure.
             _logger.LogWarning(
                 "Job {JobId} of type {JobType} failed terminally with {ErrorCode}.",
                 job.Id,
                 job.JobType,
                 job.ErrorCode);
+
+            if (job.JobType != JobType.Notification)
+            {
+                try
+                {
+                    var notifications = services.GetRequiredService<Application.Notifications.QueueNotificationUseCase>();
+
+                    await notifications
+                        .QueueJobFailedAsync(job.Id, job.JobType, job.TargetId, job.ErrorCode, cancellationToken)
+                        .ConfigureAwait(false);
+                }
+                catch (Exception exception) when (exception is not OperationCanceledException)
+                {
+                    // Announcing the failure is best effort; it must never turn into a failure of its own.
+                    _logger.LogWarning(
+                        "Could not queue a failure notification for job {JobId}: {ErrorType}.",
+                        job.Id,
+                        exception.GetType().Name);
+                }
+            }
         }
 
         return true;
