@@ -123,7 +123,7 @@ public sealed class RequestReflectionGenerationUseCase
         var job = await _jobs.EnsureAsync(
             JobType.ReflectionGeneration,
             contentDate.ToString(),
-            IdempotencyKeys.ReflectionGeneration(contentDate, round),
+            IdempotencyKeys.ReflectionGeneration(contentDate, round, allowOverwriteOfManualEdits),
             payload.ToJson(),
             requeueFailed: manual,
             cancellationToken).ConfigureAwait(false);

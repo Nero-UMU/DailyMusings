@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The packaged Windows client (docs/开发指导.md §18: 生成 Windows 安装包).
+
+  The shape follows the .NET MAUI template closely, because MakeAppx validates this against the appx schema and a
+  manifest that merely looks right is rejected. `runFullTrust` is a *restricted* capability: it has to sit in
+  `Capabilities` with the rescap prefix, its namespace has to be listed in `IgnorableNamespaces`, and the
+  microphone is requested separately as a device capability — without which MediaCapture refuses to start and
+  recording fails on a machine that has a perfectly good microphone. That is the same silent failure the Android
+  side hit with RECORD_AUDIO.
+-->
+<Package
+    xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+    xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+    xmlns:mp="http://schemas.microsoft.com/appx/2014/phone/manifest"
+    xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+    IgnorableNamespaces="uap mp rescap">
+
+  <Identity Name="dev.dailymusings.client" Publisher="CN=DailyMusings" Version="1.0.0.0" />
+
+  <Properties>
+    <DisplayName>每日随想</DisplayName>
+    <PublisherDisplayName>DailyMusings</PublisherDisplayName>
+    <Logo>Assets\StoreLogo.png</Logo>
+  </Properties>
+
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Universal" MinVersion="10.0.17763.0" MaxVersionTested="10.0.19041.0" />
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.17763.0" MaxVersionTested="10.0.19041.0" />
+  </Dependencies>
+
+  <Resources>
+    <Resource Language="x-generate" />
+  </Resources>
+
+  <Applications>
+    <Application Id="App" Executable="$targetnametoken$.exe" EntryPoint="$targetentrypoint$">
+      <uap:VisualElements
+          DisplayName="每日随想"
+          Description="捕捉想法，成文于每日"
+          Square150x150Logo="Assets\Square150x150Logo.png"
+          Square44x44Logo="Assets\Square44x44Logo.png"
+          BackgroundColor="transparent">
+        <uap:DefaultTile Wide310x150Logo="Assets\Wide310x150Logo.png" />
+        <uap:SplashScreen Image="Assets\SplashScreen.png" />
+      </uap:VisualElements>
+    </Application>
+  </Applications>
+
+  <Capabilities>
+    <rescap:Capability Name="runFullTrust" />
+    <DeviceCapability Name="microphone" />
+  </Capabilities>
+</Package>

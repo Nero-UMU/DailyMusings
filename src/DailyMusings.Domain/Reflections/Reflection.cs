@@ -47,6 +47,16 @@ public sealed class Reflection
     /// <summary>The last version a human confirmed. Survives regeneration so the audit trail stays intact.</summary>
     public ReflectionVersionId? ConfirmedVersionId { get; private set; }
 
+    /// <summary>
+    /// When a human first confirmed this day, or <c>null</c> while nobody has.
+    /// <para>
+    /// Kept from the <em>first</em> confirmation and never moved. Decision A.1 counts the audio retention window from
+    /// here, so a later regeneration or a stale mark must not restart it — otherwise a day edited often enough would
+    /// keep its recordings forever.
+    /// </para>
+    /// </summary>
+    public DateTimeOffset? ConfirmedAtUtc { get; private set; }
+
     public DateTimeOffset CreatedAtUtc { get; }
 
     public DateTimeOffset UpdatedAtUtc { get; private set; }
@@ -69,10 +79,12 @@ public sealed class Reflection
         ReflectionVersionId? workingVersionId,
         ReflectionVersionId? confirmedVersionId,
         DateTimeOffset createdAtUtc,
-        DateTimeOffset updatedAtUtc)
+        DateTimeOffset updatedAtUtc,
+        DateTimeOffset? confirmedAtUtc = null)
     {
         return new Reflection(id, contentDate, reason, createdAtUtc)
         {
+            ConfirmedAtUtc = confirmedAtUtc,
             Status = status,
             LastStaleReason = lastStaleReason,
             InitialVersionId = initialVersionId,
@@ -161,6 +173,7 @@ public sealed class Reflection
 
         Transition(ReflectionStatus.Confirmed, at);
         ConfirmedVersionId = versionId;
+        ConfirmedAtUtc ??= at;
     }
 
     /// <summary>

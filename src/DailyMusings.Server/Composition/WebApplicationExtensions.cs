@@ -1,5 +1,6 @@
 using DailyMusings.Admin;
 using DailyMusings.Infrastructure.Composition;
+using DailyMusings.Infrastructure.Operations;
 using DailyMusings.Server.Startup;
 
 namespace DailyMusings.Server.Composition;
@@ -14,10 +15,13 @@ namespace DailyMusings.Server.Composition;
 public static class WebApplicationExtensions
 {
     /// <summary>
-    /// Brings the instance to a servable state: schema migrated, administrator bootstrapped.
+    /// Brings the instance to a servable state: any staged restore applied, schema migrated, administrator
+    /// bootstrapped.
     /// <para>
-    /// Both steps run before the first request so a failure aborts startup instead of leaving an instance that
-    /// answers requests against a missing or half-built schema (§15.3).
+    /// All three run before the first request so a failure aborts startup instead of leaving an instance that
+    /// answers requests against a missing or half-built schema (§15.3). The restore comes first because it replaces
+    /// the database the migration then upgrades — a backup taken by an older build has to be migrated like any other
+    /// instance (§15.2 step 3).
     /// </para>
     /// </summary>
     public static async Task InitializeDailyMusingsAsync(
@@ -25,6 +29,15 @@ public static class WebApplicationExtensions
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(app);
+
+        var restored = await StagedRestoreStartupTask
+            .ApplyAsync(app.Configuration, app.Logger, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (restored is not null)
+        {
+            app.Logger.LogWarning("A staged restore was applied at startup: {RestoreSummary}", restored);
+        }
 
         await app.Services.ApplyMigrationsAsync(cancellationToken).ConfigureAwait(false);
         await AdminBootstrap.RunAsync(app.Services, app.Logger, cancellationToken).ConfigureAwait(false);

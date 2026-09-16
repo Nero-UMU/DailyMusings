@@ -1,0 +1,64 @@
+# Phase-5 acceptance run: instance A.
+#
+# Deliberately NOT deploy/compose.yaml: the acceptance has to point the instance at test services that
+# listen on the host's loopback (a model stub, Mailpit, the throwaway WordPress), which needs host
+# networking, and it has to keep its state in a bind mount so the driver can read the Markdown and the
+# backup archives from the host. The shipped deploy/compose.yaml is exercised separately, unchanged and
+# from an empty directory, by the restore verification (§15.2 steps 1-2).
+name: dailymusings-a
+
+services:
+  app:
+    image: dailymusings/server:local
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://127.0.0.1:8080
+      Storage__RootPath: /state
+      Storage__SecretsPath: /run/secrets
+      Storage__KeyRingPath: /keys
+      Scheduler__IntervalSeconds: "5"
+      Maintenance__BackupEnabled: "false"
+      Backup__KeepCount: "2"
+      Transcription__Enabled: "true"
+      Transcription__BaseUrl: http://127.0.0.1:8077/v1
+      Transcription__Model: stub-whisper
+      Transcription__SecretName: openai-api-key
+      Generation__Enabled: "true"
+      Generation__BaseUrl: http://127.0.0.1:8077/v1
+      Generation__Model: stub-chat
+      Generation__SecretName: openai-api-key
+      Embedding__Enabled: "true"
+      Embedding__BaseUrl: http://127.0.0.1:8077/v1
+      Embedding__Model: stub-embed
+      Embedding__SecretName: embedding-api-key
+      Embedding__Dimensions: "64"
+      Smtp__Enabled: "true"
+      Smtp__Host: 127.0.0.1
+      Smtp__Port: "1025"
+      Smtp__UseStartTls: "false"
+      Smtp__FromAddress: dailymusings@example.test
+      Smtp__FromName: 每日随想
+      Smtp__SecretName: smtp-password
+      Publishing__WordPress__Defaults__BaseUrl: http://127.0.0.1:8090
+      Publishing__WordPress__Defaults__Username: owner
+      Publishing__WordPress__Defaults__SecretName: wordpress-application-password
+    volumes:
+      - ./state:/state
+      - ./keys:/keys
+    secrets:
+      - openai-api-key
+      - embedding-api-key
+      - smtp-password
+      - wordpress-application-password
+
+secrets:
+  openai-api-key:
+    file: ./secrets/openai-api-key
+  embedding-api-key:
+    file: ./secrets/embedding-api-key
+  smtp-password:
+    file: ./secrets/smtp-password
+  wordpress-application-password:
+    file: ./secrets/wordpress-application-password

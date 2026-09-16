@@ -31,6 +31,7 @@ public static class EndpointRouteBuilderExtensions
         endpoints.MapReflectionEndpoints();
         endpoints.MapPublishingEndpoints();
         endpoints.MapContentSettingsEndpoints();
+        endpoints.MapOperationsEndpoints();
 
         return endpoints;
     }

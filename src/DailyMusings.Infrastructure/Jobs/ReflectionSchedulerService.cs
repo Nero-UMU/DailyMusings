@@ -1,3 +1,4 @@
+using System.Globalization;
 using DailyMusings.Application.Abstractions;
 using DailyMusings.Application.Configuration;
 using DailyMusings.Application.Embeddings;
@@ -124,7 +125,68 @@ public sealed class ReflectionSchedulerService : BackgroundService
         await ScheduleGenerationsAsync(cancellationToken).ConfigureAwait(false);
         await ScheduleEmbeddingRebuildAsync(cancellationToken).ConfigureAwait(false);
         await SchedulePublicationsAsync(cancellationToken).ConfigureAwait(false);
+        await ScheduleMaintenanceAsync(cancellationToken).ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// The two daily housekeeping jobs (§15.1, §15.2): a complete backup and the recording retention sweep.
+    /// <para>
+    /// Both are keyed on the content day, so a scan that runs every couple of seconds still produces exactly one of
+    /// each per day — and a restart in the middle of the night does not produce a second backup.
+    /// </para>
+    /// </summary>
+    private async Task ScheduleMaintenanceAsync(CancellationToken cancellationToken)
+    {
+        var backupEnabled = _configuration.GetValue("Maintenance:BackupEnabled", true);
+        var backupTime = ReadLocalTime("Maintenance:BackupLocalTime", new TimeOnly(3, 30));
+        var cleanupTime = ReadLocalTime("Maintenance:AudioCleanupLocalTime", new TimeOnly(4, 0));
+
+        await using var scope = _scopeFactory.CreateAsyncScope();
+        var services = scope.ServiceProvider;
+
+        var calendars = services.GetRequiredService<IContentCalendarProvider>();
+        var clock = services.GetRequiredService<IClock>();
+        var jobs = services.GetRequiredService<JobEnqueuer>();
+
+        var calendar = await calendars.GetCalendarAsync(cancellationToken).ConfigureAwait(false);
+        var now = clock.UtcNow;
+
+        // Yesterday's content day is the one whose slot has certainly arrived, so nothing is scheduled for a day
+        // that is still in progress.
+        var day = calendar.ContentDateOf(now);
+
+        if (backupEnabled && now >= calendar.AtLocalTime(day, backupTime))
+        {
+            await jobs.EnsureAsync(
+                JobType.Backup,
+                day.ToString(),
+                $"backup:{day}",
+                payload: null,
+                requeueFailed: false,
+                cancellationToken).ConfigureAwait(false);
+        }
+
+        if (now >= calendar.AtLocalTime(day, cleanupTime))
+        {
+            await jobs.EnsureAsync(
+                JobType.AudioCleanup,
+                day.ToString(),
+                $"audio-cleanup:{day}",
+                payload: null,
+                requeueFailed: false,
+                cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private TimeOnly ReadLocalTime(string key, TimeOnly fallback) =>
+        TimeOnly.TryParseExact(
+            _configuration.GetValue<string?>(key),
+            "HH:mm",
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.None,
+            out var parsed)
+            ? parsed
+            : fallback;
 
     /// <summary>
     /// The publish half of the clock (§11.1): the 08:00 slot, the execution window, and the invalidation of a

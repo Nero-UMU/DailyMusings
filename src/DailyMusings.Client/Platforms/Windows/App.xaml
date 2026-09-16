@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The WinUI application object. Its only job is to hand control to the shared MauiProgram, so the Windows client
+  boots the same app — same pages, same services — as the Android one.
+-->
+<maui:MauiWinUIApplication
+    x:Class="DailyMusings.Client.WinUI.App"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:maui="using:Microsoft.Maui"
+    xmlns:local="using:DailyMusings.Client.WinUI">
+
+</maui:MauiWinUIApplication>

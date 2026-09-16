@@ -62,6 +62,18 @@ public interface IReflectionRepository
 
     Task<IReadOnlyList<Reflection>> ListRecentAsync(int limit, CancellationToken cancellationToken);
 
+    /// <summary>Every draft, oldest first. Used by the export and the backup, which both promise completeness.</summary>
+    Task<IReadOnlyList<Reflection>> ListAllAsync(int limit, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Days confirmed at or before <paramref name="cutoffUtc"/>, oldest confirmation first.
+    /// <para>
+    /// This is the retention sweep's query (decision A.1). It filters on the confirmation instant rather than on the
+    /// content day, because the window starts when a human signed the day off — not when the material happened.
+    /// </para>
+    /// </summary>
+    Task<IReadOnlyList<Reflection>> ListConfirmedBeforeAsync(DateTimeOffset cutoffUtc, int limit, CancellationToken cancellationToken);
+
     Task AddAsync(Reflection reflection, CancellationToken cancellationToken);
 
     Task UpdateAsync(Reflection reflection, CancellationToken cancellationToken);

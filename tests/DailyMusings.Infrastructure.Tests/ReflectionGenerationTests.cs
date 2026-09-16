@@ -157,6 +157,44 @@ public class ReflectionGenerationTests
     }
 
     [TestMethod]
+    public async Task An_accepted_overwrite_is_not_swallowed_by_the_refused_attempt_before_it()
+    {
+        await using var context = await ReflectionTestContext.CreateAsync();
+        await context.CaptureTextAsync("今天试着记录了一点东西。");
+        var (_, edited) = await context.SeedDraftAsync(context.Today, ReflectionStatus.StaleByLateInput, workingVersionHasManualEdits: true);
+
+        // A client that does not know about the hand edit asks first, and the job refuses to rotate.
+        var refused = await context.RequestGeneration.ExecuteAsync(
+            context.Today, manual: true, ignoreTranscriptionFailures: false, allowOverwriteOfManualEdits: false, CancellationToken.None);
+
+        var skipped = await context.Generate.ExecuteAsync(
+            context.Today,
+            ReflectionGenerationPayload.FromJson(refused.Job!.Payload),
+            CancellationToken.None);
+
+        Assert.AreEqual(ReflectionGenerationOutcome.SkippedManualEditsProtected, skipped.Outcome);
+
+        // The user is then told what regenerating would cost and accepts it. The decision has to reach the model:
+        // reusing the refused attempt's key would hand back a job that had already finished and rotated nothing.
+        var accepted = await context.RequestGeneration.ExecuteAsync(
+            context.Today, manual: true, ignoreTranscriptionFailures: false, allowOverwriteOfManualEdits: true, CancellationToken.None);
+
+        Assert.IsTrue(accepted.Decision.Allowed, accepted.Decision.Detail);
+        Assert.AreNotEqual(refused.Job.Id, accepted.Job!.Id, "The accepted request must not reuse the refusal's job.");
+
+        var rotated = await context.Generate.ExecuteAsync(
+            context.Today,
+            ReflectionGenerationPayload.FromJson(accepted.Job.Payload),
+            CancellationToken.None);
+
+        Assert.AreEqual(ReflectionGenerationOutcome.Generated, rotated.Outcome);
+
+        var reflection = await context.Reflections.FindByContentDateAsync(context.Today, CancellationToken.None);
+        Assert.AreEqual(edited.Id, reflection!.PreviousVersionId, "The hand-edited version moves to the previous slot.");
+        Assert.AreNotEqual(edited.Id, reflection.WorkingVersionId);
+    }
+
+    [TestMethod]
     public async Task A_confirmed_day_is_not_regenerated()
     {
         await using var context = await ReflectionTestContext.CreateAsync();

@@ -87,9 +87,20 @@ public static class IdempotencyKeys
     /// unique index would refuse the second generation of a day forever — the first job row still holds the
     /// key — and §7's catch-up path would be impossible to implement.
     /// </para>
+    /// <para>
+    /// Accepting the loss of hand edits is part of the key, and that is not decoration: a request that does not
+    /// accept it produces a job that refuses to rotate (§6.4), and if the accepted request that follows reused
+    /// that same key the queue would hand back the already-finished refusal and the user's decision would be
+    /// silently dropped. Found by the phase-five acceptance run, which asked for exactly that sequence.
+    /// </para>
     /// </summary>
-    public static string ReflectionGeneration(ContentDate contentDate, int round = 0) =>
-        $"reflection-generation:{contentDate}#{round}";
+    public static string ReflectionGeneration(
+        ContentDate contentDate,
+        int round = 0,
+        bool acceptedOverwriteOfManualEdits = false) =>
+        acceptedOverwriteOfManualEdits
+            ? $"reflection-generation:{contentDate}#{round}#accepted-overwrite"
+            : $"reflection-generation:{contentDate}#{round}";
 
     public static string UnsourcedStatementCheck(ReflectionVersionId versionId) =>
         $"unsourced-check:{versionId}";

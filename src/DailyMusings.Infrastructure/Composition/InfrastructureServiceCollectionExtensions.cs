@@ -6,6 +6,7 @@ using DailyMusings.Infrastructure.Diagnostics;
 using DailyMusings.Infrastructure.Generation;
 using DailyMusings.Infrastructure.Jobs;
 using DailyMusings.Infrastructure.Notifications;
+using DailyMusings.Infrastructure.Operations;
 using DailyMusings.Infrastructure.Persistence;
 using DailyMusings.Infrastructure.Persistence.Repositories;
 using DailyMusings.Infrastructure.Publishing;
@@ -103,6 +104,18 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddSingleton<IRemotePublisher, WordPressRestPublisher>();
         services.AddSingleton<IMarkdownWriter, FileMarkdownWriter>();
         services.AddSingleton<ISmtpSettingsProvider, ConfigurationSmtpSettingsProvider>();
+
+        // §15's operations: a readable export, a complete backup, the staged restore and the retention sweep. The
+        // snapshotter is scoped because it uses the scoped connection; the writers are singletons because they only
+        // touch the filesystem.
+        services.AddScoped<SqliteDatabaseSnapshotter>();
+        services.AddSingleton<IInstanceExportWriter, FileInstanceExportWriter>();
+        services.AddSingleton<IBackupWriter, ZipBackupWriter>();
+        services.AddSingleton<IRestoreStager, StagedRestoreService>();
+
+        // §16: the temporary debug switch and the on-demand test connections. Scoped, because both read settings.
+        services.AddScoped<IDiagnosticMode, AppSettingDiagnosticMode>();
+        services.AddScoped<IExternalServiceProbe, ExternalServiceProbe>();
         services.AddSingleton<INotificationSettingsProvider, ConfigurationNotificationSettingsProvider>();
         services.AddSingleton<IEmailSender, SmtpEmailSender>();
 
@@ -130,6 +143,17 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<GenerateReflectionUseCase>();
 
         // Phase four: publishing and notifications.
+        services.AddScoped<Application.Operations.BuildInstanceDataUseCase>();
+        services.AddScoped<Application.Operations.CreateExportUseCase>();
+        services.AddScoped<Application.Operations.CreateBackupUseCase>();
+        services.AddScoped<Application.Operations.ListInstanceDataUseCase>();
+        services.AddScoped<Application.Operations.StageRestoreUseCase>();
+        services.AddScoped<Application.Operations.RunAudioCleanupUseCase>();
+        services.AddScoped<Application.Operations.ManageDiagnosticModeUseCase>();
+        services.AddScoped<Application.Operations.ProbeExternalServiceUseCase>();
+        services.AddScoped<Application.Operations.RequestIndexRebuildUseCase>();
+        services.AddScoped<Application.Operations.GetIndexStatusUseCase>();
+        services.AddScoped<Application.Operations.RunMaintenanceJobUseCase>();
         services.AddScoped<Application.Notifications.QueueNotificationUseCase>();
         services.AddScoped<Application.Notifications.SendNotificationUseCase>();
         services.AddScoped<Application.Configuration.UpdateContentSettingsUseCase>();
@@ -153,6 +177,8 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<IJobHandler, EmbeddingRebuildJobHandler>();
         services.AddScoped<IJobHandler, PublicationJobHandler>();
         services.AddScoped<IJobHandler, NotificationJobHandler>();
+        services.AddScoped<IJobHandler, AudioCleanupJobHandler>();
+        services.AddScoped<IJobHandler, BackupJobHandler>();
 
         // The nightly generation slot and the catch-up scan (§7). One instance only, like the executor.
         services.AddHostedService<ReflectionSchedulerService>();

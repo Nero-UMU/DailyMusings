@@ -282,6 +282,54 @@ public class InputLoopTests
     }
 
     [TestMethod]
+    public async Task The_stored_recording_can_be_read_back_until_retention_removes_it()
+    {
+        await using var stub = await StubTranscriptionEndpoint.StartAsync();
+        await using var instance = await TestInstance.StartAsync(TranscriptionEnabled(stub.BaseUrl));
+
+        instance.WriteSecret("openai-api-key", "test-api-key");
+        await instance.SignInAsChangedAdministratorAsync();
+        var (_, device) = await instance.PairDeviceAsync();
+
+        using var upload = await UploadVoiceAsync(device, "play-me");
+        var ingested = await upload.Content.ReadFromJsonAsync<IngestResponse>();
+        var id = ingested!.Input.Id;
+
+        await WaitForAsync(device, id, view => view.TranscriptionStatus == TranscriptionStatusNames.Succeeded);
+
+        // §15.2 step 6: the restored instance's audio has to be checkable, which needs a read path.
+        using var audio = await device.GetAsync($"/api/inputs/{id}/audio");
+        audio.EnsureSuccessStatusCode();
+
+        Assert.AreEqual("audio/mp4", audio.Content.Headers.ContentType?.MediaType);
+        CollectionAssert.AreEqual(FakeAudio, await audio.Content.ReadAsByteArrayAsync());
+
+        // A player seeks, so the endpoint has to answer range requests.
+        using var rangeRequest = new HttpRequestMessage(HttpMethod.Get, $"/api/inputs/{id}/audio");
+        rangeRequest.Headers.Range = new RangeHeaderValue(0, 9);
+        using var partial = await device.SendAsync(rangeRequest);
+
+        Assert.AreEqual(HttpStatusCode.PartialContent, partial.StatusCode);
+        Assert.AreEqual(10, (await partial.Content.ReadAsByteArrayAsync()).Length);
+
+        // A caller with no credential is not allowed to listen to somebody's recording.
+        using var anonymous = new HttpClient { BaseAddress = instance.Client.BaseAddress };
+        using var forbidden = await anonymous.GetAsync($"/api/inputs/{id}/audio");
+        Assert.AreEqual(HttpStatusCode.Unauthorized, forbidden.StatusCode);
+
+        // Once retention (or the user) removes the blob, the entry stays and the read answers honestly.
+        using var deleteAudio = await device.DeleteAsync($"/api/inputs/{id}/audio");
+        Assert.AreEqual(HttpStatusCode.NoContent, deleteAudio.StatusCode);
+
+        using var gone = await device.GetAsync($"/api/inputs/{id}/audio");
+        Assert.AreEqual(HttpStatusCode.NotFound, gone.StatusCode);
+        Assert.AreEqual("input.audio.deleted", (await gone.Content.ReadFromJsonAsync<ApiError>())?.Code);
+
+        using var stillThere = await device.GetAsync($"/api/inputs/{id}");
+        stillThere.EnsureSuccessStatusCode();
+    }
+
+    [TestMethod]
     public async Task A_revision_is_kept_apart_from_the_original_and_audio_deletion_keeps_the_entry()
     {
         await using var stub = await StubTranscriptionEndpoint.StartAsync();

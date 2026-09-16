@@ -46,6 +46,12 @@ public interface IInputEntryRepository
     /// <summary>Most recent entries across days, newest first. Used by the client's timeline.</summary>
     Task<IReadOnlyList<InputEntry>> ListRecentAsync(int limit, CancellationToken cancellationToken);
 
+    /// <summary>
+    /// Every entry, oldest first, including days that never produced a draft. Used by the export and the backup:
+    /// §15.1 asks for 输入 in the export, and an input on a day with no reflection is still the user's material.
+    /// </summary>
+    Task<IReadOnlyList<InputEntry>> ListAllAsync(int limit, CancellationToken cancellationToken);
+
     Task AddAsync(InputEntry entry, CancellationToken cancellationToken);
 
     Task UpdateAsync(InputEntry entry, CancellationToken cancellationToken);

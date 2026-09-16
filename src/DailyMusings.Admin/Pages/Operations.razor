@@ -1,0 +1,383 @@
+@page "/operations"
+@rendermode InteractiveServer
+@attribute [Authorize]
+@inject IServiceScopeFactory ScopeFactory
+
+<h1>运维</h1>
+
+<p class="hint">
+    导出与备份都写在实例的挂载目录里：导出在 <code>exports/</code>，备份在 <code>backups/</code>。
+    两者都<strong>不包含任何 Secret</strong>；备份还会剥掉设备令牌（恢复后需要重新配对），并且从不进入
+    DataProtection 密钥环所在的目录。
+</p>
+
+@if (_message is not null)
+{
+    <p class="notice ok">@_message</p>
+}
+
+@if (_error is not null)
+{
+    <p class="notice error">@_error</p>
+}
+
+<h2>导出与备份</h2>
+
+<div class="form">
+    <button @onclick="CreateExportAsync" disabled="@_busy">立即导出（可阅读）</button>
+    <button @onclick="CreateBackupAsync" disabled="@_busy">立即备份</button>
+</div>
+
+@if (_exports is null || _backups is null)
+{
+    <p>正在读取…</p>
+}
+else
+{
+    <h3>导出（@_exports.Count 份）</h3>
+    @if (_exports.Count == 0)
+    {
+        <p>还没有导出。</p>
+    }
+    else
+    {
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>目录</th>
+                    <th>时间（本地）</th>
+                    <th>文件数</th>
+                    <th>大小</th>
+                    <th>音频保留策略</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var item in _exports)
+                {
+                    <tr>
+                        <td>@item.RelativeRoot</td>
+                        <td>@item.CreatedAtUtc.ToLocalTime().ToString("u")</td>
+                        <td>@item.FileCount</td>
+                        <td>@Format(item.TotalBytes)</td>
+                        <td>@item.RetentionPolicy</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+
+    <h3>备份（@_backups.Count 份，默认保留最近七份）</h3>
+    @if (_backups.Count == 0)
+    {
+        <p>还没有备份。</p>
+    }
+    else
+    {
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>文件</th>
+                    <th>时间（本地）</th>
+                    <th>大小</th>
+                    <th>已剥离的设备凭据</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var item in _backups)
+                {
+                    <tr>
+                        <td>@item.FileName</td>
+                        <td>@item.CreatedAtUtc.ToLocalTime().ToString("u")</td>
+                        <td>@Format(item.ByteCount)</td>
+                        <td>@item.RedactedDeviceTokens</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+}
+
+<h2>恢复</h2>
+
+<p class="hint">
+    上传一份备份后，服务器会先<strong>校验</strong>它（是不是本产品的备份、是否来自更新的版本、是否还带着设备令牌），
+    然后暂存；<strong>重启实例</strong>时才会真正替换数据。替换前会把当前数据库另存为
+    <code>pre-restore-*.db</code>，所以恢复错了还有退路。
+</p>
+
+<div class="form">
+    <InputFile OnChange="OnArchiveSelected" accept=".zip" />
+    <button @onclick="StageRestoreAsync" disabled="@(_busy || _archive is null)">校验并暂存</button>
+</div>
+
+@if (_restore is not null)
+{
+    <p class="notice @(_restore.IsValid ? "ok" : "error")">
+        @if (_restore.IsValid)
+        {
+            <span>
+                已暂存，重启实例后生效。
+                @if (_restore.Contents.Count > 0)
+                {
+                    <text>包内共 @_restore.Contents.Count 项，含数据库快照。</text>
+                }
+            </span>
+        }
+        else
+        {
+            <span>@_restore.Code：@_restore.Detail</span>
+        }
+    </p>
+}
+
+<h2>音频保留</h2>
+
+<p class="hint">
+    保留策略在<a href="/publishing">发布</a>页配置。清理会在草稿被确认之后才开始计时，
+    并且永远不会删除<strong>转写失败</strong>的录音——那是重试所需的原始材料。
+</p>
+
+<div class="form">
+    <button @onclick="RunAudioCleanupAsync" disabled="@_busy">立即清理一次</button>
+</div>
+
+<h2>语义索引</h2>
+
+@if (_index is null)
+{
+    <p>正在读取…</p>
+}
+else if (_index.ConfiguredVersion is null)
+{
+    <p>未配置 Embedding 端点，因此没有索引；历史检索退化为主题标签与全文匹配（§8.3）。</p>
+}
+else
+{
+    <p>
+        已索引 @_index.IndexedEntries 条；当前配置指纹 <code>@Short(_index.ConfiguredVersion)</code>；
+        可用：<strong>@(_index.SemanticSearchAvailable ? "是" : "否（重建中）")</strong>。
+    </p>
+    <div class="form">
+        <button @onclick="RebuildIndexAsync" disabled="@_busy">重建索引</button>
+    </div>
+}
+
+<h2>日志与调试</h2>
+
+<p class="hint">
+    默认日志只记录请求 / 任务 ID、状态变化、耗时、重试次数和脱敏错误码。下面这个开关是唯一会让
+    <strong>内容</strong>（转写正文、提示词、模型响应）进入日志的方式，它会自动到期。
+</p>
+
+@if (_diagnostic is null)
+{
+    <p>正在读取…</p>
+}
+else
+{
+    <p>
+        当前状态：<strong>@(_diagnostic.Enabled ? $"已开启（剩余 {(int)_diagnostic.RemainingAt(DateTimeOffset.UtcNow).TotalMinutes} 分钟，由 {_diagnostic.EnabledBy} 开启）" : "关闭")</strong>
+    </p>
+
+    <div class="risk">
+        <strong>开启后，转写正文、提示词与模型响应可能被写入日志文件。</strong>
+        <p>日志文件不在备份之外的保护之内。只在你确实需要排查时才开启，并在结束后立即关闭。</p>
+        <label>
+            时长（分钟）
+            <input type="number" @bind="_diagnosticMinutes" min="1" max="240" />
+        </label>
+        <label class="check">
+            <input type="checkbox" @bind="_diagnosticAcknowledged" />
+            我已了解这可能把私人内容写进日志
+        </label>
+        <button @onclick="EnableDiagnosticAsync" disabled="@(_busy || !_diagnosticAcknowledged)">开启调试模式</button>
+        @if (_diagnostic.Enabled)
+        {
+            <button @onclick="DisableDiagnosticAsync" disabled="@_busy">立即关闭</button>
+        }
+    </div>
+}
+
+<h2>测试连接</h2>
+
+<p class="hint">
+    外部服务从不参与基础健康检查（§16）：模型、SMTP 或博客不可用不会让实例显得不健康。这里按需单独测试。
+</p>
+
+<div class="form">
+    @foreach (var service in new[] { "transcription", "generation", "embedding", "smtp", "wordpress" })
+    {
+        <button @onclick="() => ProbeAsync(service)" disabled="@_busy">测试 @service</button>
+    }
+</div>
+
+@if (_probes.Count > 0)
+{
+    <table class="table">
+        <thead>
+            <tr>
+                <th>服务</th>
+                <th>结果</th>
+                <th>说明</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var probe in _probes)
+            {
+                <tr>
+                    <td>@probe.Service</td>
+                    <td>@(probe.Ok ? "可达" : "失败")</td>
+                    <td>@probe.Detail（@probe.Code）</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    private IReadOnlyList<InstanceExportSummary>? _exports;
+    private IReadOnlyList<BackupSummary>? _backups;
+    private RestoreValidation? _restore;
+    private IndexStatus? _index;
+    private DiagnosticModeState? _diagnostic;
+    private readonly List<ProbeResultDto> _probes = [];
+
+    private IBrowserFile? _archive;
+    private string? _message;
+    private string? _error;
+    private int _diagnosticMinutes = 30;
+    private bool _diagnosticAcknowledged;
+    private bool _busy;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        await using var scope = ScopeFactory.CreateAsyncScope();
+        var services = scope.ServiceProvider;
+
+        var list = services.GetRequiredService<ListInstanceDataUseCase>();
+        _exports = await list.ListExportsAsync(CancellationToken.None);
+        _backups = await list.ListBackupsAsync(CancellationToken.None);
+        _restore = await list.GetPendingRestoreAsync(CancellationToken.None);
+
+        _index = await services.GetRequiredService<GetIndexStatusUseCase>().ExecuteAsync(CancellationToken.None);
+        _diagnostic = await services.GetRequiredService<ManageDiagnosticModeUseCase>().GetAsync(CancellationToken.None);
+    }
+
+    private async Task CreateExportAsync() => await RunAsync(async services =>
+    {
+        var result = await services.GetRequiredService<CreateExportUseCase>().ExecuteAsync(CancellationToken.None);
+        _message = $"导出完成：exports/{result.RelativeRoot}（{result.Entries.Count} 个文件，含 {result.CopiedBlobs} 个录音）。";
+    });
+
+    private async Task CreateBackupAsync() => await RunAsync(async services =>
+    {
+        var summary = await services.GetRequiredService<CreateBackupUseCase>().ExecuteAsync(CancellationToken.None);
+        _message = $"备份完成：backups/{summary.FileName}（{Format(summary.ByteCount)}，剥离 {summary.RedactedDeviceTokens} 条设备凭据）。";
+    });
+
+    private async Task RunAudioCleanupAsync() => await RunAsync(async services =>
+    {
+        var result = await services.GetRequiredService<RunAudioCleanupUseCase>().ExecuteAsync(CancellationToken.None);
+        _message = result.DeletedBlobs == 0
+            ? "没有到期的录音需要清理。"
+            : $"已清理 {result.DeletedBlobs} 个录音（释放 {Format(result.ReleasedBytes)}），失败 {result.FailedDeletions} 个。";
+    });
+
+    private async Task RebuildIndexAsync() => await RunAsync(async services =>
+    {
+        var fingerprint = await services.GetRequiredService<RequestIndexRebuildUseCase>().ExecuteAsync(CancellationToken.None);
+        _message = fingerprint is null
+            ? "未配置 Embedding 端点，无需重建。"
+            : "已排队重建语义索引；重建期间检索继续使用主题标签与全文匹配。";
+    });
+
+    private async Task EnableDiagnosticAsync() => await RunAsync(async services =>
+    {
+        var state = await services
+            .GetRequiredService<ManageDiagnosticModeUseCase>()
+            .EnableAsync("admin", TimeSpan.FromMinutes(_diagnosticMinutes), CancellationToken.None);
+
+        _message = $"调试模式已开启，将于 {state.ExpiresAtUtc?.ToLocalTime():u} 自动到期。";
+        _diagnosticAcknowledged = false;
+    });
+
+    private async Task DisableDiagnosticAsync() => await RunAsync(async services =>
+    {
+        await services.GetRequiredService<ManageDiagnosticModeUseCase>().DisableAsync(CancellationToken.None);
+        _message = "调试模式已关闭。";
+    });
+
+    private async Task ProbeAsync(string service) => await RunAsync(async services =>
+    {
+        var names = new Dictionary<string, ExternalService>(StringComparer.Ordinal)
+        {
+            ["transcription"] = ExternalService.Transcription,
+            ["generation"] = ExternalService.Generation,
+            ["embedding"] = ExternalService.Embedding,
+            ["smtp"] = ExternalService.Smtp,
+            ["wordpress"] = ExternalService.WordPress,
+        };
+
+        var result = await services
+            .GetRequiredService<ProbeExternalServiceUseCase>()
+            .ExecuteAsync(names[service], CancellationToken.None);
+
+        _probes.Insert(0, new ProbeResultDto(service, result.Ok, result.Code, result.Detail));
+    });
+
+    private void OnArchiveSelected(InputFileChangeEventArgs args) => _archive = args.File;
+
+    private async Task StageRestoreAsync() => await RunAsync(async services =>
+    {
+        if (_archive is null)
+        {
+            return;
+        }
+
+        await using var stream = _archive.OpenReadStream(maxAllowedSize: 4L * 1024 * 1024 * 1024);
+
+        var validation = await services
+            .GetRequiredService<StageRestoreUseCase>()
+            .ExecuteAsync(stream, CancellationToken.None);
+
+        _restore = validation;
+
+        if (validation.IsValid)
+        {
+            _message = "备份已校验并暂存。重启实例后生效；替换前的数据库会被保留。";
+        }
+    });
+
+    private async Task RunAsync(Func<IServiceProvider, Task> action)
+    {
+        _busy = true;
+        _message = null;
+        _error = null;
+
+        try
+        {
+            await using var scope = ScopeFactory.CreateAsyncScope();
+            await action(scope.ServiceProvider);
+            await LoadAsync();
+        }
+        catch (Exception exception) when (exception is DomainException or UseCaseException)
+        {
+            _error = exception.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private static string Format(long bytes) => bytes switch
+    {
+        < 1024 => $"{bytes} B",
+        < 1024 * 1024 => $"{bytes / 1024.0:0.0} KB",
+        _ => $"{bytes / (1024.0 * 1024.0):0.0} MB",
+    };
+
+    private static string Short(string value) => value.Length <= 12 ? value : value[..12] + "…";
+}

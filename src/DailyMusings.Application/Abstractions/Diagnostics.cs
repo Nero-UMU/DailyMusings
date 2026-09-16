@@ -33,3 +33,69 @@ public interface ICapabilityStatus
 {
     Task<bool> IsSemanticSearchAvailableAsync(CancellationToken cancellationToken);
 }
+
+/// <summary>The temporary, self-expiring debug switch of docs/开发指导.md §16.</summary>
+public sealed record DiagnosticModeState(bool Enabled, DateTimeOffset? ExpiresAtUtc, string? EnabledBy)
+{
+    public static DiagnosticModeState Disabled { get; } = new(false, null, null);
+
+    /// <summary>How long is left, floored at zero. Shown to the operator so "when does this stop" is answerable.</summary>
+    public TimeSpan RemainingAt(DateTimeOffset nowUtc) =>
+        Enabled && ExpiresAtUtc is { } expiry && expiry > nowUtc ? expiry - nowUtc : TimeSpan.Zero;
+}
+
+/// <summary>
+/// The one question the pipelines ask before writing content to the log
+/// (docs/开发指导.md §16: 只有用户主动开启临时调试模式时才能记录内容相关信息).
+/// <para>
+/// It exists so that "we log content only when asked" is a property of the code rather than of each call site's
+/// memory. The switch expires on its own: a debug mode that stays on because nobody remembered to turn it off is
+/// how a transcript ends up in a log file months later.
+/// </para>
+/// </summary>
+public interface IDiagnosticMode
+{
+    Task<DiagnosticModeState> GetAsync(CancellationToken cancellationToken);
+
+    /// <summary>Enables it for a bounded time, recording who did it.</summary>
+    Task<DiagnosticModeState> EnableAsync(string enabledBy, TimeSpan duration, CancellationToken cancellationToken);
+
+    Task DisableAsync(CancellationToken cancellationToken);
+
+    /// <summary>The cheap form, called on the hot path of every transcription and generation.</summary>
+    Task<bool> IsContentLoggingAllowedAsync(CancellationToken cancellationToken);
+}
+
+/// <summary>The external services §16 gives a "test connection" action.</summary>
+public enum ExternalService
+{
+    Transcription = 0,
+    Generation = 1,
+    Embedding = 2,
+    Smtp = 3,
+    WordPress = 4,
+}
+
+/// <summary>
+/// The verdict of a test-connection. <see cref="Code"/> is a stable identifier, never a message from the remote:
+/// an upstream's error text can echo the request, which may contain the user's writing.
+/// </summary>
+public sealed record ProbeResult(bool Ok, string Code, string Detail)
+{
+    public static ProbeResult Success(string detail) => new(true, "probe.ok", detail);
+
+    public static ProbeResult Failure(string code, string detail) => new(false, code, detail);
+}
+
+/// <summary>
+/// Checks one external service on demand (docs/开发指导.md §16).
+/// <para>
+/// Deliberately not a health probe. §16 requires that a broken model endpoint, SMTP server or blog cannot make the
+/// instance look unhealthy — the instance is still perfectly able to accept captures while they are down — so this
+/// is only ever reached because a human pressed a button.
+/// </para>
+/// </summary>
+public interface IExternalServiceProbe
+{
+    Task<ProbeResult> ProbeAsync(ExternalService service, CancellationToken cancellationToken);
+}

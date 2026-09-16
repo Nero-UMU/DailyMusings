@@ -132,6 +132,20 @@ public sealed class SqliteInputEntryRepository : IInputEntryRepository
             ("$upTo", SqliteValues.ContentDay(upToInclusive)),
             ("$limit", limit)).ConfigureAwait(false);
 
+    /// <summary>
+    /// Every entry, oldest first, including days that never produced a draft. The export and the backup both promise
+    /// completeness (§15.1), and an input on a day with no reflection is still the user's material.
+    /// </summary>
+    public Task<IReadOnlyList<InputEntry>> ListAllAsync(int limit, CancellationToken cancellationToken) =>
+        LoadAsync(
+            $"""
+             SELECT {Columns} FROM input_entry
+              ORDER BY content_date, created_at_utc, id
+              LIMIT $limit;
+             """,
+            cancellationToken,
+            ("$limit", limit));
+
     public async Task AddAsync(InputEntry entry, CancellationToken cancellationToken)
     {
         await _accessor.ExecuteAsync(

@@ -21,7 +21,7 @@ public sealed class SqliteReflectionRepository : IReflectionRepository
     private const string ReflectionColumns = """
         id, content_date, status, generation_reason, last_stale_reason,
         initial_version_id, previous_version_id, working_version_id, confirmed_version_id,
-        created_at_utc, updated_at_utc
+        created_at_utc, updated_at_utc, confirmed_at_utc
         """;
 
     private const string VersionColumns = """
@@ -69,12 +69,39 @@ public sealed class SqliteReflectionRepository : IReflectionRepository
             cancellationToken,
             ("$limit", limit)).ConfigureAwait(false);
 
+    public async Task<IReadOnlyList<Reflection>> ListAllAsync(int limit, CancellationToken cancellationToken) =>
+        await _accessor.QueryAsync(
+            $"SELECT {ReflectionColumns} FROM reflection ORDER BY content_date LIMIT $limit;",
+            MapReflection,
+            cancellationToken,
+            ("$limit", limit)).ConfigureAwait(false);
+
+    /// <summary>
+    /// The retention sweep's query (decision A.1): days whose <em>first confirmation</em> is old enough. Indexed on
+    /// that column, so a sweep does not walk every day the instance has ever written.
+    /// </summary>
+    public async Task<IReadOnlyList<Reflection>> ListConfirmedBeforeAsync(
+        DateTimeOffset cutoffUtc,
+        int limit,
+        CancellationToken cancellationToken) =>
+        await _accessor.QueryAsync(
+            $"""
+             SELECT {ReflectionColumns} FROM reflection
+              WHERE confirmed_at_utc IS NOT NULL AND confirmed_at_utc <= $cutoff
+              ORDER BY confirmed_at_utc
+              LIMIT $limit;
+             """,
+            MapReflection,
+            cancellationToken,
+            ("$cutoff", SqliteValues.Instant(cutoffUtc)),
+            ("$limit", limit)).ConfigureAwait(false);
+
     public async Task AddAsync(Reflection reflection, CancellationToken cancellationToken) =>
         await _accessor.ExecuteAsync(
             $"""
              INSERT INTO reflection ({ReflectionColumns})
              VALUES ($id, $day, $status, $reason, $stale,
-                     $initial, $previous, $working, $confirmed, $createdAt, $updatedAt);
+                     $initial, $previous, $working, $confirmed, $createdAt, $updatedAt, $confirmedAt);
              """,
             cancellationToken,
             ("$id", reflection.Id.ToString()),
@@ -87,7 +114,8 @@ public sealed class SqliteReflectionRepository : IReflectionRepository
             ("$working", SqliteValues.GuidOrNull(reflection.WorkingVersionId?.Value)),
             ("$confirmed", SqliteValues.GuidOrNull(reflection.ConfirmedVersionId?.Value)),
             ("$createdAt", SqliteValues.Instant(reflection.CreatedAtUtc)),
-            ("$updatedAt", SqliteValues.Instant(reflection.UpdatedAtUtc))).ConfigureAwait(false);
+            ("$updatedAt", SqliteValues.Instant(reflection.UpdatedAtUtc)),
+            ("$confirmedAt", SqliteValues.InstantOrNull(reflection.ConfirmedAtUtc))).ConfigureAwait(false);
 
     public async Task UpdateAsync(Reflection reflection, CancellationToken cancellationToken) =>
         await _accessor.ExecuteAsync(
@@ -100,7 +128,8 @@ public sealed class SqliteReflectionRepository : IReflectionRepository
                    previous_version_id = $previous,
                    working_version_id = $working,
                    confirmed_version_id = $confirmed,
-                   updated_at_utc = $updatedAt
+                   updated_at_utc = $updatedAt,
+                   confirmed_at_utc = $confirmedAt
              WHERE id = $id;
             """,
             cancellationToken,
@@ -112,7 +141,8 @@ public sealed class SqliteReflectionRepository : IReflectionRepository
             ("$previous", SqliteValues.GuidOrNull(reflection.PreviousVersionId?.Value)),
             ("$working", SqliteValues.GuidOrNull(reflection.WorkingVersionId?.Value)),
             ("$confirmed", SqliteValues.GuidOrNull(reflection.ConfirmedVersionId?.Value)),
-            ("$updatedAt", SqliteValues.Instant(reflection.UpdatedAtUtc))).ConfigureAwait(false);
+            ("$updatedAt", SqliteValues.Instant(reflection.UpdatedAtUtc)),
+            ("$confirmedAt", SqliteValues.InstantOrNull(reflection.ConfirmedAtUtc))).ConfigureAwait(false);
 
     /// <summary>
     /// Loads a version together with its source map and its second-stage findings.
@@ -340,7 +370,8 @@ public sealed class SqliteReflectionRepository : IReflectionRepository
             reader.IsDBNull(7) ? null : new ReflectionVersionId(SqliteIds.Parse(reader.GetString(7))),
             reader.IsDBNull(8) ? null : new ReflectionVersionId(SqliteIds.Parse(reader.GetString(8))),
             SqliteValues.ReadRequiredInstant(reader, 9),
-            SqliteValues.ReadRequiredInstant(reader, 10));
+            SqliteValues.ReadRequiredInstant(reader, 10),
+            SqliteValues.ReadInstant(reader, 11));
 
     private static ReflectionVersion MapVersion(SqliteDataReader reader) =>
         ReflectionVersion.Rehydrate(

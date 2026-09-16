@@ -40,6 +40,7 @@ public static class InputEndpointRouteBuilderExtensions
         inputs.MapPost("/text", CaptureTextAsync);
         inputs.MapGet(string.Empty, ListAsync);
         inputs.MapGet("/{id}", GetAsync);
+        inputs.MapGet("/{id}/audio", GetAudioAsync);
         inputs.MapPatch("/{id}", ReviseTranscriptAsync);
         inputs.MapDelete("/{id}/audio", DeleteAudioAsync);
         inputs.MapDelete("/{id}", DeleteAsync);
@@ -181,6 +182,64 @@ public static class InputEndpointRouteBuilderExtensions
         catch (DomainException exception)
         {
             return MapDomainFailure(exception);
+        }
+    }
+
+    /// <summary>
+    /// Streams the stored recording back (docs/开发指导.md §15.2 step 6, decision A.1).
+    /// <para>
+    /// Added in phase five. A.1 keeps audio for thirty days precisely so a transcript can be re-checked against
+    /// it, and §15.2's restore verification asks for the restored instance's audio to be playable — neither is
+    /// possible if the blob is reachable only from the volume on the host. Range requests are enabled because
+    /// playing audio means seeking in it.
+    /// </para>
+    /// </summary>
+    private static async Task<IResult> GetAudioAsync(
+        string id,
+        GetInputUseCase getInput,
+        IAudioStore audio,
+        CancellationToken cancellationToken)
+    {
+        if (!Guid.TryParse(id, out var parsed))
+        {
+            return NotFoundInput();
+        }
+
+        InputEntry entry;
+        try
+        {
+            entry = (await getInput
+                .ExecuteAsync(new InputEntryId(parsed), cancellationToken)
+                .ConfigureAwait(false)).Entry;
+        }
+        catch (DomainException exception)
+        {
+            return MapDomainFailure(exception);
+        }
+
+        if (entry.AudioPath is null)
+        {
+            // Deleted by the retention sweep or by the user: the entry is still there, the recording is not.
+            return Results.Json(
+                new ApiError("input.audio.deleted", "The audio for this entry is no longer stored."),
+                statusCode: StatusCodes.Status404NotFound);
+        }
+
+        try
+        {
+            var stream = await audio.OpenReadAsync(entry.AudioPath, cancellationToken).ConfigureAwait(false);
+
+            // Ownership of the stream passes to the response, which disposes it once the body is written.
+            return Results.Stream(
+                stream,
+                contentType: entry.AudioContentType ?? "application/octet-stream",
+                enableRangeProcessing: true);
+        }
+        catch (FileNotFoundException)
+        {
+            return Results.Json(
+                new ApiError("input.audio.missing", "The stored audio file is gone."),
+                statusCode: StatusCodes.Status404NotFound);
         }
     }
 
