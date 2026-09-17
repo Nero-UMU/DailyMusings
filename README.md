@@ -26,7 +26,7 @@
 - `DailyMusings.Client.Core` / `DailyMusings.Client` —— 与界面无关的客户端逻辑（离线队列、上传与重试、配对与令牌）+ MAUI 界面。阶段五把单一 Android 目标改为 **Android 与 Windows 双目标**：共享部分一行未动，新增的只有平台录音实现（Android `MediaRecorder` / Windows `MediaCapture`，后者输出 96 kbps 单声道 m4a）、Windows 的 WinUI 应用外壳与 `Package.appxmanifest`。真机上发现并修掉的两处状态显示问题（上传完成后仍显示「正在上传」、转写轮询无上限）也已并入。**收尾轮补齐了 §9.3 的五个页面**：今日（录音 / 文字 / 离线队列 / 当天时间线，每行可修订转写、调整主题、重试转写、播放录音，草稿状态与「打开草稿」在列表上方）、草稿（可编辑正文、三个版本槽切换、来源核验、显式接受无来源陈述、重新生成前的手工修改确认、发布与检查远程）、日历（按月看输入与草稿状态，点进某天）、主题（浏览 / 新建 / 重命名 / 合并 / 调整归属）、设置（服务器地址与风险确认、配对与解除、通知偏好、实例上的模型名）；录音回放由 `IAudioPlayer` 的平台实现（Android `MediaPlayer` / Windows `MediaPlayer`）承担，音频以 `.partial` 再改名的缓存落盘。同时把三处「结果未分类」的读取统一成 `ApiResult<T>`（送达 / 被拒绝 / 未送达），界面一律如实说明而不是抛异常。
 - `deploy/` —— Dockerfile、Compose、环境与 Secrets 示例。
 
-收尾轮之后的真实状态：§9.3 的五个页面都有了，客户端也能回放录音（服务端 `GET /api/inputs/{id}/audio` + 平台播放器）。仍要如实说明的边界：**Android 真机上 `adb shell input text` 无法注入中文**，所以设备上那几条文字是 ASCII 写下的（中文输入在 Windows 端验过）；小米自带输入法会把 ASCII 标点转成全角，输入 URL 前必须先切到 ASCII 输入法；**「转写失败 → 重试转写」这条按钮路径在真机上没有复现过**（需要构造一个转写失败的真实状态），只有单元测试覆盖；Windows 客户端在**打包（MSIX）与未打包（zip）两种形态**下都做过交互式验收，Android 端是 Release APK 真机验收。
+收尾轮之后的真实状态：§9.3 的五个页面都有了，客户端也能回放录音（服务端 `GET /api/inputs/{id}/audio` + 平台播放器）。Windows 端的交付形态是**免安装 zip：解压到任意目录双击即可**（附录 A.16），不做安装包。仍要如实说明的边界：**Android 真机上 `adb shell input text` 无法注入中文**，所以设备上那几条文字是 ASCII 写下的（中文输入在 Windows 端验过）；小米自带输入法会把 ASCII 标点转成全角，输入 URL 前必须先切到 ASCII 输入法；**「转写失败 → 重试转写」这条按钮路径在真机上没有复现过**（需要构造一个转写失败的真实状态），只有单元测试覆盖；Windows 与 Android 两端的交互式验收都做过，端到端跑的是最终产物。
 
 阶段五由验收脚本、真机验收与 Windows 客户端验收发现并修掉的问题（判定依据写进了 [`tools/acceptance/README.md`](tools/acceptance/README.md)）：
 - **客户端在服务器不可达时直接崩溃**（真机发现）：今日页出现时的读取路径把 `HttpRequestException` 抛进了 `async void OnAppearing`，进程当场死掉——而「服务器连不上也能继续记录」正是 §9.2 的前提。修法分两层：读取路径改为返回带分类的结果（`InputListResult`：未送达 / 被拒绝 / 成功，与上传路径共用同一套错误码），界面据此说「连不上服务器，暂时看不到服务器上的内容；本机待上传的内容仍在下面」，而不是假装「今天还没有上传任何内容」；同时所有 `async void` 处理器都有顶层兜底，任何异常都变成一句提示而不是一次崩溃。此前该读取路径只存在于 MAUI 工程内部（`ICaptureApiClient` 没有这个成员），因此既有测试根本碰不到它——修复把它移进 `Client.Core` 并补了测试。
@@ -38,10 +38,10 @@
 - **备份裁剪按文件系统时间排序，同秒并列时可能删掉最新的那份**：`PruneAsync` 用创建时间倒序，而同秒写入的多份归档时间相同，排序结果不稳定。改为按写入器自己发出去的名字（时间戳 + 后缀）排序。
 - **备份快照删掉设备令牌后，文件里仍留着该哈希的字节**：`DELETE` 只把行标为空闲页，字节还在，`grep` 备份包仍能找到设备令牌的摘要。摘要本身不能通过认证（接受它的行已不存在），但「备份不含设备令牌」这条承诺必须经得起**翻文件**式的检查，因此在剥离之后再做一次 `VACUUM` 重建快照文件。
 
-收尾轮由补断言与「装上安装包」发现的三个问题：
+收尾轮由补断言与「把交付产物真的跑起来」发现的三个问题：
 
 - **被中断的转写任务在重启后跑不完，输入从此拿不到转写**（补「重启后被中断的任务会被重排」这条断言时立刻暴露）：启动恢复确实把遗留 `Running` 的任务重排了，但第二次尝试被领域规则拒绝（`input.transcription.bad_state`），因为输入条目还停在 `in_progress`，而 `BeginTranscription` 只接受 `pending` / `failed`。结果是任务最终失败、条目永远停在「转写中」，用户点「重试转写」也救不回来——而 §14 写的是「任务必须持久化，服务重启后可恢复」，§9.2 的前提是录下来的东西不会丢。修法是在进入转写前把被中断遗留的 `in_progress` 复位（复用领域已有的 `RetryTranscription` 语义，它本就接受「卡住的转写」），判定依据写进了 [`docs/开发指导.md`](docs/开发指导.md) 附录 A.15：**重跑是否安全**决定中断后怎么恢复——转写重跑安全（音频还在、目标唯一），发布重跑不安全（请求可能已经进了对方网络，重排后按计划跳过，交给「检查远程」）。
-- **MSIX 安装包根本装不上：包里的清单指向不存在的图片**（第一次真的去装这个包时发现）：`Add-AppxPackage` 以 `0x80070003`「找不到初始屏幕图像 [SplashScreen.png]」拒绝注册。原因是手写的 `Package.appxmanifest` 用了老式模板的 `Assets\Square150x150Logo.png` 这类路径，而 MAUI 的 `GeneratePackageAppxManifest` 只替换 `$placeholder$.png` 这个记号——包实际生成的是 `appiconStoreLogo.png` / `splashSplashScreen.png` 这样一组文件，于是清单指向的文件在包里一个都没有。先前的交付记录只做到「能构建、能签名、签名能在包里找到」，从没装过，所以这个缺陷一直没露头。改成 `$placeholder$.png` 后清单引用的每个文件都在包里。
+- **MSIX 安装包根本装不上：包里的清单指向不存在的图片**（第一次真的去装这个包时发现）：`Add-AppxPackage` 以 `0x80070003`「找不到初始屏幕图像 [SplashScreen.png]」拒绝注册。原因是手写的 `Package.appxmanifest` 用了老式模板的 `Assets\Square150x150Logo.png` 这类路径，而 MAUI 的 `GeneratePackageAppxManifest` 只替换 `$placeholder$.png` 这个记号——包实际生成的是 `appiconStoreLogo.png` / `splashSplashScreen.png` 这样一组文件，于是清单指向的文件在包里一个都没有。先前的交付记录只做到「能构建、能签名、签名能在包里找到」，从没装过，所以这个缺陷一直没露头。改成 `$placeholder$.png` 后包能正常安装，但它也把**交付形态**这件事摊开了：自签名 MSIX 要求每台机器先用管理员权限把证书导入本机存储，对一个自托管工具不划算——于是定案改为**只交付免安装 zip、解压即用**（附录 A.16）；MSIX 的构建路径留在仓库里，但不再作为交付物、也不随版本复验。
 - **配对成功后设置页仍提示「配置服务器并配对后可以看到模型名」**（在打包版上配对时看到）：通知偏好与模型名都需要令牌才能读，而配对成功与解除配对只刷新了其中一半，于是刚配对好的设备被页面劝去再配对一次。改为两条读取合成一个 `RefreshInstanceInfoAsync`，地址保存 / 配对 / 解除配对三个改变连接状态的入口都调用它。
 
 已知的实现取舍：
@@ -70,9 +70,9 @@
 - **收尾轮（2026-09-17）**：补齐 §9.3 五个页面与 §8.1 管理页配置界面之后，做了一次完整交付验证。
   - 全量自动化测试：**441 项通过**（Domain 208、Application 21、Client 75、Infrastructure 99、Api.Integration 38），构建 0 警告。
   - 把最终源码整棵复制到测试主机、用仓库自己的 `deploy/Dockerfile` 重建镜像，重跑整套验收：**89/89 通过**，§15.2 八步恢复验证 **21/21 通过**（两次都 `exit=0`；证据在 `tools/acceptance/README.md`）。
-  - 三个产物按最终源码重建、MSIX 用自签名证书真正签名（`signtool verify /pa` 通过、包内存在 `AppxSignature.p7x`），校验值见 [`docs/发布校验值.md`](docs/发布校验值.md)。
-  - **MSIX 首次真的装上并跑完一轮**：装好后从开始菜单启动，进程跑在 `C:\Program Files\WindowsApps\...` 的包标识下；五个页面都在；设置页填地址 → 明文风险确认 → 测试连接 → 配对（服务端记录真实平台）→ 立刻读到通知偏好与实例上的模型名；今日页列出服务端 9 条输入，**用 PC 麦克风录了 14 秒**并上传转写成功，列表变成 10 条。安装目录里的 `DailyMusings.Client.dll` 与包内同名文件逐字节一致，确保「跑的就是给出校验值的那份产物」。
-  - 未打包（zip）形态的 Windows 客户端此前已验过；Android 端仍是 Release APK 真机验收。
+  - 两个产物（Android APK 与 Windows 免安装 zip）按最终源码重建，校验值见 [`docs/发布校验值.md`](docs/发布校验值.md)。
+  - **Windows 端确定交付形态为免安装 zip**（附录 A.16）：解压到任意目录双击即可，没有安装步骤、不需要证书、不需要管理员权限。为此曾把 MSIX 这条路走完一遍——签名、装机、跑通——也因此发现清单引用了包里不存在的图片（见下面收尾轮的缺陷列表）；走完之后的结论是这条发行链对自托管工具不划算，于是 MSIX 退为「仓库里保留构建路径、不再作为交付物」。**免安装形态**随后在全新空目录里复验：五个页面都在、已配对状态跨进程保留、今日页列出 10 条输入、**录 5 秒并上传转写成功（列表变 11 条）**。
+  - Android 端是 Release APK 真机验收，同样跑的是最终产物。
   - 面向使用者的 [`docs/使用手册.md`](docs/使用手册.md) 在本轮补齐，并与实现逐条核对（配对码在状态页签发、内容与时间在发布页、运维页只提供「立即清理一次」等）。
 
 
@@ -132,18 +132,15 @@ dotnet build src/DailyMusings.Client -f net10.0-android -c Release -t:SignAndroi
 需要 `maui-windows` 工作负载：
 
 ```powershell
-# 免安装包（自包含，解压即用）
+# 免安装包（自包含，解压即用）—— 这就是 Windows 的交付形态（A.16）
 dotnet publish src\DailyMusings.Client -f net10.0-windows10.0.19041.0 -c Release `
   -p:WindowsPackageType=None -p:SelfContained=true -p:UseMonoRuntime=false `
   -p:WindowsAppSDKSelfContained=true -p:RuntimeIdentifier=win-x64 -o artifacts\windows
-
-# MSIX 安装包（用自签名证书签名；证书指纹与导入方式见 docs/发布校验值.md）
-dotnet publish src\DailyMusings.Client -f net10.0-windows10.0.19041.0 -c Release `
-  -p:WindowsPackageType=MSIX -p:GenerateAppxPackageOnBuild=true `
-  -p:PackageCertificateThumbprint=<指纹>
 ```
 
 `-p:UseMonoRuntime=false` 不能省：`SelfContained=true` 会沿 MAUI 的默认值去还原并不存在的 `Microsoft.NETCore.App.Runtime.Mono.win-x64`，还原会直接失败。1.0.0 的产物大小与 SHA-256 见 [`docs/发布校验值.md`](docs/发布校验值.md)。
+
+MSIX 的构建路径仍然可用（`Platforms/Windows/Package.appxmanifest` 与签名参数都在，见 [`docs/发布校验值.md`](docs/发布校验值.md) 的留档一节），但按 A.16 它**不是交付物、也不随版本复验**：自签名 MSIX 要求每台机器先用管理员权限把证书导入本机存储，对自托管的个人工具不划算。
 
 ## Docker Compose 部署
 
@@ -188,7 +185,7 @@ docs/       开发指导.md（唯一事实源，含附录 A 的设计定案记�
 
 [`docs/开发指导.md`](docs/开发指导.md) —— 产品约束、领域模型、时间与生成规则、API 边界、测试策略与完成定义。它是本项目的唯一事实源；任何超出其范围的新需求都必须先改这份文档。
 
-[`docs/发布校验值.md`](docs/发布校验值.md) —— 1.0.0 的 Android APK / Windows MSIX / Windows 免安装包的 SHA-256、复现构建命令与安装说明。
+[`docs/发布校验值.md`](docs/发布校验值.md) —— 1.0.0 的 Android APK 与 Windows 免安装 zip 的 SHA-256、复现构建命令、Windows 形态验收记录，以及 MSIX 那条路的留档（为什么不做、当时踩了什么坑）。
 
 [`docs/使用手册.md`](docs/使用手册.md) —— 面向使用者与实例管理员的操作用手册：部署、Secrets、首次登录与配对、每个管理页各管什么、日常使用、备份与八步恢复、升级、排障对照表、数据与隐私。
 

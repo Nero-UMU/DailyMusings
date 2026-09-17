@@ -1,6 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  The packaged Windows client (docs/开发指导.md §18: 生成 Windows 安装包).
+  The packaged Windows client (docs/开发指导.md §18).
+
+  NOT A DELIVERABLE (decision A.16): Windows ships as the unpackaged, self-contained zip — unzip and run, no
+  installer, no certificate, no administrator. This manifest stays in the repository because the parameters that
+  make an MSIX build are recorded in docs/发布校验值.md and the packaging path is only one command away, but it is
+  not built, signed or re-verified per release. The reason is the cost of the self-signed signature: every machine
+  would first have to import the certificate into its *machine* stores with administrator rights, which is a poor
+  trade for a self-hosted personal tool.
 
   The shape follows the .NET MAUI template closely, because MakeAppx validates this against the appx schema and a
   manifest that merely looks right is rejected. `runFullTrust` is a *restricted* capability: it has to sit in
