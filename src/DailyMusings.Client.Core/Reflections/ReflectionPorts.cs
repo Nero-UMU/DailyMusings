@@ -1,42 +1,32 @@
+using DailyMusings.Client.Core;
 using DailyMusings.Contracts;
 
 namespace DailyMusings.Client.Core.Reflections;
 
 /// <summary>
-/// One answer from the reflection endpoints, with the failure already classified
-/// (docs/开发指导.md §6.3, §8.4, §11.1).
-/// <para>
-/// The same shape as <see cref="InputListResult"/>, for the same reason: the draft screen must be able to tell
-/// "the server has no draft for that day" apart from "the server could not be reached", and neither of those may
-/// be an exception on a screen that is coming into view.
-/// </para>
-/// </summary>
-public sealed record ReflectionResult<T>(T? Value, bool ServerReached, string? FailureCode)
-{
-    public bool Succeeded => ServerReached && FailureCode is null && Value is not null;
-
-    public static ReflectionResult<T> From(T value) => new(value, true, null);
-
-    /// <summary>The request never answered, so nothing is known.</summary>
-    public static ReflectionResult<T> Unreachable(string failureCode) => new(default, false, failureCode);
-
-    /// <summary>The server answered and refused, or answered with something unusable.</summary>
-    public static ReflectionResult<T> Refused(string failureCode) => new(default, true, failureCode);
-}
-
-/// <summary>
 /// The reflection and publishing endpoints the draft screen needs (§9.3 草稿：编辑、来源核验、版本切换和发布).
 /// <para>
 /// Deliberately the whole set in one port: every one of them acts on one day's draft and they are always used
-/// together, so splitting them would only spread the same failure classification over several files.
+/// together, so splitting them would only spread the same failure classification over several files. Every call
+/// answers with <see cref="ApiResult{T}"/>, so "no draft for that day" and "the server could not be reached" stay
+/// distinguishable without an exception escaping a screen that is coming into view.
 /// </para>
 /// </summary>
 public interface IReflectionApiClient
 {
-    Task<ReflectionResult<ReflectionDto>> GetAsync(string contentDate, CancellationToken cancellationToken);
+    Task<ApiResult<ReflectionDto>> GetAsync(string contentDate, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// The drafts in a date range, for the calendar screen. The server caps a range at 366 days and defaults to 31,
+    /// which is why a month is what the calendar asks for.
+    /// </summary>
+    Task<ApiResult<IReadOnlyList<ReflectionDto>>> ListAsync(
+        string fromInclusive,
+        string toInclusive,
+        CancellationToken cancellationToken);
 
     /// <summary>Saves the hand edits. The server keeps the original version alongside them.</summary>
-    Task<ReflectionResult<ReflectionDto>> EditAsync(
+    Task<ApiResult<ReflectionDto>> EditAsync(
         string contentDate,
         string title,
         string summary,
@@ -44,7 +34,7 @@ public interface IReflectionApiClient
         CancellationToken cancellationToken);
 
     /// <summary>Moves a version into the working slot (§6.4).</summary>
-    Task<ReflectionResult<ReflectionDto>> SwitchVersionAsync(
+    Task<ApiResult<ReflectionDto>> SwitchVersionAsync(
         string contentDate,
         string versionId,
         CancellationToken cancellationToken);
@@ -53,32 +43,32 @@ public interface IReflectionApiClient
     /// Confirms the day. <paramref name="acceptedUnsourcedClaims"/> is the user's explicit acceptance of the
     /// sentences the source check could not trace — the server refuses without it (§8.4).
     /// </summary>
-    Task<ReflectionResult<ReflectionDto>> ConfirmAsync(
+    Task<ApiResult<ReflectionDto>> ConfirmAsync(
         string contentDate,
         bool acceptedUnsourcedClaims,
         CancellationToken cancellationToken);
 
-    Task<ReflectionResult<ReflectionGenerationResponse>> GenerateAsync(
+    Task<ApiResult<ReflectionGenerationResponse>> GenerateAsync(
         string contentDate,
         bool ignoreTranscriptionFailures,
         bool allowOverwriteOfManualEdits,
         CancellationToken cancellationToken);
 
-    Task<ReflectionResult<IReadOnlyList<PublishTargetDto>>> ListTargetsAsync(CancellationToken cancellationToken);
+    Task<ApiResult<IReadOnlyList<PublishTargetDto>>> ListTargetsAsync(CancellationToken cancellationToken);
 
-    Task<ReflectionResult<PublishResponse>> PublishAsync(
+    Task<ApiResult<PublishResponse>> PublishAsync(
         string contentDate,
         string targetId,
         string visibility,
         bool replaceExistingFile,
         CancellationToken cancellationToken);
 
-    Task<ReflectionResult<IReadOnlyList<PublicationDto>>> ListPublicationsAsync(
+    Task<ApiResult<IReadOnlyList<PublicationDto>>> ListPublicationsAsync(
         string contentDate,
         CancellationToken cancellationToken);
 
     /// <summary>Reads the remote back and reports whether it still matches the published version (§11.1).</summary>
-    Task<ReflectionResult<RemoteCheckResponse>> CheckRemoteAsync(
+    Task<ApiResult<RemoteCheckResponse>> CheckRemoteAsync(
         string publicationId,
         CancellationToken cancellationToken);
 }

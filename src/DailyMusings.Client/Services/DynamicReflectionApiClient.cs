@@ -1,3 +1,4 @@
+using DailyMusings.Client.Core;
 using DailyMusings.Client.Core.Http;
 using DailyMusings.Client.Core.Reflections;
 using DailyMusings.Contracts;
@@ -21,10 +22,16 @@ public sealed class DynamicReflectionApiClient : IReflectionApiClient
         _tokens = tokens;
     }
 
-    public Task<ReflectionResult<ReflectionDto>> GetAsync(string contentDate, CancellationToken cancellationToken) =>
+    public Task<ApiResult<ReflectionDto>> GetAsync(string contentDate, CancellationToken cancellationToken) =>
         WithClientAsync(client => client.GetAsync(contentDate, cancellationToken));
 
-    public Task<ReflectionResult<ReflectionDto>> EditAsync(
+    public Task<ApiResult<IReadOnlyList<ReflectionDto>>> ListAsync(
+        string fromInclusive,
+        string toInclusive,
+        CancellationToken cancellationToken) =>
+        WithClientAsync(client => client.ListAsync(fromInclusive, toInclusive, cancellationToken));
+
+    public Task<ApiResult<ReflectionDto>> EditAsync(
         string contentDate,
         string title,
         string summary,
@@ -32,19 +39,19 @@ public sealed class DynamicReflectionApiClient : IReflectionApiClient
         CancellationToken cancellationToken) =>
         WithClientAsync(client => client.EditAsync(contentDate, title, summary, body, cancellationToken));
 
-    public Task<ReflectionResult<ReflectionDto>> SwitchVersionAsync(
+    public Task<ApiResult<ReflectionDto>> SwitchVersionAsync(
         string contentDate,
         string versionId,
         CancellationToken cancellationToken) =>
         WithClientAsync(client => client.SwitchVersionAsync(contentDate, versionId, cancellationToken));
 
-    public Task<ReflectionResult<ReflectionDto>> ConfirmAsync(
+    public Task<ApiResult<ReflectionDto>> ConfirmAsync(
         string contentDate,
         bool acceptedUnsourcedClaims,
         CancellationToken cancellationToken) =>
         WithClientAsync(client => client.ConfirmAsync(contentDate, acceptedUnsourcedClaims, cancellationToken));
 
-    public Task<ReflectionResult<ReflectionGenerationResponse>> GenerateAsync(
+    public Task<ApiResult<ReflectionGenerationResponse>> GenerateAsync(
         string contentDate,
         bool ignoreTranscriptionFailures,
         bool allowOverwriteOfManualEdits,
@@ -55,10 +62,10 @@ public sealed class DynamicReflectionApiClient : IReflectionApiClient
             allowOverwriteOfManualEdits,
             cancellationToken));
 
-    public Task<ReflectionResult<IReadOnlyList<PublishTargetDto>>> ListTargetsAsync(CancellationToken cancellationToken) =>
+    public Task<ApiResult<IReadOnlyList<PublishTargetDto>>> ListTargetsAsync(CancellationToken cancellationToken) =>
         WithClientAsync(client => client.ListTargetsAsync(cancellationToken));
 
-    public Task<ReflectionResult<PublishResponse>> PublishAsync(
+    public Task<ApiResult<PublishResponse>> PublishAsync(
         string contentDate,
         string targetId,
         string visibility,
@@ -66,26 +73,26 @@ public sealed class DynamicReflectionApiClient : IReflectionApiClient
         CancellationToken cancellationToken) =>
         WithClientAsync(client => client.PublishAsync(contentDate, targetId, visibility, replaceExistingFile, cancellationToken));
 
-    public Task<ReflectionResult<IReadOnlyList<PublicationDto>>> ListPublicationsAsync(
+    public Task<ApiResult<IReadOnlyList<PublicationDto>>> ListPublicationsAsync(
         string contentDate,
         CancellationToken cancellationToken) =>
         WithClientAsync(client => client.ListPublicationsAsync(contentDate, cancellationToken));
 
-    public Task<ReflectionResult<RemoteCheckResponse>> CheckRemoteAsync(
+    public Task<ApiResult<RemoteCheckResponse>> CheckRemoteAsync(
         string publicationId,
         CancellationToken cancellationToken) =>
         WithClientAsync(client => client.CheckRemoteAsync(publicationId, cancellationToken));
 
-    private async Task<ReflectionResult<T>> WithClientAsync<T>(Func<IReflectionApiClient, Task<ReflectionResult<T>>> work)
+    private async Task<ApiResult<T>> WithClientAsync<T>(Func<IReflectionApiClient, Task<ApiResult<T>>> work)
     {
         if (_settings.ResolveBaseUri() is not { } baseUri)
         {
-            return ReflectionResult<T>.Unreachable("client.not_configured");
+            return ApiResult<T>.Unreachable("client.not_configured");
         }
 
         if (!await _tokens.HasTokenAsync(CancellationToken.None).ConfigureAwait(false))
         {
-            return ReflectionResult<T>.Unreachable("client.not_paired");
+            return ApiResult<T>.Unreachable("client.not_paired");
         }
 
         using var http = new HttpClient { BaseAddress = baseUri, Timeout = Timeout };

@@ -252,7 +252,7 @@ public class HttpCaptureApiClientTests
 
         Assert.IsFalse(result.ServerReached);
         Assert.AreEqual("client.network_unreachable", result.FailureCode);
-        Assert.AreEqual(0, result.Items.Count);
+        Assert.IsNull(result.Value);
     }
 
     [TestMethod]
@@ -273,8 +273,8 @@ public class HttpCaptureApiClientTests
 
         Assert.IsTrue(result.ServerReached);
         Assert.IsNull(result.FailureCode);
-        Assert.AreEqual(1, result.Items.Count);
-        Assert.AreEqual("一句话。", result.Items[0].Transcript);
+        Assert.AreEqual(1, result.Value!.Count);
+        Assert.AreEqual("一句话。", result.Value![0].Transcript);
 
         var request = handler.Requests.Single();
         Assert.AreEqual("/api/inputs", request.RequestUri!.AbsolutePath);

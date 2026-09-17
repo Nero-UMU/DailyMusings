@@ -439,20 +439,22 @@ public partial class TodayPage : ContentPage
             return;
         }
 
-        foreach (var item in result.Items)
+        var items = result.Value ?? [];
+
+        foreach (var item in items)
         {
             _today.Add(new TodayRow(DescribeTitle(item), DescribeStatus(item)));
         }
 
         TodayStatus.Text = result.FailureCode is null
-            ? result.Items.Count == 0
+            ? items.Count == 0
                 ? "今天还没有上传任何内容。"
-                : $"共 {result.Items.Count} 条。"
+                : $"共 {items.Count} 条。"
             : $"读取今天的内容失败（{result.FailureCode}）。";
 
         // A freshly uploaded recording is transcribed asynchronously, so the screen has to look again — otherwise it
         // says "正在转写…" until the user thinks to press sync, which is what testing on a device showed.
-        UpdateTranscriptionPolling(result.Items.Any(IsAwaitingTranscription));
+        UpdateTranscriptionPolling(items.Any(IsAwaitingTranscription));
     }
 
     private static bool IsAwaitingTranscription(InputDto item) =>

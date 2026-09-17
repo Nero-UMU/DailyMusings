@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage
+    x:Class="DailyMusings.Client.Pages.CalendarPage"
+    xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+    xmlns:pages="clr-namespace:DailyMusings.Client.Pages"
+    Title="日历">
+
+    <ScrollView>
+        <VerticalStackLayout Padding="16" Spacing="14">
+
+            <!-- §10.3: shown for as long as an insecure connection is configured, on every screen. -->
+            <Border
+                x:Name="InsecureBanner"
+                IsVisible="False"
+                Stroke="#B42318"
+                StrokeThickness="1"
+                BackgroundColor="#FFEBE9"
+                Padding="12">
+                <Border.StrokeShape>
+                    <RoundRectangle CornerRadius="8" />
+                </Border.StrokeShape>
+                <Label
+                    TextColor="#7A271A"
+                    FontSize="13"
+                    Text="当前连接未加密（HTTP）。密码、设备令牌、录音和文章都可能被同一网络中的他人截获。请优先使用 HTTPS、局域网或 VPN。此提示只说明风险，不代表连接已经安全。" />
+            </Border>
+
+            <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
+                <Button Text="上个月" Padding="12,4" Clicked="OnPreviousMonthClicked" />
+                <Button Grid.Column="1" Text="回到本月" Padding="12,4" Clicked="OnTodayClicked" />
+                <Button Grid.Column="2" Text="下个月" Padding="12,4" Clicked="OnNextMonthClicked" />
+            </Grid>
+
+            <Label x:Name="MonthStatus" FontAttributes="Bold" />
+            <Label
+                x:Name="ActionStatus"
+                FontSize="13"
+                TextColor="#656D76" />
+
+            <CollectionView x:Name="DayList" SelectionMode="None">
+                <CollectionView.ItemTemplate>
+                    <DataTemplate x:DataType="pages:CalendarDayRow">
+                        <Border Padding="10" Margin="0,4" Stroke="#E1E4E8" StrokeThickness="1">
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="8" />
+                            </Border.StrokeShape>
+                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                <VerticalStackLayout Spacing="2">
+                                    <Label Text="{Binding Date}" FontAttributes="Bold" />
+                                    <Label Text="{Binding Inputs}" FontSize="12" TextColor="#656D76" />
+                                    <Label Text="{Binding Draft}" FontSize="12" TextColor="#656D76" />
+                                </VerticalStackLayout>
+                                <Button
+                                    Grid.Column="1"
+                                    Text="打开草稿"
+                                    IsVisible="{Binding CanOpen}"
+                                    Padding="10,2"
+                                    FontSize="12"
+                                    Clicked="OnOpenDayClicked"
+                                    CommandParameter="{Binding ContentDate}" />
+                            </Grid>
+                        </Border>
+                    </DataTemplate>
+                </CollectionView.ItemTemplate>
+            </CollectionView>
+
+        </VerticalStackLayout>
+    </ScrollView>
+
+</ContentPage>

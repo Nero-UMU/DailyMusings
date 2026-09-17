@@ -1,3 +1,4 @@
+using DailyMusings.Client.Core;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -27,10 +28,21 @@ public sealed class HttpReflectionApiClient : IReflectionApiClient
         _tokenProvider = tokenProvider;
     }
 
-    public Task<ReflectionResult<ReflectionDto>> GetAsync(string contentDate, CancellationToken cancellationToken) =>
+    public Task<ApiResult<ReflectionDto>> GetAsync(string contentDate, CancellationToken cancellationToken) =>
         SendAsync<ReflectionDto>(HttpMethod.Get, $"/api/reflections/{contentDate}", null, cancellationToken);
 
-    public Task<ReflectionResult<ReflectionDto>> EditAsync(
+    public Task<ApiResult<IReadOnlyList<ReflectionDto>>> ListAsync(
+        string fromInclusive,
+        string toInclusive,
+        CancellationToken cancellationToken) =>
+        SendListAsync<ReflectionListResponse, ReflectionDto>(
+            HttpMethod.Get,
+            $"/api/reflections?from={Uri.EscapeDataString(fromInclusive)}&to={Uri.EscapeDataString(toInclusive)}",
+            null,
+            response => response.Items,
+            cancellationToken);
+
+    public Task<ApiResult<ReflectionDto>> EditAsync(
         string contentDate,
         string title,
         string summary,
@@ -42,7 +54,7 @@ public sealed class HttpReflectionApiClient : IReflectionApiClient
             new EditReflectionRequest(title, summary, body),
             cancellationToken);
 
-    public Task<ReflectionResult<ReflectionDto>> SwitchVersionAsync(
+    public Task<ApiResult<ReflectionDto>> SwitchVersionAsync(
         string contentDate,
         string versionId,
         CancellationToken cancellationToken) =>
@@ -52,7 +64,7 @@ public sealed class HttpReflectionApiClient : IReflectionApiClient
             new SwitchWorkingVersionRequest(versionId),
             cancellationToken);
 
-    public Task<ReflectionResult<ReflectionDto>> ConfirmAsync(
+    public Task<ApiResult<ReflectionDto>> ConfirmAsync(
         string contentDate,
         bool acceptedUnsourcedClaims,
         CancellationToken cancellationToken) =>
@@ -62,7 +74,7 @@ public sealed class HttpReflectionApiClient : IReflectionApiClient
             new ConfirmReflectionRequest(acceptedUnsourcedClaims),
             cancellationToken);
 
-    public Task<ReflectionResult<ReflectionGenerationResponse>> GenerateAsync(
+    public Task<ApiResult<ReflectionGenerationResponse>> GenerateAsync(
         string contentDate,
         bool ignoreTranscriptionFailures,
         bool allowOverwriteOfManualEdits,
@@ -73,7 +85,7 @@ public sealed class HttpReflectionApiClient : IReflectionApiClient
             new GenerateReflectionRequest(ignoreTranscriptionFailures, allowOverwriteOfManualEdits),
             cancellationToken);
 
-    public Task<ReflectionResult<IReadOnlyList<PublishTargetDto>>> ListTargetsAsync(CancellationToken cancellationToken) =>
+    public Task<ApiResult<IReadOnlyList<PublishTargetDto>>> ListTargetsAsync(CancellationToken cancellationToken) =>
         SendListAsync<PublishTargetListResponse, PublishTargetDto>(
             HttpMethod.Get,
             "/api/publish-targets",
@@ -81,7 +93,7 @@ public sealed class HttpReflectionApiClient : IReflectionApiClient
             response => response.Items,
             cancellationToken);
 
-    public Task<ReflectionResult<PublishResponse>> PublishAsync(
+    public Task<ApiResult<PublishResponse>> PublishAsync(
         string contentDate,
         string targetId,
         string visibility,
@@ -93,7 +105,7 @@ public sealed class HttpReflectionApiClient : IReflectionApiClient
             new PublishRequest(visibility, replaceExistingFile),
             cancellationToken);
 
-    public Task<ReflectionResult<IReadOnlyList<PublicationDto>>> ListPublicationsAsync(
+    public Task<ApiResult<IReadOnlyList<PublicationDto>>> ListPublicationsAsync(
         string contentDate,
         CancellationToken cancellationToken) =>
         SendListAsync<PublicationListResponse, PublicationDto>(
@@ -103,7 +115,7 @@ public sealed class HttpReflectionApiClient : IReflectionApiClient
             response => response.Items,
             cancellationToken);
 
-    public Task<ReflectionResult<RemoteCheckResponse>> CheckRemoteAsync(
+    public Task<ApiResult<RemoteCheckResponse>> CheckRemoteAsync(
         string publicationId,
         CancellationToken cancellationToken) =>
         SendAsync<RemoteCheckResponse>(
@@ -116,7 +128,7 @@ public sealed class HttpReflectionApiClient : IReflectionApiClient
     /// A list response, unwrapped into the items the screen actually wants. Kept next to
     /// <see cref="SendAsync{T}"/> so the classification is written once.
     /// </summary>
-    private async Task<ReflectionResult<IReadOnlyList<TItem>>> SendListAsync<TResponse, TItem>(
+    private async Task<ApiResult<IReadOnlyList<TItem>>> SendListAsync<TResponse, TItem>(
         HttpMethod method,
         string path,
         object? body,
@@ -128,19 +140,19 @@ public sealed class HttpReflectionApiClient : IReflectionApiClient
 
         if (result.Succeeded)
         {
-            return ReflectionResult<IReadOnlyList<TItem>>.From(select(result.Value!));
+            return ApiResult<IReadOnlyList<TItem>>.From(select(result.Value!));
         }
 
         return result.ServerReached
-            ? ReflectionResult<IReadOnlyList<TItem>>.Refused(result.FailureCode ?? "client.empty_response")
-            : ReflectionResult<IReadOnlyList<TItem>>.Unreachable(result.FailureCode ?? "client.request_failed");
+            ? ApiResult<IReadOnlyList<TItem>>.Refused(result.FailureCode ?? "client.empty_response")
+            : ApiResult<IReadOnlyList<TItem>>.Unreachable(result.FailureCode ?? "client.request_failed");
     }
 
     /// <summary>
     /// One request, classified. Nothing here throws for a failure the user could act on, and nothing logs the draft:
     /// the body of a day's reflection is the user's private writing (§16).
     /// </summary>
-    private async Task<ReflectionResult<T>> SendAsync<T>(
+    private async Task<ApiResult<T>> SendAsync<T>(
         HttpMethod method,
         string path,
         object? body,
@@ -155,12 +167,12 @@ public sealed class HttpReflectionApiClient : IReflectionApiClient
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            return ReflectionResult<T>.Unreachable("client.token_unavailable");
+            return ApiResult<T>.Unreachable("client.token_unavailable");
         }
 
         if (string.IsNullOrWhiteSpace(token))
         {
-            return ReflectionResult<T>.Unreachable("client.not_paired");
+            return ApiResult<T>.Unreachable("client.not_paired");
         }
 
         using var request = new HttpRequestMessage(method, path);
@@ -182,24 +194,24 @@ public sealed class HttpReflectionApiClient : IReflectionApiClient
         }
         catch (HttpRequestException)
         {
-            return ReflectionResult<T>.Unreachable("client.network_unreachable");
+            return ApiResult<T>.Unreachable("client.network_unreachable");
         }
         catch (TaskCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
-            return ReflectionResult<T>.Unreachable("client.timeout");
+            return ApiResult<T>.Unreachable("client.timeout");
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
             // Anything else the HTTP stack surfaces is still "the draft is not available right now", never a reason to
             // take the screen down — the same lesson the capture loop learned from a blackholed network.
-            return ReflectionResult<T>.Unreachable("client.request_failed");
+            return ApiResult<T>.Unreachable("client.request_failed");
         }
 
         using (response)
         {
             if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
             {
-                return ReflectionResult<T>.Refused("auth.device_token_rejected");
+                return ApiResult<T>.Refused("auth.device_token_rejected");
             }
 
             if (!response.IsSuccessStatusCode)
@@ -207,7 +219,7 @@ public sealed class HttpReflectionApiClient : IReflectionApiClient
                 // The server's own code, verbatim: several of these are instructions to the user rather than errors
                 // (reflection.confirm.unsourced_claims_not_acknowledged, reflection.regeneration.*,
                 // publication.*), and inventing a client-side code for them would lose that.
-                return ReflectionResult<T>.Refused(await ReadErrorCodeAsync(response, cancellationToken).ConfigureAwait(false)
+                return ApiResult<T>.Refused(await ReadErrorCodeAsync(response, cancellationToken).ConfigureAwait(false)
                     ?? $"server.rejected.{(int)response.StatusCode}");
             }
 
@@ -218,12 +230,12 @@ public sealed class HttpReflectionApiClient : IReflectionApiClient
                     .ConfigureAwait(false);
 
                 return value is null
-                    ? ReflectionResult<T>.Refused("client.empty_response")
-                    : ReflectionResult<T>.From(value);
+                    ? ApiResult<T>.Refused("client.empty_response")
+                    : ApiResult<T>.From(value);
             }
             catch (Exception exception) when (exception is JsonException or NotSupportedException)
             {
-                return ReflectionResult<T>.Refused("client.malformed_response");
+                return ApiResult<T>.Refused("client.malformed_response");
             }
         }
     }

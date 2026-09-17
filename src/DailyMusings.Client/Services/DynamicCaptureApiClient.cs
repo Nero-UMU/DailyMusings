@@ -46,11 +46,11 @@ public sealed class DynamicCaptureApiClient : ICaptureApiClient
     }
 
     /// <summary>Reads a day's entries, so the timeline reflects the server rather than a second local copy.</summary>
-    public async Task<InputListResult> GetInputsAsync(string contentDate, CancellationToken cancellationToken)
+    public async Task<ApiResult<IReadOnlyList<InputDto>>> GetInputsAsync(string? contentDate, CancellationToken cancellationToken)
     {
         if (_settings.ResolveBaseUri() is not { } baseUri)
         {
-            return InputListResult.Unreachable("client.not_configured");
+            return ApiResult<IReadOnlyList<InputDto>>.Unreachable("client.not_configured");
         }
 
         using var http = new HttpClient { BaseAddress = baseUri, Timeout = TimeSpan.FromSeconds(30) };

@@ -1,3 +1,4 @@
+using DailyMusings.Client.Core;
 using System.Collections.ObjectModel;
 using System.Globalization;
 using DailyMusings.Client.Core.Reflections;
@@ -79,7 +80,10 @@ public partial class DraftPage : ContentPage, IQueryAttributable
         VisibilityPicker.SelectedIndex = 0;
     }
 
-    /// <summary>The day this screen opens on, so the calendar screen can navigate straight to one.</summary>
+    /// <summary>The shell route of this screen, so the calendar can hand a date over (§9.3).</summary>
+    public const string TabRoute = "//draft";
+
+    /// <summary>The day this screen opens on.</summary>
     public static string RouteFor(DateOnly date) => $"//draft?date={date:yyyy-MM-dd}";
 
     protected override void OnDisappearing()

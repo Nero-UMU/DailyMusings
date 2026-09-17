@@ -2,6 +2,7 @@ using DailyMusings.Client.Core;
 using DailyMusings.Client.Core.Capture;
 using DailyMusings.Client.Core.Offline;
 using DailyMusings.Client.Core.Reflections;
+using DailyMusings.Client.Core.Topics;
 using DailyMusings.Client.Pages;
 using DailyMusings.Client.Services;
 using Microsoft.Extensions.Logging;
@@ -46,6 +47,10 @@ public static class MauiProgram
 		builder.Services.AddSingleton<DynamicReflectionApiClient>();
 		builder.Services.AddSingleton<IReflectionApiClient>(sp => sp.GetRequiredService<DynamicReflectionApiClient>());
 
+		// The topic vocabulary: browsing, renaming, merging and filing by hand (§6.2, §9.3 主题页).
+		builder.Services.AddSingleton<DynamicTopicApiClient>();
+		builder.Services.AddSingleton<ITopicApiClient>(sp => sp.GetRequiredService<DynamicTopicApiClient>());
+
 		// The recorder is the one platform-specific piece of the capture path, so it is the one registration that
 		// differs between the two clients. Everything else — the offline queue, the upload, the pages — is the same
 		// code, which is what §5's Client.Core split was for.
@@ -59,6 +64,8 @@ public static class MauiProgram
 
 		builder.Services.AddTransient<TodayPage>();
 		builder.Services.AddTransient<DraftPage>();
+		builder.Services.AddTransient<TopicsPage>();
+		builder.Services.AddTransient<CalendarPage>();
 		builder.Services.AddTransient<SettingsPage>();
 		builder.Services.AddSingleton<AppShell>();
 

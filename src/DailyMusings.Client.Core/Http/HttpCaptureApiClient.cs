@@ -104,13 +104,13 @@ public sealed class HttpCaptureApiClient : ICaptureApiClient
     /// exactly that rather than as an empty day.
     /// </para>
     /// </summary>
-    public async Task<InputListResult> GetInputsAsync(string contentDate, CancellationToken cancellationToken)
+    public async Task<ApiResult<IReadOnlyList<InputDto>>> GetInputsAsync(string? contentDate, CancellationToken cancellationToken)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(contentDate);
+        var path = string.IsNullOrWhiteSpace(contentDate)
+            ? "/api/inputs"
+            : $"/api/inputs?date={Uri.EscapeDataString(contentDate)}";
 
-        using var request = new HttpRequestMessage(
-            HttpMethod.Get,
-            $"/api/inputs?date={Uri.EscapeDataString(contentDate)}");
+        using var request = new HttpRequestMessage(HttpMethod.Get, path);
 
         try
         {
@@ -119,7 +119,7 @@ public sealed class HttpCaptureApiClient : ICaptureApiClient
         catch (CaptureUploadException exception)
         {
             // Not paired: there is nothing to read, and the screen says so in its own words.
-            return InputListResult.Unreachable(exception.Code);
+            return ApiResult<IReadOnlyList<InputDto>>.Unreachable(exception.Code);
         }
 
         HttpResponseMessage response;
@@ -132,23 +132,23 @@ public sealed class HttpCaptureApiClient : ICaptureApiClient
         }
         catch (HttpRequestException)
         {
-            return InputListResult.Unreachable("client.network_unreachable");
+            return ApiResult<IReadOnlyList<InputDto>>.Unreachable("client.network_unreachable");
         }
         catch (TaskCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
-            return InputListResult.Unreachable("client.timeout");
+            return ApiResult<IReadOnlyList<InputDto>>.Unreachable("client.timeout");
         }
 
         using (response)
         {
             if (response.StatusCode == HttpStatusCode.Unauthorized)
             {
-                return InputListResult.Refused("auth.device_token_rejected");
+                return ApiResult<IReadOnlyList<InputDto>>.Refused("auth.device_token_rejected");
             }
 
             if (!response.IsSuccessStatusCode)
             {
-                return InputListResult.Refused($"server.rejected.{(int)response.StatusCode}");
+                return ApiResult<IReadOnlyList<InputDto>>.Refused($"server.rejected.{(int)response.StatusCode}");
             }
 
             try
@@ -157,11 +157,11 @@ public sealed class HttpCaptureApiClient : ICaptureApiClient
                     .ReadFromJsonAsync<InputListResponse>(cancellationToken)
                     .ConfigureAwait(false);
 
-                return InputListResult.FromServer(page?.Items ?? []);
+                return ApiResult<IReadOnlyList<InputDto>>.From(page?.Items ?? []);
             }
             catch (Exception exception) when (exception is JsonException or NotSupportedException)
             {
-                return InputListResult.Refused("client.malformed_response");
+                return ApiResult<IReadOnlyList<InputDto>>.Refused("client.malformed_response");
             }
         }
     }
