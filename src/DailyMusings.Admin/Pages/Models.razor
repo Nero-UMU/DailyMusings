@@ -108,44 +108,70 @@ else
         }
         else
         {
+            @* The fields below are bound to the staged values, not to the row that was loaded: a preset fills the
+               staged values, and a form that displayed the stored row would look as if the click did nothing. *@
+            <p class="hint">常用邮箱：点一下就把主机、端口与 TLS 填好，用户名与密码按下面的提示填。</p>
+
+            <div class="actions">
+                @foreach (var preset in SmtpPresets.All)
+                {
+                    <button type="button" class="btn-sm" @onclick="() => ApplySmtpPreset(preset)" disabled="@_busy">
+                        @preset.Label
+                    </button>
+                }
+            </div>
+
             <div class="form-grid">
                 <label class="checkbox">
-                    <input type="checkbox" checked="@_smtp.Enabled" @onchange="e => _smtpEnabled = (bool)e.Value!" />
+                    <input type="checkbox" checked="@_smtpEnabled" @onchange="e => _smtpEnabled = (bool)e.Value!" />
                     启用发信
                 </label>
                 <label>
                     主机
-                    <input value="@_smtp.Host" @onchange="e => _smtpHost = (string?)e.Value" />
+                    <input value="@_smtpHost" @onchange="e => _smtpHost = (string?)e.Value" />
                 </label>
                 <label>
                     端口
-                    <input type="number" value="@_smtp.Port" @onchange="e => _smtpPort = (string?)e.Value" />
+                    <input type="number" value="@_smtpPort" @onchange="e => _smtpPort = (string?)e.Value" />
                 </label>
                 <label class="checkbox">
-                    <input type="checkbox" checked="@_smtp.UseStartTls" @onchange="e => _smtpStartTls = (bool)e.Value!" />
+                    <input type="checkbox" checked="@_smtpStartTls" @onchange="e => _smtpStartTls = (bool)e.Value!" />
                     使用 STARTTLS
                 </label>
                 <label>
                     用户名（可留空）
-                    <input value="@_smtp.Username" @onchange="e => _smtpUsername = (string?)e.Value" />
+                    <input value="@_smtpUsername" @onchange="e => _smtpUsername = (string?)e.Value" />
                 </label>
                 <label>
                     密码 Secret 名
-                    <input value="@_smtp.SecretName" @onchange="e => _smtpSecretName = (string?)e.Value" />
+                    <input value="@_smtpSecretName" @onchange="e => _smtpSecretName = (string?)e.Value" />
                 </label>
                 <label>
                     发件地址
-                    <input value="@_smtp.FromAddress" @onchange="e => _smtpFromAddress = (string?)e.Value" />
+                    <input value="@_smtpFromAddress" @onchange="e => _smtpFromAddress = (string?)e.Value" />
                 </label>
                 <label>
                     发件人名称
-                    <input value="@_smtp.FromName" @onchange="e => _smtpFromName = (string?)e.Value" />
+                    <input value="@_smtpFromName" @onchange="e => _smtpFromName = (string?)e.Value" />
                 </label>
                 <label>
                     超时（秒）
-                    <input type="number" value="@_smtp.TimeoutSeconds" @onchange="e => _smtpTimeout = (string?)e.Value" />
+                    <input type="number" value="@_smtpTimeout" @onchange="e => _smtpTimeout = (string?)e.Value" />
                 </label>
             </div>
+
+            @if (_smtpPresetNote is not null)
+            {
+                <p class="notice info">@_smtpPresetNote</p>
+            }
+
+            <p class="hint">
+                这里只支持 <strong>STARTTLS</strong>：先明文打招呼、再升级加密，服务商对应的端口是 <strong>587</strong>。
+                <strong>465 是隐式 TLS</strong>（连上立刻握手，别的软件写成「SSL：是，STARTTLS：否」），这个发送器连不上，
+                填了会一直等到超时并报「SMTP server could not be reached」——「测试连接」若只说 did not answer in time，
+                十有八九就是这个原因。163、126 与阿里云企业邮只提供 465，所以它们当前用不了。发信还需要勾选「启用发信」、
+                在「运维」页填好收件地址并打开至少一个通知事件。
+            </p>
 
             <div class="actions">
                 <button class="btn-primary" @onclick="SaveSmtpAsync" disabled="@_busy">保存</button>
@@ -201,6 +227,9 @@ else
     private string? _smtpFromAddress;
     private string? _smtpFromName;
     private string? _smtpTimeout;
+
+    /// <summary>What a preset filled, and the part of it only the operator can supply. Null until one is used.</summary>
+    private string? _smtpPresetNote;
 
     private string? _message;
     private string? _error;
@@ -282,6 +311,21 @@ else
 
     private void SetDimensions(string? value) => _dimensions = value;
 
+    /// <summary>
+    /// Fills the three fields that are the same for every user of a provider. It deliberately does not tick
+    /// 「启用发信」: sending mail is a decision, and a preset is only a convenience.
+    /// </summary>
+    private void ApplySmtpPreset(SmtpPreset preset)
+    {
+        ArgumentNullException.ThrowIfNull(preset);
+
+        _smtpHost = preset.Host;
+        _smtpPort = preset.Port.ToString(CultureInfo.InvariantCulture);
+        _smtpStartTls = preset.UseStartTls;
+        _smtpPresetNote = $"已填入 {preset.Label}（{preset.Host}:{preset.Port}，STARTTLS）。{preset.Note}"
+            + " 别忘了勾选「启用发信」再点保存。";
+    }
+
     private async Task SaveEndpointAsync(string service) => await RunAsync(async services =>
     {
         var timeout = int.TryParse(
@@ -338,6 +382,8 @@ else
                 CancellationToken.None);
 
         await LoadAsync();
+        // The preset note says "not saved yet"; once it is saved it would be stale advice.
+        _smtpPresetNote = null;
         _message = "已保存 SMTP 配置。密码仍然只按名字引用，值在 Secrets 目录里。";
     });
 
