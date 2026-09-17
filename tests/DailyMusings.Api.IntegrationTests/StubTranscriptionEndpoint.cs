@@ -70,6 +70,21 @@ internal sealed class StubTranscriptionEndpoint : IAsyncDisposable
                 state.LastAudioBytes = buffer.Length;
             }
 
+            if (state.ResponseDelay is { } delay)
+            {
+                // A slow endpoint: the client's own deadline is what ends the call, which is the only way to
+                // exercise the timeout classification without a mock of our own HTTP layer.
+                try
+                {
+                    await Task.Delay(delay, context.RequestAborted);
+                }
+                catch (OperationCanceledException)
+                {
+                    // The caller gave up (its deadline elapsed, or the process is shutting down).
+                    return;
+                }
+            }
+
             if (state.FailWithStatusCode is { } statusCode)
             {
                 context.Response.StatusCode = (int)statusCode;
@@ -135,6 +150,12 @@ internal sealed class StubTranscriptionEndpoint : IAsyncDisposable
         /// <summary>Set to make the stub fail, for exercising the retry classification.</summary>
         public HttpStatusCode? FailWithStatusCode { get; set; }
 
+        /// <summary>
+        /// Set to make the stub slow to answer. Combined with a short configured timeout this produces the
+        /// endpoint-that-never-answers case; long enough, it holds a call open across a restart.
+        /// </summary>
+        public TimeSpan? ResponseDelay { get; set; }
+
         /// <summary>Set to answer with a body of a shape the client cannot read.</summary>
         public string? ResponseBodyOverride { get; set; }
 
@@ -148,6 +169,7 @@ internal sealed class StubTranscriptionEndpoint : IAsyncDisposable
             LastContentType = null;
             LastAudioBytes = 0;
             FailWithStatusCode = null;
+            ResponseDelay = null;
             ResponseBodyOverride = null;
         }
     }

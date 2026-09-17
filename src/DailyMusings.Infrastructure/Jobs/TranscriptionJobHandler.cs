@@ -107,6 +107,15 @@ public sealed class TranscriptionJobHandler : IJobHandler
                 "The audio for this entry is no longer stored.");
         }
 
+        // A recovered job can find the entry exactly as the interruption left it: still in progress. §14 requeues
+        // the work rather than pretending it failed, so this attempt has to accept that state as "start again" —
+        // which is what RetryTranscription already means. Without this the requeued job was refused by the domain
+        // and failed terminally, leaving a transcript the user could never obtain.
+        if (entry.TranscriptionStatus == TranscriptionStatus.InProgress)
+        {
+            entry.RetryTranscription();
+        }
+
         entry.BeginTranscription();
         await _inputs.UpdateAsync(entry, cancellationToken).ConfigureAwait(false);
 

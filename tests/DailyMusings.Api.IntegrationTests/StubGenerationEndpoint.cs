@@ -1,3 +1,4 @@
+using System.Net;
 using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -83,6 +84,26 @@ internal sealed class StubGenerationEndpoint : IAsyncDisposable
             state.LastSystemPrompt = systemPrompt;
             state.LastUserPrompt = userPrompt;
 
+            if (state.ResponseDelay is { } delay)
+            {
+                // A slow endpoint, so the client's own deadline is what ends the call.
+                try
+                {
+                    await Task.Delay(delay, context.RequestAborted);
+                }
+                catch (OperationCanceledException)
+                {
+                    // The caller gave up (its deadline elapsed, or the process is shutting down).
+                    return;
+                }
+            }
+
+            if (state.FailWithStatusCode is { } statusCode)
+            {
+                context.Response.StatusCode = (int)statusCode;
+                return;
+            }
+
             // The second stage is told apart by the prompt it receives, exactly as a real endpoint would have to.
             var isCheck = userPrompt.Contains("无法从这些素材得到支持", StringComparison.Ordinal);
 
@@ -151,6 +172,19 @@ internal sealed class StubGenerationState
     /// draft the checker finds clean.
     /// </summary>
     public string UnsourcedSentence { get; set; } = "我记得那天的风很大。";
+
+    /// <summary>Set to make the endpoint answer with an error status, for exercising the retry classification.</summary>
+    public HttpStatusCode? FailWithStatusCode { get; set; }
+
+    /// <summary>Set to make the endpoint slow to answer, for exercising the client's own deadline.</summary>
+    public TimeSpan? ResponseDelay { get; set; }
+
+    /// <summary>Back to a well-behaved endpoint that answers immediately, keeping the recorded requests.</summary>
+    public void Reset()
+    {
+        FailWithStatusCode = null;
+        ResponseDelay = null;
+    }
 
     public string DraftContent()
     {

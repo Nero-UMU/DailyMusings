@@ -200,6 +200,116 @@ public class InputLoopTests
     }
 
     /// <summary>
+    /// §8.2: a rate-limited endpoint is temporary trouble, not a refusal. It has to back off and be tried again,
+    /// which is a different decision from the 401 case above and a different code for the client to explain.
+    /// </summary>
+    [TestMethod]
+    public async Task A_rate_limited_endpoint_backs_off_instead_of_giving_up()
+    {
+        await using var stub = await StubTranscriptionEndpoint.StartAsync();
+        stub.State.FailWithStatusCode = HttpStatusCode.TooManyRequests;
+
+        await using var instance = await TestInstance.StartAsync(TranscriptionEnabled(stub.BaseUrl));
+        instance.WriteSecret("openai-api-key", "test-api-key");
+        await instance.SignInAsChangedAdministratorAsync();
+        var (_, device) = await instance.PairDeviceAsync();
+
+        using var upload = await UploadVoiceAsync(device, "rate-limited");
+        upload.EnsureSuccessStatusCode();
+        var ingested = await upload.Content.ReadFromJsonAsync<IngestResponse>();
+
+        var afterFirstAttempt = await WaitForAsync(
+            device,
+            ingested!.Input.Id,
+            view => view.TranscriptionJobAttempts >= 1 && view.TranscriptionStatus == TranscriptionStatusNames.Failed);
+
+        // A 429 must not be terminal: the job keeps its place in the queue and the attempt budget is intact.
+        Assert.AreEqual(JobStatusNames.Pending, afterFirstAttempt.TranscriptionJobStatus);
+        Assert.AreEqual(1, afterFirstAttempt.TranscriptionJobAttempts);
+        Assert.AreEqual("transcription.upstream_unavailable", afterFirstAttempt.FailureCode);
+
+        // And the audio is still there, so the retry has something to send.
+        Assert.IsTrue(afterFirstAttempt.HasAudio);
+
+        stub.State.Reset();
+
+        var recovered = await WaitForAsync(
+            device,
+            ingested.Input.Id,
+            view => view.TranscriptionStatus == TranscriptionStatusNames.Succeeded,
+            timeout: TimeSpan.FromSeconds(90));
+
+        Assert.AreEqual(stub.State.ResponseText, recovered.Transcript);
+        Assert.AreEqual(2, recovered.TranscriptionJobAttempts, "The retry is the second attempt of the same job.");
+    }
+
+    /// <summary>
+    /// §8.2/§14: an endpoint that accepts the connection and never answers must end as a timeout, not as a hang
+    /// that holds the entry in progress forever. The distinguishing detail is that the caller's own deadline is
+    /// what fires — the request is not cancelled by a shutdown.
+    /// </summary>
+    [TestMethod]
+    public async Task An_endpoint_that_never_answers_times_out_and_stays_retryable()
+    {
+        await using var stub = await StubTranscriptionEndpoint.StartAsync();
+
+        // Longer than the configured deadline below, by a margin that no scheduling hiccup can bridge.
+        stub.State.ResponseDelay = TimeSpan.FromSeconds(30);
+
+        var settings = TranscriptionEnabled(stub.BaseUrl);
+        settings["Transcription:TimeoutSeconds"] = "2";
+
+        await using var instance = await TestInstance.StartAsync(settings);
+        instance.WriteSecret("openai-api-key", "test-api-key");
+        await instance.SignInAsChangedAdministratorAsync();
+        var (_, device) = await instance.PairDeviceAsync();
+
+        using var upload = await UploadVoiceAsync(device, "never-answers");
+        upload.EnsureSuccessStatusCode();
+        var ingested = await upload.Content.ReadFromJsonAsync<IngestResponse>();
+
+        var timedOut = await WaitForAsync(
+            device,
+            ingested!.Input.Id,
+            view => view.TranscriptionStatus == TranscriptionStatusNames.Failed && view.FailureCode is not null,
+            timeout: TimeSpan.FromSeconds(90));
+
+        Assert.AreEqual("transcription.timeout", timedOut.FailureCode);
+
+        // A timeout is retryable, so the job is queued again rather than reported as a final failure.
+        Assert.AreEqual(JobStatusNames.Pending, timedOut.TranscriptionJobStatus);
+        Assert.IsTrue(timedOut.HasAudio);
+
+        // The request really did reach the endpoint and stall there, rather than failing before it was sent.
+        Assert.IsTrue(stub.State.RequestCount >= 1, "The stalled request must have reached the endpoint.");
+        Assert.AreEqual(FakeAudio.Length, stub.State.LastAudioBytes);
+
+        // The manual retry endpoint refuses while the job is still queued — its answer is "it is already going
+        // to be tried again", and rewriting the queue would reset the attempt budget. So the retry that matters
+        // here is the automatic one, which fires after §14's backoff.
+        using (var refused = await device.PostAsync($"/api/inputs/{ingested.Input.Id}/retry-transcription", null))
+        {
+            Assert.AreEqual(
+                HttpStatusCode.BadRequest,
+                refused.StatusCode,
+                "A queued retry must not be re-queued by hand.");
+
+            Assert.AreEqual("job.not_failed", (await refused.Content.ReadFromJsonAsync<ApiError>())?.Code);
+        }
+
+        stub.State.ResponseDelay = null;
+
+        var recovered = await WaitForAsync(
+            device,
+            ingested.Input.Id,
+            view => view.TranscriptionStatus == TranscriptionStatusNames.Succeeded,
+            timeout: TimeSpan.FromSeconds(150));
+
+        Assert.AreEqual(stub.State.ResponseText, recovered.Transcript);
+        Assert.AreEqual(2, recovered.TranscriptionJobAttempts, "The retry is the second attempt of the same job.");
+    }
+
+    /// <summary>
     /// Regression for a defect the real pipeline exposed: a provider answering with an unexpected shape used to
     /// escape as an unclassified exception, leaving the entry stuck in progress and un-retryable.
     /// </summary>

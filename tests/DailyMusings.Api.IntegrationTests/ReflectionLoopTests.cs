@@ -135,6 +135,60 @@ public class ReflectionLoopTests
         Assert.IsFalse(semantic.Rebuilding);
     }
 
+    /// <summary>
+    /// §8.1/§14: a rate-limited writing endpoint is temporary trouble. The day must be visibly failed (so the
+    /// user is not left watching "generating" forever) while the job keeps its place in the queue, and the
+    /// automatic retry must produce the draft once the endpoint behaves — with no user action.
+    /// </summary>
+    [TestMethod]
+    public async Task A_rate_limited_writing_endpoint_is_retried_and_the_draft_still_appears()
+    {
+        await using var model = await StubGenerationEndpoint.StartAsync();
+        model.State.FailWithStatusCode = HttpStatusCode.TooManyRequests;
+
+        await using var instance = await TestInstance.StartAsync(GenerationEnabled(model.BaseUrl));
+        instance.WriteSecret("openai-api-key", "test-api-key");
+        await instance.SignInAsChangedAdministratorAsync();
+        var (_, device) = await instance.PairDeviceAsync();
+
+        using var captured = await device.PostAsJsonAsync(
+            "/api/inputs/text",
+            new TextInputRequest("今天试着记录了一点东西。", DateTimeOffset.UtcNow.ToString("o"), 480, "rate-limited"));
+        captured.EnsureSuccessStatusCode();
+
+        var ingested = await captured.Content.ReadFromJsonAsync<IngestResponse>();
+        var today = ingested!.Input.ContentDate;
+
+        using var requested = await instance.Client.PostAsJsonAsync(
+            $"/api/reflections/{today}/generate",
+            new GenerateReflectionRequest(IgnoreTranscriptionFailures: false, AllowOverwriteOfManualEdits: false));
+        requested.EnsureSuccessStatusCode();
+
+        var failed = await WaitForDraftAsync(instance.Client, today, ReflectionStatusNames.Failed);
+
+        // The day says it failed, and the failure is the endpoint's rate limit rather than an internal defect.
+        Assert.IsNull(failed.WorkingVersion, "Nothing may be written while the endpoint is refusing.");
+
+        var job = await WaitForJobAsync(device, today, "ReflectionGeneration", JobStatusNames.Pending);
+
+        Assert.AreEqual("generation.upstream_unavailable", job.ErrorCode);
+        Assert.AreEqual(1, job.AttemptCount);
+
+        // Once the endpoint stops rate-limiting, the queued retry writes the draft by itself. §14's backoff is a
+        // minute, so the window has to be comfortably longer than that.
+        model.State.Reset();
+
+        var draft = await WaitForDraftAsync(
+            instance.Client,
+            today,
+            ReflectionStatusNames.ReviewRequired,
+            timeout: TimeSpan.FromSeconds(150));
+
+        Assert.IsNotNull(draft.WorkingVersion);
+        Assert.AreEqual("今天的记录", draft.WorkingVersion.Title);
+        Assert.IsTrue(model.State.RequestCount >= 2, "The retry really did call the endpoint again.");
+    }
+
     [TestMethod]
     public async Task An_arbitrary_past_day_cannot_be_generated()
     {
@@ -314,9 +368,13 @@ public class ReflectionLoopTests
         throw new InvalidOperationException("unreachable");
     }
 
-    private static async Task<ReflectionDto> WaitForDraftAsync(HttpClient client, string contentDate, string status)
+    private static async Task<ReflectionDto> WaitForDraftAsync(
+        HttpClient client,
+        string contentDate,
+        string status,
+        TimeSpan? timeout = null)
     {
-        var deadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(60);
+        var deadline = DateTimeOffset.UtcNow + (timeout ?? TimeSpan.FromSeconds(60));
         ReflectionDto? last = null;
         string? lastError = null;
 
@@ -366,6 +424,35 @@ public class ReflectionLoopTests
         }
 
         Assert.Fail($"The source check did not complete in time. Checked at: {last?.CheckedAtUtc ?? "never"}");
+        throw new InvalidOperationException("unreachable");
+    }
+
+    /// <summary>
+    /// Polls the queue for one target's job. The retry classification — queued again versus given up on — is only
+    /// visible here, which is why the API exposes the job beside the day it belongs to.
+    /// </summary>
+    private static async Task<JobDto> WaitForJobAsync(HttpClient client, string targetId, string jobType, string status)
+    {
+        var deadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(60);
+        JobDto? last = null;
+
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            var jobs = await client.GetFromJsonAsync<JobListResponse>("/api/jobs?limit=100");
+            last = jobs?.Items.FirstOrDefault(item => item.JobType == jobType && item.TargetId == targetId);
+
+            if (last is { ErrorCode: not null } && last.Status == status)
+            {
+                return last;
+            }
+
+            await Task.Delay(250);
+        }
+
+        Assert.Fail(
+            $"No {jobType} job for {targetId} reported {status} with an error code in time. " +
+            $"Last seen: {last?.Status ?? "none"} / {last?.ErrorCode ?? "no code"}");
+
         throw new InvalidOperationException("unreachable");
     }
 
