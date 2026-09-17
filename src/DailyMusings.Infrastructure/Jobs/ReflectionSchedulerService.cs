@@ -38,33 +38,34 @@ public sealed class ReflectionSchedulerService : BackgroundService
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IGenerationSettingsProvider _generationSettings;
     private readonly IEmbeddingSettingsProvider _embeddingSettings;
-    private readonly IConfiguration _configuration;
     private readonly ILogger<ReflectionSchedulerService> _logger;
 
     public ReflectionSchedulerService(
         IServiceScopeFactory scopeFactory,
         IGenerationSettingsProvider generationSettings,
         IEmbeddingSettingsProvider embeddingSettings,
-        IConfiguration configuration,
         ILogger<ReflectionSchedulerService> logger)
     {
         _scopeFactory = scopeFactory;
         _generationSettings = generationSettings;
         _embeddingSettings = embeddingSettings;
-        _configuration = configuration;
         _logger = logger;
     }
 
-    private TimeSpan Interval => TimeSpan.FromSeconds(
-        Math.Clamp(_configuration.GetValue("Scheduler:IntervalSeconds", (int)DefaultInterval.TotalSeconds), 1, 3600));
-
-    private int BackfillWindowDays => Math.Clamp(_configuration.GetValue("Scheduler:BackfillWindowDays", 60), 1, 3650);
-
     /// <summary>
-    /// Bound on how many days one tick may put into generation. After a long outage every missed day is due at
-    /// once, and queueing them all would fire a burst of model calls; the rest are picked up by later ticks.
+    /// The operational settings, read once per tick rather than captured at start-up: the interval, the backfill
+    /// window, the batch bound and the two housekeeping slots are all editable from the admin page (§8.1), and an
+    /// operator who changes them expects the next tick to honour it.
     /// </summary>
-    private int MaxGenerationsPerTick => Math.Clamp(_configuration.GetValue("Scheduler:MaxGenerationsPerTick", 3), 1, 100);
+    private async Task<InstanceSettings> ReadSettingsAsync(CancellationToken cancellationToken)
+    {
+        await using var scope = _scopeFactory.CreateAsyncScope();
+
+        return await scope.ServiceProvider
+            .GetRequiredService<IInstanceSettingsProvider>()
+            .GetAsync(cancellationToken)
+            .ConfigureAwait(false);
+    }
 
     private bool _warnedAboutMissingGeneration;
 
@@ -93,9 +94,30 @@ public sealed class ReflectionSchedulerService : BackgroundService
                     exception.GetType().Name);
             }
 
+            TimeSpan delay;
+
             try
             {
-                await Task.Delay(Interval, stoppingToken).ConfigureAwait(false);
+                delay = (await ReadSettingsAsync(stoppingToken).ConfigureAwait(false)).SchedulerInterval;
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (Exception exception)
+            {
+                // A settings read must not stop the scheduler, and an exception escaping a BackgroundService stops
+                // the entire host by default. Fall back to the built-in interval and try again next time.
+                _logger.LogWarning(
+                    "Could not read the instance settings ({ErrorType}); using the default interval.",
+                    exception.GetType().Name);
+
+                delay = DefaultInterval;
+            }
+
+            try
+            {
+                await Task.Delay(delay, stoppingToken).ConfigureAwait(false);
             }
             catch (TaskCanceledException)
             {
@@ -108,24 +130,28 @@ public sealed class ReflectionSchedulerService : BackgroundService
 
     private async Task TickAsync(CancellationToken cancellationToken)
     {
+        var settings = await ReadSettingsAsync(cancellationToken).ConfigureAwait(false);
         var generation = await _generationSettings.GetAsync(cancellationToken).ConfigureAwait(false);
-        if (!generation.Enabled)
-        {
-            if (!_warnedAboutMissingGeneration)
-            {
-                _warnedAboutMissingGeneration = true;
-                _logger.LogInformation(
-                    "No generation endpoint is configured, so no drafts will be produced. "
-                    + "Configure Generation:Enabled and the endpoint to start.");
-            }
 
-            return;
+        if (generation.Enabled)
+        {
+            await ScheduleGenerationsAsync(settings, cancellationToken).ConfigureAwait(false);
+        }
+        else if (!_warnedAboutMissingGeneration)
+        {
+            _warnedAboutMissingGeneration = true;
+            _logger.LogInformation(
+                "No generation endpoint is configured, so no drafts will be produced. "
+                + "Configure Generation:Enabled and the endpoint to start.");
         }
 
-        await ScheduleGenerationsAsync(cancellationToken).ConfigureAwait(false);
+        // These three are deliberately outside the generation check. They used to sit behind a `return` taken when
+        // generation was disabled — which is the default on a fresh instance — so an instance without a model
+        // endpoint never took its nightly backup, never swept audio, never expired a publication and never rebuilt
+        // its index. None of those has anything to do with a model endpoint.
         await ScheduleEmbeddingRebuildAsync(cancellationToken).ConfigureAwait(false);
         await SchedulePublicationsAsync(cancellationToken).ConfigureAwait(false);
-        await ScheduleMaintenanceAsync(cancellationToken).ConfigureAwait(false);
+        await ScheduleMaintenanceAsync(settings, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -135,11 +161,11 @@ public sealed class ReflectionSchedulerService : BackgroundService
     /// each per day — and a restart in the middle of the night does not produce a second backup.
     /// </para>
     /// </summary>
-    private async Task ScheduleMaintenanceAsync(CancellationToken cancellationToken)
+    private async Task ScheduleMaintenanceAsync(InstanceSettings instanceSettings, CancellationToken cancellationToken)
     {
-        var backupEnabled = _configuration.GetValue("Maintenance:BackupEnabled", true);
-        var backupTime = ReadLocalTime("Maintenance:BackupLocalTime", new TimeOnly(3, 30));
-        var cleanupTime = ReadLocalTime("Maintenance:AudioCleanupLocalTime", new TimeOnly(4, 0));
+        var backupEnabled = instanceSettings.BackupEnabled;
+        var backupTime = instanceSettings.BackupLocalTime;
+        var cleanupTime = instanceSettings.AudioCleanupLocalTime;
 
         await using var scope = _scopeFactory.CreateAsyncScope();
         var services = scope.ServiceProvider;
@@ -178,16 +204,6 @@ public sealed class ReflectionSchedulerService : BackgroundService
         }
     }
 
-    private TimeOnly ReadLocalTime(string key, TimeOnly fallback) =>
-        TimeOnly.TryParseExact(
-            _configuration.GetValue<string?>(key),
-            "HH:mm",
-            CultureInfo.InvariantCulture,
-            DateTimeStyles.None,
-            out var parsed)
-            ? parsed
-            : fallback;
-
     /// <summary>
     /// The publish half of the clock (§11.1): the 08:00 slot, the execution window, and the invalidation of a
     /// pending version when the draft moves on. It enqueues and records; the rules it applies live in the domain.
@@ -210,7 +226,7 @@ public sealed class ReflectionSchedulerService : BackgroundService
         }
     }
 
-    private async Task ScheduleGenerationsAsync(CancellationToken cancellationToken)
+    private async Task ScheduleGenerationsAsync(InstanceSettings instanceSettings, CancellationToken cancellationToken)
     {
         await using var scope = _scopeFactory.CreateAsyncScope();
         var services = scope.ServiceProvider;
@@ -230,7 +246,7 @@ public sealed class ReflectionSchedulerService : BackgroundService
         // Days with material, from the input side: a day with nothing in it is never a candidate, which is how
         // §7's "no input means no article" holds without a separate guard.
         var daysWithInputs = await inputs
-            .ListContentDatesWithInputsAsync(today, BackfillWindowDays, cancellationToken)
+            .ListContentDatesWithInputsAsync(today, instanceSettings.SchedulerBackfillWindowDays, cancellationToken)
             .ConfigureAwait(false);
 
         if (daysWithInputs.Count == 0)
@@ -239,7 +255,10 @@ public sealed class ReflectionSchedulerService : BackgroundService
         }
 
         var existing = await reflections
-            .ListByDateRangeAsync(today.AddDays(-(BackfillWindowDays - 1)), today, cancellationToken)
+            .ListByDateRangeAsync(
+                today.AddDays(-(instanceSettings.SchedulerBackfillWindowDays - 1)),
+                today,
+                cancellationToken)
             .ConfigureAwait(false);
 
         var byDate = existing.ToDictionary(reflection => reflection.ContentDate);
@@ -260,7 +279,9 @@ public sealed class ReflectionSchedulerService : BackgroundService
             // Oldest first: §7 asks for day-by-day catch-up, and building the history in order means a backfilled
             // day can cite the days before it.
             .OrderBy(day => day)
-            .Take(MaxGenerationsPerTick)
+            // Bound on how many days one tick may put into generation. After a long outage every missed day is due
+            // at once, and queueing them all would fire a burst of model calls; later ticks pick up the rest.
+            .Take(instanceSettings.SchedulerMaxGenerationsPerTick)
             .ToArray();
 
         var enqueued = 0;

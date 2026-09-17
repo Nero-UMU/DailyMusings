@@ -21,16 +21,24 @@ services:
 
     environment:
       ASPNETCORE_ENVIRONMENT: Production
-      ASPNETCORE_URLS: http://+:8080
+      ASPNETCORE_URLS: http://+:${DAILYMUSINGS_INTERNAL_PORT:-18321}
       Storage__RootPath: /var/lib/dailymusings
       Storage__SecretsPath: /run/secrets
       Storage__KeyRingPath: /var/lib/dailymusings-keys
+      Storage__RuntimeConfigPath: /var/lib/dailymusings-config/runtime.json
+      # Mirrors the port above so the healthcheck can fall back to it when there is no admin-page override.
+      DM_INTERNAL_PORT: "${DAILYMUSINGS_INTERNAL_PORT:-18321}"
 
     ports:
       # §10.3 recommends HTTPS, a LAN or a VPN. If this port is exposed to the public internet over plain
       # HTTP, the login page states the interception risk and requires an explicit acknowledgement — and that
       # acknowledgement protects nothing. Prefer a TLS-terminating reverse proxy in front of this service.
-      - "${DAILYMUSINGS_HTTP_PORT:-8080}:8080"
+      #
+      # 18321 rather than 8080: 8080 is the single most contended port on a self-hosted box. The internal port is
+      # parameterized because the admin page can change the port the instance listens on (§8.1) — if you change it
+      # there, set DAILYMUSINGS_INTERNAL_PORT to the same value and recreate the container, or this mapping will
+      # point at a port nothing is listening on. The admin page prints the exact commands.
+      - "${DAILYMUSINGS_HTTP_PORT:-18321}:${DAILYMUSINGS_INTERNAL_PORT:-18321}"
 
     volumes:
       # Everything durable: SQLite database, audio, exports, Markdown output and backups. This is the backup set.
@@ -41,6 +49,10 @@ services:
       # persisted at all so that recreating the container does not silently log the operator out.
       - dailymusings-keys:/var/lib/dailymusings-keys
 
+      # The bootstrap overrides file (the admin-chosen listening port). Its own volume because it has to survive a
+      # recreate — the port would otherwise revert on every deploy — and because it must not travel with a backup.
+      - dailymusings-config:/var/lib/dailymusings-config
+
     secrets:
       # Names only. Values are read from files at run time and never appear in configuration, logs or backups.
       - openai-api-key
@@ -49,7 +61,16 @@ services:
       - wordpress-application-password
 
     healthcheck:
-      test: ["CMD", "curl", "--fail", "--silent", "--show-error", "http://127.0.0.1:8080/api/system/health"]
+      # The instance's port is admin-changeable, so the check reads the override file instead of assuming a
+      # number — a healthcheck hardcoded to the old port would report the container unhealthy forever after a
+      # port change, which is exactly the kind of false alarm that trains an operator to ignore it.
+      test:
+        - CMD-SHELL
+        - >
+          override=$(sed -n 's/.*"port"[[:space:]]*:[[:space:]]*\([0-9]\{1,\}\).*/\1/p'
+          "$${Storage__RuntimeConfigPath}" 2>/dev/null | head -n1);
+          curl --fail --silent --show-error
+          "http://127.0.0.1:$${override:-$${DM_INTERNAL_PORT}}/api/system/health"
       interval: 30s
       timeout: 5s
       retries: 5
@@ -58,6 +79,7 @@ services:
 volumes:
   dailymusings-state:
   dailymusings-keys:
+  dailymusings-config:
 
 # Copy deploy/secrets.example/* into deploy/secrets/ and fill in real values before starting.
 # deploy/secrets/ is gitignored on purpose.

@@ -14,7 +14,7 @@ services:
     restart: unless-stopped
     environment:
       ASPNETCORE_ENVIRONMENT: Production
-      ASPNETCORE_URLS: http://127.0.0.1:8080
+      ASPNETCORE_URLS: http://127.0.0.1:18321
       Storage__RootPath: /state
       Storage__SecretsPath: /run/secrets
       Storage__KeyRingPath: /keys

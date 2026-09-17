@@ -118,29 +118,25 @@ public sealed class ConfigurationEmbeddingSettingsProvider : IEmbeddingSettingsP
 }
 
 /// <summary>
-/// Retrieval tuning (§8.3: 默认最多返回十条高相关材料，数量可配置). Deployment configuration only: §8.1's admin editor
-/// covers the three endpoints, and these are tuning knobs rather than endpoints.
+/// Retrieval tuning (§8.3: 默认最多返回十条高相关材料，数量可配置).
+/// <para>
+/// Reads through <see cref="IInstanceSettingsProvider"/> so these knobs behave like every other setting the admin
+/// page owns: the stored value wins, deployment configuration is the fallback, and a change applies on the next
+/// call. It previously read its section once in the constructor and never looked again, so even editing the
+/// deployment configuration required a restart — and there was no admin surface for it at all.
+/// </para>
 /// </summary>
 public sealed class ConfigurationRetrievalSettingsProvider : IRetrievalSettingsProvider
 {
-    public const string SectionName = "Retrieval";
+    private readonly IInstanceSettingsProvider _instanceSettings;
 
-    private readonly RetrievalSettings _settings;
+    public ConfigurationRetrievalSettingsProvider(IInstanceSettingsProvider instanceSettings) =>
+        _instanceSettings = instanceSettings;
 
-    public ConfigurationRetrievalSettingsProvider(IConfiguration configuration)
+    public async Task<RetrievalSettings> GetAsync(CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(configuration);
+        var settings = await _instanceSettings.GetAsync(cancellationToken).ConfigureAwait(false);
 
-        var section = configuration.GetSection(SectionName);
-        var defaults = RetrievalSettings.Default;
-
-        _settings = new RetrievalSettings(
-            MaxMaterials: Math.Clamp(section.GetValue("MaxMaterials", defaults.MaxMaterials), 1, 100),
-            CandidateScanLimit: Math.Clamp(section.GetValue("CandidateScanLimit", defaults.CandidateScanLimit), 1, 20_000),
-            MinimumRelevance: section.GetValue("MinimumRelevance", defaults.MinimumRelevance),
-            MinimumLexicalScore: section.GetValue("MinimumLexicalScore", defaults.MinimumLexicalScore));
+        return settings.ToRetrievalSettings();
     }
-
-    public Task<RetrievalSettings> GetAsync(CancellationToken cancellationToken) =>
-        Task.FromResult(_settings);
 }

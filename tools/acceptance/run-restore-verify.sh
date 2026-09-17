@@ -23,7 +23,7 @@ chmod 644 "$FRESH/secrets/"*
 echo "contents of the fresh directory:"
 ls -la "$FRESH" "$FRESH/secrets"
 
-echo "--- instance A stops first: both instances are the only thing on port 8080 ---"
+echo "--- instance A stops first: both instances are the only thing on port 18321 ---"
 docker compose -f "$ROOT/inst-a/compose.verify.yaml" down --remove-orphans >/dev/null 2>&1
 
 echo "--- step 2: docker compose up -d ---"
@@ -36,7 +36,7 @@ docker compose -f compose.yaml down -v --remove-orphans >/dev/null 2>&1
 docker compose -f compose.yaml up -d
 
 for _ in $(seq 1 90); do
-    curl -fsS http://127.0.0.1:8080/api/system/health >/dev/null 2>&1 && break
+    curl -fsS http://127.0.0.1:18321/api/system/health >/dev/null 2>&1 && break
     sleep 2
 done
 
@@ -45,7 +45,7 @@ PW=$(docker compose -f compose.yaml logs app 2>&1 \
 echo "captured the one-time administrator password (${#PW} characters)"
 
 cd "$VERIFY"
-export DM_BASE=http://127.0.0.1:8080
+export DM_BASE=http://127.0.0.1:18321
 export DM_WORK="$WORK"
 export DM_ADMIN_INITIAL_PASSWORD="$PW"
 export DM_ADMIN_USER=owner
@@ -60,7 +60,7 @@ STAGE_EXIT=${PIPESTATUS[0]}
 echo "--- the staged restore is applied at the next start (that is the design, not a workaround) ---"
 docker compose -f "$FRESH/compose.yaml" restart app
 for _ in $(seq 1 90); do
-    curl -fsS http://127.0.0.1:8080/api/system/health >/dev/null 2>&1 && break
+    curl -fsS http://127.0.0.1:18321/api/system/health >/dev/null 2>&1 && break
     sleep 2
  done
 sleep 5

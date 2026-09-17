@@ -68,4 +68,24 @@ internal static class StoredSettings
         stored.TryGetValue(key, out var value)
             ? string.IsNullOrWhiteSpace(value) ? null : value.Trim()
             : configured;
+
+    /// <summary>An <c>HH:mm</c> local time, stored as text because that is what the admin page edits.</summary>
+    public static TimeOnly TimeOfDay(
+        IReadOnlyDictionary<string, string> stored,
+        string key,
+        TimeOnly configured) =>
+        stored.TryGetValue(key, out var value) &&
+        TimeOnly.TryParseExact(value, "HH:mm", CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed)
+            ? parsed
+            : configured;
+
+    /// <summary>A ratio or threshold. Invariant culture, so a stored "0.35" cannot be read as 35 on a comma locale.</summary>
+    public static double Decimal(
+        IReadOnlyDictionary<string, string> stored,
+        string key,
+        double configured) =>
+        stored.TryGetValue(key, out var value) &&
+        double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed)
+            ? parsed
+            : configured;
 }

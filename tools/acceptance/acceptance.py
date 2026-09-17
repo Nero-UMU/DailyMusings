@@ -29,7 +29,7 @@ import zipfile
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-BASE = os.environ.get("DM_BASE", "http://127.0.0.1:8080")
+BASE = os.environ.get("DM_BASE", "http://127.0.0.1:18321")
 MAILPIT = os.environ.get("DM_MAILPIT", "http://127.0.0.1:8025")
 WP = os.environ.get("DM_WP", "http://127.0.0.1:8090")
 WP_USER = os.environ.get("DM_WP_USER", "owner")
@@ -202,7 +202,7 @@ def main():
     # the §17.3 step 5 check below would be testing the harness's assumption instead of the product.
     notifications = admin.patch_json(
         "/api/notification-settings",
-        {"toAddress": "owner@example.test", "instanceUrl": "http://127.0.0.1:8080", "draftReady": True},
+        {"toAddress": "owner@example.test", "instanceUrl": "http://127.0.0.1:18321", "draftReady": True},
     )
     notification_body = notifications.json() or {}
     check("notification recipient and the draft-ready switch are configurable",

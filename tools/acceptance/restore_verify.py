@@ -22,7 +22,7 @@ import wave
 
 from dmverify import Api, check, error_code, note, poll, results, step, summary_exit
 
-BASE = os.environ.get("DM_BASE", "http://127.0.0.1:8080")
+BASE = os.environ.get("DM_BASE", "http://127.0.0.1:18321")
 WORK = os.environ.get("DM_WORK", "")
 VOLUME = os.environ.get("DM_VOLUME", "")
 IMAGE = os.environ.get("DM_IMAGE", "dailymusings/server:local")

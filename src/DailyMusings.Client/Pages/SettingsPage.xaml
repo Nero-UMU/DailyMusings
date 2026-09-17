@@ -29,7 +29,7 @@
 
             <Entry
                 x:Name="ServerUrlEntry"
-                Placeholder="https://example.com 或 http://192.168.1.10:8080"
+                Placeholder="https://example.com 或 http://192.168.1.10:18321"
                 Keyboard="Url" />
 
             <Label

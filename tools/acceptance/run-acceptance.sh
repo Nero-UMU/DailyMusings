@@ -48,13 +48,13 @@ sleep 2
 curl -fsS http://127.0.0.1:8077/v1/models && echo
 
 echo "--- instance A: a fresh instance on a clean state directory ---"
-# This instance binds 8080 on the host network, so anything else publishing 8080 has to stop first: the restore
+# This instance binds 18321 on the host network, so anything else publishing 18321 has to stop first: the restore
 # verification's instance does exactly that, and leaving it up makes the health check answer from the wrong server.
 docker compose -f "$ROOT/inst-b/compose.yaml" down --remove-orphans >/dev/null 2>&1
 docker compose -f "$INSTANCE/compose.verify.yaml" down --remove-orphans >/dev/null 2>&1
 
-if curl -fsS --max-time 3 http://127.0.0.1:8080/api/system/health >/dev/null 2>&1; then
-    echo "FATAL: something is already answering on 127.0.0.1:8080; stop it before running this"
+if curl -fsS --max-time 3 http://127.0.0.1:18321/api/system/health >/dev/null 2>&1; then
+    echo "FATAL: something is already answering on 127.0.0.1:18321; stop it before running this"
     docker ps --format '{{.Names}} {{.Ports}}' | head -10
     exit 1
 fi
@@ -69,11 +69,11 @@ chmod 777 "$STATE" "$INSTANCE/keys"
 docker compose -f "$INSTANCE/compose.verify.yaml" up -d
 
 for _ in $(seq 1 90); do
-    curl -fsS http://127.0.0.1:8080/api/system/health >/dev/null 2>&1 && break
+    curl -fsS http://127.0.0.1:18321/api/system/health >/dev/null 2>&1 && break
     sleep 2
 done
 
-if ! curl -fsS http://127.0.0.1:8080/api/system/health >/dev/null 2>&1; then
+if ! curl -fsS http://127.0.0.1:18321/api/system/health >/dev/null 2>&1; then
     echo "FATAL: the instance never became healthy; container log follows"
     docker compose -f "$INSTANCE/compose.verify.yaml" logs app 2>&1 | tail -40
     exit 1
@@ -90,7 +90,7 @@ if [ -z "$PW" ]; then
 fi
 
 cd "$VERIFY"
-DM_BASE=http://127.0.0.1:8080 \
+DM_BASE=http://127.0.0.1:18321 \
 DM_MAILPIT=http://127.0.0.1:8025 \
 DM_WP=http://127.0.0.1:8090 \
 DM_WP_USER=owner \

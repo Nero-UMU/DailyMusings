@@ -22,7 +22,7 @@
   | --- | --- |
   | `DM_WP_APP_PASSWORD` | 一次性 WordPress 站点的 Application Password（**必填**，凭据不入库） |
   | `DM_ROOT` | 覆盖 `<root>`（默认取本目录的父目录） |
-  | `DM_BASE` / `DM_MAILPIT` / `DM_WP` | 默认 `http://127.0.0.1:8080` / `:8025` / `:8090` |
+  | `DM_BASE` / `DM_MAILPIT` / `DM_WP` | 默认 `http://127.0.0.1:18321` / `:8025` / `:8090` |
   | `DM_IMAGE` | 服务端镜像名，默认 `dailymusings/server:local` |
   | `DM_VOLUME` | 全新实例的状态卷名，默认 `dailymusings_dailymusings-state` |
 

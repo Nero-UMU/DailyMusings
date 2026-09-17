@@ -64,9 +64,10 @@ public sealed class ConfigurationSmtpSettingsProvider : ISmtpSettingsProvider
 /// <summary>
 /// Which events are mailed, and where the instance lives (§12).
 /// <para>
-/// Read from the settings table as well as configuration, because these are the switches an operator flips while
-/// looking at the instance rather than at a compose file. Configuration wins when it is present, so a deployment
-/// that wants to pin an event on can do so.
+/// Read from the settings table first, then the deployment configuration, then the defaults — the same order the
+/// model endpoints and SMTP use. It used to be the other way round, which meant a deployment that set
+/// <c>Notification:To</c> or pinned an event switch silently overrode whatever the administrator saved in the
+/// admin page: they would turn a notification off and keep receiving it, with nothing to indicate why.
 /// </para>
 /// </summary>
 public sealed class ConfigurationNotificationSettingsProvider : INotificationSettingsProvider
@@ -98,22 +99,19 @@ public sealed class ConfigurationNotificationSettingsProvider : INotificationSet
         };
 
         return new NotificationSettings(
-            ToAddress: section.GetValue<string?>("To") ?? Read(stored, NotificationSettingKeys.ToAddress) ?? string.Empty,
-            InstanceUrl: section.GetValue<string?>("InstanceUrl") ?? Read(stored, NotificationSettingKeys.InstanceUrl))
+            ToAddress: Read(stored, NotificationSettingKeys.ToAddress)
+                ?? section.GetValue<string?>("To")
+                ?? string.Empty,
+            InstanceUrl: Read(stored, NotificationSettingKeys.InstanceUrl)
+                ?? section.GetValue<string?>("InstanceUrl"))
         {
             Events = events,
         };
 
-        bool ReadSwitch(string settingKey, string configurationKey)
-        {
-            var configured = section.GetValue<bool?>(configurationKey);
-            if (configured is not null)
-            {
-                return configured.Value;
-            }
-
-            return bool.TryParse(Read(stored, settingKey), out var parsed) && parsed;
-        }
+        bool ReadSwitch(string settingKey, string configurationKey) =>
+            bool.TryParse(Read(stored, settingKey), out var fromSettings)
+                ? fromSettings
+                : section.GetValue<bool?>(configurationKey) ?? false;
     }
 
     private static string? Read(IReadOnlyDictionary<string, string> values, string key) =>

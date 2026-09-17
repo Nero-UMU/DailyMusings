@@ -3,6 +3,7 @@ using System.IO.Compression;
 using System.Text;
 using System.Text.Json;
 using DailyMusings.Application.Abstractions;
+using DailyMusings.Application.Configuration;
 using DailyMusings.Domain.Common;
 using DailyMusings.Infrastructure.Persistence;
 using DailyMusings.Infrastructure.Storage;
@@ -147,18 +148,27 @@ public sealed class ZipBackupWriter : IBackupWriter
     private readonly InstancePaths _paths;
     private readonly SqliteDatabaseSnapshotter _snapshotter;
     private readonly IConfiguration _configuration;
+    private readonly IAppSettingStore? _storedSettings;
     private readonly ILogger<ZipBackupWriter> _logger;
 
+    /// <summary>
+    /// <paramref name="storedSettings"/> is optional and last on purpose: the composition root supplies the scoped
+    /// store (so the retention count is admin-editable, §8.1), while a test that only cares about what lands in the
+    /// archive can keep constructing the writer with the four arguments that describe the filesystem and the
+    /// configuration. When it is absent the retention count falls back to the deployment configuration.
+    /// </summary>
     public ZipBackupWriter(
         InstancePaths paths,
         SqliteDatabaseSnapshotter snapshotter,
         IConfiguration configuration,
-        ILogger<ZipBackupWriter> logger)
+        ILogger<ZipBackupWriter> logger,
+        IAppSettingStore? storedSettings = null)
     {
         _paths = paths;
         _snapshotter = snapshotter;
         _configuration = configuration;
         _logger = logger;
+        _storedSettings = storedSettings;
     }
 
     public async Task<BackupSummary> WriteAsync(
@@ -301,16 +311,35 @@ public sealed class ZipBackupWriter : IBackupWriter
     }
 
     /// <summary>
-    /// Keeps the newest <paramref name="keep"/> archives. §15.2 asks for seven by default; the value is read from
-    /// configuration so an operator with a different appetite does not have to patch the code.
+    /// Keeps the newest N archives. §15.2 asks for seven by default.
+    /// <para>
+    /// Three layers, most specific first: what the admin page saved, then <c>Backup:KeepCount</c> from the
+    /// deployment configuration, then the count the caller asked for. The stored value is read raw rather than
+    /// through <see cref="InstanceSettings"/> precisely so that "never configured" stays distinguishable from
+    /// "configured as the default" — otherwise the caller's argument could never win.
+    /// </para>
     /// </summary>
-    public Task<int> PruneAsync(int keep, CancellationToken cancellationToken)
+    public async Task<int> PruneAsync(int keep, CancellationToken cancellationToken)
     {
         var effective = Math.Max(1, _configuration.GetValue("Backup:KeepCount", keep));
 
+        // The admin page's value wins when it is present. Read raw rather than through InstanceSettings precisely so
+        // that "never configured" stays distinguishable from "configured as the default" — otherwise the caller's
+        // argument could never win.
+        if (_storedSettings is not null)
+        {
+            var stored = await _storedSettings.GetAllAsync(cancellationToken).ConfigureAwait(false);
+
+            if (stored.TryGetValue(InstanceSettings.BackupKeepCountKey, out var raw) &&
+                int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var storedKeep))
+            {
+                effective = Math.Max(1, storedKeep);
+            }
+        }
+
         if (!Directory.Exists(_paths.BackupPath))
         {
-            return Task.FromResult(0);
+            return 0;
         }
 
         var archives = PackageFileName
@@ -344,7 +373,7 @@ public sealed class ZipBackupWriter : IBackupWriter
             _logger.LogInformation("Removed {RemovedCount} old backup(s), keeping {KeepCount}.", removed, effective);
         }
 
-        return Task.FromResult(removed);
+        return removed;
     }
 
     private static async Task ZipAsync(string directory, string destination, CancellationToken cancellationToken)

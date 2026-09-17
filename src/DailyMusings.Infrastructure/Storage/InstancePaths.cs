@@ -26,6 +26,17 @@ public sealed class StorageOptions
     /// </para>
     /// </summary>
     public string KeyRingPath { get; set; } = "keys";
+
+    /// <summary>
+    /// Where the bootstrap overrides file lives (currently the listening port an administrator changed from the
+    /// admin page, §8.1).
+    /// <para>
+    /// Deliberately outside <see cref="RootPath"/>: the server has to read it before the web host is built, so it
+    /// cannot come from the database, and a restore must not carry a port along with the user's content. It has
+    /// to survive a container recreate, which is why a deployment gives it its own volume.
+    /// </para>
+    /// </summary>
+    public string RuntimeConfigPath { get; set; } = "runtime.json";
 }
 
 /// <summary>
@@ -47,6 +58,8 @@ public sealed class InstancePaths
         RootPath = Path.GetFullPath(string.IsNullOrWhiteSpace(options.RootPath) ? "." : options.RootPath);
         SecretsPath = options.SecretsPath;
         KeyRingPath = Path.GetFullPath(string.IsNullOrWhiteSpace(options.KeyRingPath) ? "keys" : options.KeyRingPath);
+        RuntimeConfigPath = Path.GetFullPath(
+            string.IsNullOrWhiteSpace(options.RuntimeConfigPath) ? "runtime.json" : options.RuntimeConfigPath);
     }
 
     /// <summary>
@@ -68,6 +81,12 @@ public sealed class InstancePaths
     public string SecretsPath { get; }
 
     public string KeyRingPath { get; }
+
+    /// <summary>
+    /// The bootstrap overrides file. Not part of <see cref="ManagedDirectories"/> and not part of the backup set:
+    /// it is a file, and it must stay out of the archives.
+    /// </summary>
+    public string RuntimeConfigPath { get; }
 
     public string DataDirectory => Path.Combine(RootPath, "data");
 

@@ -1,4 +1,5 @@
 using DailyMusings.Application.Abstractions;
+using DailyMusings.Application.Publishing;
 using DailyMusings.Domain.Common;
 using DailyMusings.Domain.Publishing;
 using DailyMusings.Infrastructure.Storage;
@@ -11,8 +12,11 @@ namespace DailyMusings.Infrastructure.Publishing;
 /// <para>
 /// A WordPress target stores a configuration <em>key</em>; that key is looked up under
 /// <c>Publishing:WordPress:Targets:&lt;key&gt;</c> with <c>Publishing:WordPress:Defaults</c> as the fallback, so an
-/// instance with a single blog does not have to name it. A Markdown target stores a directory
-/// <em>relative to</em> the instance's markdown root, which is the mounted volume.
+/// instance with a single blog does not have to name it. On top of that sits a per-target override the admin page
+/// can write (§8.1): the site address, the application password's name and the timeout can be changed without
+/// touching the deployment, and a field the operator never filled in keeps falling through to the configuration.
+/// A Markdown target stores a directory <em>relative to</em> the instance's markdown root, which is the mounted
+/// volume.
 /// </para>
 /// <para>
 /// Relative rather than absolute on purpose: the compose file decides what that volume is mounted to, and a
@@ -27,21 +31,37 @@ public sealed class ConfigurationPublishDestinationProvider : IPublishDestinatio
 
     private readonly IConfiguration _configuration;
     private readonly InstancePaths _paths;
+    private readonly IWordPressSiteOverrideStore _overrides;
 
-    public ConfigurationPublishDestinationProvider(IConfiguration configuration, InstancePaths paths)
+    public ConfigurationPublishDestinationProvider(
+        IConfiguration configuration,
+        InstancePaths paths,
+        IWordPressSiteOverrideStore overrides)
     {
         _configuration = configuration;
         _paths = paths;
+        _overrides = overrides;
     }
 
-    public Task<PublishDestination> ResolveAsync(PublishTarget target, CancellationToken cancellationToken)
+    public async Task<PublishDestination> ResolveAsync(PublishTarget target, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(target);
 
-        return Task.FromResult(target.Type switch
+        if (target.Type == PublishTargetType.Markdown)
         {
-            PublishTargetType.Markdown => PublishDestination.ForMarkdown(ResolveMarkdownDirectory(target)),
-            _ => PublishDestination.ForWordPress(ResolveWordPressSite(target)),
+            return PublishDestination.ForMarkdown(ResolveMarkdownDirectory(target));
+        }
+
+        var site = ResolveWordPressSite(target);
+        var overrides = await _overrides.GetAsync(target.Id, cancellationToken).ConfigureAwait(false);
+
+        // Field by field: an operator who set only the address keeps the configured username and secret name.
+        return PublishDestination.ForWordPress(site with
+        {
+            BaseUrl = overrides.BaseUrl ?? site.BaseUrl,
+            Username = overrides.Username ?? site.Username,
+            SecretName = overrides.SecretName ?? site.SecretName,
+            Timeout = overrides.TimeoutSeconds is { } seconds ? TimeSpan.FromSeconds(seconds) : site.Timeout,
         });
     }
 

@@ -2,6 +2,7 @@ using DailyMusings.Application.Abstractions;
 using DailyMusings.Application.Configuration;
 using DailyMusings.Application.Publishing;
 using DailyMusings.Application.Reflections;
+using DailyMusings.Infrastructure.Configuration;
 using DailyMusings.Infrastructure.Diagnostics;
 using DailyMusings.Infrastructure.Generation;
 using DailyMusings.Infrastructure.Jobs;
@@ -49,6 +50,11 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddSingleton<IPasswordHasher>(new Pbkdf2PasswordHasher());
         services.AddSingleton<ISecretGenerator, CryptoSecretGenerator>();
         services.AddSingleton<ISecretStore, FileSecretStore>();
+
+        // The bootstrap overrides (§8.1). Read before the host is built and written by the admin page, so it is a
+        // plain file rather than a settings-table row — see RuntimeOverridesFile for why.
+        services.AddSingleton<IRuntimeOverridesStore, FileRuntimeOverridesStore>();
+
         services.AddSingleton<JobExecutorHeartbeat>();
 
         // The one executor instance §14 allows.
@@ -80,12 +86,18 @@ public static class InfrastructureServiceCollectionExtensions
         // Audio storage: the media volume, behind the port that enforces "durable before acknowledged" (§8.2).
         services.AddSingleton<IAudioStore, FileAudioStore>();
 
+        services.AddScoped<IInstanceSettingsProvider, AppSettingInstanceSettingsProvider>();
+
         // The transcription endpoint. Configuration and the secret store are singletons, so the client can be one
         // too — and a single long-lived HttpClient is the recommended shape for one upstream.
         services.AddSingleton<ITranscriptionSettingsProvider, ConfigurationTranscriptionSettingsProvider>();
         services.AddSingleton<IGenerationSettingsProvider, ConfigurationGenerationSettingsProvider>();
         services.AddSingleton<IEmbeddingSettingsProvider, ConfigurationEmbeddingSettingsProvider>();
-        services.AddSingleton<IRetrievalSettingsProvider, ConfigurationRetrievalSettingsProvider>();
+
+        // Scoped, not singleton: it now reads the settings table per call, so it holds the scoped setting store (and
+        // through it the scoped connection). It used to be a singleton that cached its values in the constructor,
+        // which meant a change needed a restart even in deployment configuration.
+        services.AddScoped<IRetrievalSettingsProvider, ConfigurationRetrievalSettingsProvider>();
         services.AddSingleton(_ => new HttpClient { Timeout = Timeout.InfiniteTimeSpan });
         services.AddSingleton<ITranscriptionClient, OpenAiCompatibleTranscriptionClient>();
 
@@ -100,7 +112,10 @@ public static class InfrastructureServiceCollectionExtensions
 
         // Publishing and mail. Each is a singleton because they hold no per-call state: the site and the secret
         // are parameters of every call, so two publications can run without sharing anything.
-        services.AddSingleton<IPublishDestinationProvider, ConfigurationPublishDestinationProvider>();
+        // The destination provider is scoped: it reads the per-target WordPress override from the settings table
+        // (§8.1), which is scoped state.
+        services.AddScoped<IWordPressSiteOverrideStore, AppSettingWordPressSiteStore>();
+        services.AddScoped<IPublishDestinationProvider, ConfigurationPublishDestinationProvider>();
         services.AddSingleton<IRemotePublisher, WordPressRestPublisher>();
         services.AddSingleton<IMarkdownWriter, FileMarkdownWriter>();
         services.AddSingleton<ISmtpSettingsProvider, ConfigurationSmtpSettingsProvider>();
@@ -110,7 +125,12 @@ public static class InfrastructureServiceCollectionExtensions
         // touch the filesystem.
         services.AddScoped<SqliteDatabaseSnapshotter>();
         services.AddSingleton<IInstanceExportWriter, FileInstanceExportWriter>();
-        services.AddSingleton<IBackupWriter, ZipBackupWriter>();
+
+        // Scoped, not singleton: it takes the scoped snapshotter (which holds a connection) and reads the settings
+        // table for the retention count. As a singleton it was a captive dependency — resolved once from the root
+        // scope, keeping one connection for the process lifetime, which is exactly what this file's own comment
+        // above warns against.
+        services.AddScoped<IBackupWriter, ZipBackupWriter>();
         services.AddSingleton<IRestoreStager, StagedRestoreService>();
 
         // §16: the temporary debug switch and the on-demand test connections. Scoped, because both read settings.
@@ -157,11 +177,13 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<Application.Notifications.QueueNotificationUseCase>();
         services.AddScoped<Application.Notifications.SendNotificationUseCase>();
         services.AddScoped<Application.Configuration.UpdateContentSettingsUseCase>();
+        services.AddScoped<Application.Configuration.UpdateInstanceSettingsUseCase>();
         services.AddScoped<Application.Publishing.ListPublishTargetsUseCase>();
         services.AddScoped<Application.Publishing.ListPublicationsUseCase>();
         services.AddScoped<Application.Publishing.CreatePublishTargetUseCase>();
         services.AddScoped<Application.Publishing.UpdatePublishTargetUseCase>();
         services.AddScoped<Application.Publishing.SetAutomaticPublishUseCase>();
+        services.AddScoped<Application.Publishing.UpdateWordPressSiteOverrideUseCase>();
         services.AddScoped<Application.Publishing.RequestPublicationUseCase>();
         services.AddScoped<Application.Publishing.RunPublicationUseCase>();
         services.AddScoped<Application.Publishing.RetryPublicationUseCase>();

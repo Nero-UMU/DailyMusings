@@ -4,9 +4,11 @@ using DailyMusings.Application.Configuration;
 using DailyMusings.Application.Operations;
 using DailyMusings.Contracts;
 using DailyMusings.Domain.Jobs;
+using DailyMusings.Infrastructure.Configuration;
 using DailyMusings.Server.Authentication;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Configuration;
 
 namespace DailyMusings.Server.Composition;
 
@@ -69,6 +71,14 @@ public static class OperationsEndpointRouteBuilderExtensions
         system.MapPost("/diagnostic-mode", EnableDiagnosticModeAsync).DisableAntiforgery();
         system.MapDelete("/diagnostic-mode", DisableDiagnosticModeAsync);
         system.MapPost("/test-connection/{service}", TestConnectionAsync).DisableAntiforgery();
+
+        // §8.1's "everything configurable from the admin page": the operational knobs that used to be reachable only
+        // by editing compose and restarting, plus the listening port — the one setting that cannot be stored in the
+        // settings table, and is therefore written to the bootstrap overrides file instead.
+        system.MapGet("/instance-settings", GetInstanceSettingsAsync);
+        system.MapPatch("/instance-settings", UpdateInstanceSettingsAsync);
+        system.MapGet("/listening-port", GetListeningPort);
+        system.MapPatch("/listening-port", UpdateListeningPort).DisableAntiforgery();
 
         return endpoints;
     }
@@ -485,6 +495,171 @@ public static class OperationsEndpointRouteBuilderExtensions
         job.Id.ToString(),
         job.Status.ToString(),
         job.ScheduledAtUtc.ToString("o", CultureInfo.InvariantCulture));
+
+    private static async Task<IResult> GetInstanceSettingsAsync(
+        IInstanceSettingsProvider settings,
+        CancellationToken cancellationToken)
+    {
+        var current = await settings.GetAsync(cancellationToken).ConfigureAwait(false);
+
+        return Results.Ok(ToDto(current));
+    }
+
+    private static async Task<IResult> UpdateInstanceSettingsAsync(
+        [FromBody] UpdateInstanceSettingsRequest? request,
+        UpdateInstanceSettingsUseCase update,
+        IInstanceSettingsProvider settings,
+        CancellationToken cancellationToken)
+    {
+        if (request is null)
+        {
+            return Invalid("A body is required.");
+        }
+
+        // Parsed here so a typo is reported against the field that has it; every other bound is checked by the use
+        // case, which validates the whole set before writing any of it.
+        if (!TryParseLocalTime(request.BackupLocalTime, out var backupTime) ||
+            !TryParseLocalTime(request.AudioCleanupLocalTime, out var cleanupTime))
+        {
+            return Invalid("备份时刻与清理时刻需要写成 HH:mm，例如 03:30。");
+        }
+
+        try
+        {
+            await update
+                .ExecuteAsync(
+                    new InstanceSettingsUpdate(
+                        request.SchedulerIntervalSeconds,
+                        request.SchedulerBackfillWindowDays,
+                        request.SchedulerMaxGenerationsPerTick,
+                        request.BackupEnabled,
+                        backupTime,
+                        cleanupTime,
+                        request.BackupKeepCount,
+                        request.RetrievalMaxMaterials,
+                        request.RetrievalCandidateScanLimit,
+                        request.RetrievalMinimumRelevance,
+                        request.RetrievalMinimumLexicalScore),
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (UseCaseException exception)
+        {
+            return Results.Json(
+                new ApiError(exception.Code, exception.Message),
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        // Read back rather than echoing the request: what the instance will actually use is the answer that matters.
+        return Results.Ok(ToDto(await settings.GetAsync(cancellationToken).ConfigureAwait(false)));
+    }
+
+    private static IResult GetListeningPort(
+        HttpContext context,
+        IRuntimeOverridesStore overrides,
+        IConfiguration configuration) =>
+        Results.Ok(ToDto(overrides.Read(), context, overrides, configuration));
+
+    /// <summary>
+    /// Saves the port the instance should listen on at its next start.
+    /// <para>
+    /// Deliberately reports "saved, restart required" rather than "applied". A container's published mapping is
+    /// fixed when the container starts, so claiming the new port is live would be the one lie that matters here —
+    /// and the page prints the two commands that finish the job.
+    /// </para>
+    /// </summary>
+    private static IResult UpdateListeningPort(
+        HttpContext context,
+        [FromBody] UpdateListeningPortRequest? request,
+        IRuntimeOverridesStore overrides,
+        IConfiguration configuration,
+        IClock clock)
+    {
+        if (request is null)
+        {
+            return Invalid("A body is required.");
+        }
+
+        if (request.Port is { } port &&
+            port is < RuntimeOverridesFile.MinimumPort or > RuntimeOverridesFile.MaximumPort)
+        {
+            return Invalid(
+                $"端口需要介于 {RuntimeOverridesFile.MinimumPort} 与 {RuntimeOverridesFile.MaximumPort} 之间："
+                + "低于 1024 的端口容器里的非特权用户绑定不了，那会让实例重启后连不上。");
+        }
+
+        try
+        {
+            overrides.Write(request.Port, context.User.Identity?.Name, clock.UtcNow);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return Results.Json(
+                new ApiError(
+                    "instance.port.write_failed",
+                    $"无法写入 {overrides.ConfigPath}，请检查该目录的权限。"),
+                statusCode: StatusCodes.Status500InternalServerError);
+        }
+
+        return Results.Ok(ToDto(overrides.Read(), context, overrides, configuration));
+    }
+
+    /// <summary>
+    /// <paramref name="request"/> absent means "leave it as it is"; a blank string means the same, so a page that
+    /// posts every field keeps working.
+    /// </summary>
+    private static bool TryParseLocalTime(string? request, out TimeOnly? parsed)
+    {
+        parsed = null;
+
+        if (string.IsNullOrWhiteSpace(request))
+        {
+            return true;
+        }
+
+        if (TimeOnly.TryParseExact(request, "HH:mm", CultureInfo.InvariantCulture, DateTimeStyles.None, out var time))
+        {
+            parsed = time;
+            return true;
+        }
+
+        return false;
+    }
+
+    private static InstanceSettingsDto ToDto(InstanceSettings settings) => new(
+        settings.SchedulerIntervalSeconds,
+        settings.SchedulerBackfillWindowDays,
+        settings.SchedulerMaxGenerationsPerTick,
+        settings.BackupEnabled,
+        ContentSettings.FormatTime(settings.BackupLocalTime),
+        ContentSettings.FormatTime(settings.AudioCleanupLocalTime),
+        settings.BackupKeepCount,
+        settings.RetrievalMaxMaterials,
+        settings.RetrievalCandidateScanLimit,
+        settings.RetrievalMinimumRelevance,
+        settings.RetrievalMinimumLexicalScore);
+
+    private static ListeningPortDto ToDto(
+        RuntimeOverrides current,
+        HttpContext context,
+        IRuntimeOverridesStore overrides,
+        IConfiguration configuration)
+    {
+        // The port this request actually arrived on is the only truthful "effective port": it is measured, not
+        // inferred from configuration that may or may not have been honoured.
+        var effective = context.Connection.LocalPort;
+
+        return new ListeningPortDto(
+            current.ListeningPort,
+            effective,
+            current.ListeningPort is { } port && port != effective,
+            current.UpdatedBy,
+            current.UpdatedAtUtc?.ToString("o", CultureInfo.InvariantCulture),
+            overrides.ConfigPath,
+            configuration["Storage:RootPath"] ?? ".",
+            configuration["Storage:SecretsPath"] ?? "/run/secrets",
+            configuration["Storage:KeyRingPath"] ?? "keys");
+    }
 
     private static IResult Invalid(string message) =>
         Results.Json(new ApiError(ApiErrorCodes.ValidationFailed, message), statusCode: StatusCodes.Status400BadRequest);

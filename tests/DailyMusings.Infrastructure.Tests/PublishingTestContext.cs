@@ -187,7 +187,15 @@ internal sealed class PublishingTestContext : IAsyncDisposable
         // The destination provider needs the configuration surface; a Markdown target only needs the path, so an
         // empty configuration is honest here — the WordPress path is exercised by the integration tests.
         var configuration = new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build();
-        Destinations = new ConfigurationPublishDestinationProvider(configuration, paths);
+
+        // It also reads the per-target WordPress override from the settings table (§8.1). These tests only exercise
+        // Markdown targets, so an empty store is the honest stand-in — the same construction the reflection context
+        // uses.
+        var appSettings = new DailyMusings.Infrastructure.Persistence.Repositories.SqliteAppSettingStore(accessor, clock);
+        Destinations = new ConfigurationPublishDestinationProvider(
+            configuration,
+            paths,
+            new DailyMusings.Infrastructure.Publishing.AppSettingWordPressSiteStore(appSettings));
 
         QueueNotifications = new QueueNotificationUseCase(notifications, smtp, Enqueuer);
         SendNotifications = new SendNotificationUseCase(email);
