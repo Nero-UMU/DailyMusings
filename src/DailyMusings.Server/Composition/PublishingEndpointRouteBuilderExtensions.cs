@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Security.Claims;
 using DailyMusings.Application.Abstractions;
+using DailyMusings.Application.Notifications;
 using DailyMusings.Application.Publishing;
 using DailyMusings.Contracts;
 using DailyMusings.Domain.Common;
@@ -74,11 +75,18 @@ public static class PublishingEndpointRouteBuilderExtensions
             .MapGet("/api/reflections/{date}/publications", ListForReflectionAsync)
             .RequireAuthorization(ServerAuthenticationPolicies.DeviceOrAdmin);
 
+        // §9.3 puts 通知偏好 on the client's settings screen, so a paired device may read them. Writing stays an
+        // administrator's decision: a device token that could change the recipient could send the day's date and
+        // title to an address of its holder's choosing — the same reasoning §10.4 applies to credentials. What a
+        // notification carries is the user's own material, and where it goes is not a device's to decide.
+        endpoints
+            .MapGet("/api/notification-settings", GetNotificationSettingsAsync)
+            .RequireAuthorization(ServerAuthenticationPolicies.DeviceOrAdmin);
+
         var notifications = endpoints
             .MapGroup("/api/notification-settings")
             .RequireAuthorization(ServerAuthenticationPolicies.AdminOnly);
 
-        notifications.MapGet(string.Empty, GetNotificationSettingsAsync);
         notifications.MapPatch(string.Empty, UpdateNotificationSettingsAsync);
 
         return endpoints;
@@ -390,16 +398,14 @@ public static class PublishingEndpointRouteBuilderExtensions
     }
 
     private static async Task<IResult> GetNotificationSettingsAsync(
-        ISmtpSettingsProvider smtp,
-        INotificationSettingsProvider notifications,
+        ReadNotificationSettingsUseCase read,
         CancellationToken cancellationToken) =>
-        Results.Ok(await ReadNotificationSettingsAsync(smtp, notifications, cancellationToken).ConfigureAwait(false));
+        Results.Ok(ToDto(await read.ExecuteAsync(cancellationToken).ConfigureAwait(false)));
 
     private static async Task<IResult> UpdateNotificationSettingsAsync(
         [FromBody] UpdateNotificationSettingsRequest? request,
-        IAppSettingStore settings,
-        ISmtpSettingsProvider smtp,
-        INotificationSettingsProvider notifications,
+        UpdateNotificationSettingsUseCase update,
+        ReadNotificationSettingsUseCase read,
         CancellationToken cancellationToken)
     {
         if (request is null)
@@ -407,54 +413,26 @@ public static class PublishingEndpointRouteBuilderExtensions
             return Invalid("A body is required.");
         }
 
-        if (request.ToAddress is not null)
-        {
-            await settings
-                .SetAsync(NotificationSettingKeys.ToAddress, request.ToAddress.Trim(), cancellationToken)
-                .ConfigureAwait(false);
-        }
+        await update
+            .ExecuteAsync(
+                request.ToAddress,
+                request.InstanceUrl,
+                request.DraftReady,
+                request.JobFailed,
+                request.AutomaticPublication,
+                cancellationToken)
+            .ConfigureAwait(false);
 
-        if (request.InstanceUrl is not null)
-        {
-            await settings
-                .SetAsync(NotificationSettingKeys.InstanceUrl, request.InstanceUrl.Trim(), cancellationToken)
-                .ConfigureAwait(false);
-        }
-
-        foreach (var (key, value) in new (string Key, bool? Value)[]
-                 {
-                     (NotificationSettingKeys.DraftReady, request.DraftReady),
-                     (NotificationSettingKeys.JobFailed, request.JobFailed),
-                     (NotificationSettingKeys.AutomaticPublication, request.AutomaticPublication),
-                 })
-        {
-            if (value is not null)
-            {
-                await settings
-                    .SetAsync(key, value.Value ? "true" : "false", cancellationToken)
-                    .ConfigureAwait(false);
-            }
-        }
-
-        return Results.Ok(await ReadNotificationSettingsAsync(smtp, notifications, cancellationToken).ConfigureAwait(false));
+        return Results.Ok(ToDto(await read.ExecuteAsync(cancellationToken).ConfigureAwait(false)));
     }
 
-    private static async Task<NotificationSettingsDto> ReadNotificationSettingsAsync(
-        ISmtpSettingsProvider smtp,
-        INotificationSettingsProvider notifications,
-        CancellationToken cancellationToken)
-    {
-        var smtpSettings = await smtp.GetAsync(cancellationToken).ConfigureAwait(false);
-        var settings = await notifications.GetAsync(cancellationToken).ConfigureAwait(false);
-
-        return new NotificationSettingsDto(
-            SmtpConfigured: smtpSettings.Enabled,
-            ToAddress: settings.ToAddress,
-            InstanceUrl: settings.InstanceUrl,
-            DraftReady: settings.IsEnabled(Domain.Notifications.NotificationEvent.DraftReady),
-            JobFailed: settings.IsEnabled(Domain.Notifications.NotificationEvent.JobFailed),
-            AutomaticPublication: settings.IsEnabled(Domain.Notifications.NotificationEvent.AutomaticPublication));
-    }
+    private static NotificationSettingsDto ToDto(NotificationSettingsView settings) => new(
+        SmtpConfigured: settings.SmtpConfigured,
+        ToAddress: settings.ToAddress,
+        InstanceUrl: settings.InstanceUrl,
+        DraftReady: settings.DraftReady,
+        JobFailed: settings.JobFailed,
+        AutomaticPublication: settings.AutomaticPublication);
 
     /// <summary>
     /// Looks a publication's view up after a write, so the response carries the same shape as a read would.

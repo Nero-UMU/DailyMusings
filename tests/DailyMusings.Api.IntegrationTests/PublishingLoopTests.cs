@@ -178,8 +178,18 @@ public class PublishingLoopTests
         Assert.IsFalse((await disabled.Content.ReadFromJsonAsync<PublishTargetDto>())!.AutomaticPublishEnabled);
     }
 
+    /// <summary>
+    /// Who may read and who may change the notification preferences (§9.3, §12).
+    /// <para>
+    /// The split is deliberate. §9.3 puts 通知偏好 on the client's settings screen, so a paired device may read them
+    /// and say what is switched on; changing the recipient stays an administrator's decision, because a device token
+    /// that could redirect the instance's mail could send the day's date and title to an address of its holder's
+    /// choosing. This test used to assert that a device could not even read — which kept the client's settings screen
+    /// from showing anything at all.
+    /// </para>
+    /// </summary>
     [TestMethod]
-    public async Task Notification_settings_are_administrator_only()
+    public async Task Notification_settings_can_be_read_by_a_device_but_changed_only_by_an_administrator()
     {
         await using var model = await StubGenerationEndpoint.StartAsync();
         await using var instance = await TestInstance.StartAsync(GenerationEnabled(model.BaseUrl));
@@ -190,12 +200,22 @@ public class PublishingLoopTests
 
         using var fromDevice = await device.GetAsync("/api/notification-settings");
 
-        // 401 or 403 depending on whether the endpoint tries the device scheme at all: an admin-only route that
-        // never looks at a bearer token sees an anonymous caller, which is a 401. Either way the device is refused,
-        // and that is the assertion that matters.
+        Assert.AreEqual(
+            HttpStatusCode.OK,
+            fromDevice.StatusCode,
+            "§9.3 puts the notification preferences on the client's settings screen, so a paired device may look.");
+
+        var deviceView = await fromDevice.Content.ReadFromJsonAsync<NotificationSettingsDto>();
+        Assert.AreEqual("owner@example.invalid", deviceView!.ToAddress);
+
+        // Writing is the part a device must not be able to do: the recipient decides where the user's material goes.
+        using var deviceWrite = await device.PatchAsJsonAsync(
+            "/api/notification-settings",
+            new UpdateNotificationSettingsRequest("attacker@example.invalid", null, null, null, null));
+
         Assert.IsTrue(
-            fromDevice.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden,
-            $"A device token must not be able to read the notification settings (got {fromDevice.StatusCode}).");
+            deviceWrite.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden,
+            $"A device token must not be able to redirect notifications (got {deviceWrite.StatusCode}).");
 
         var settings = await instance.Client.GetFromJsonAsync<NotificationSettingsDto>("/api/notification-settings");
         Assert.IsNotNull(settings);

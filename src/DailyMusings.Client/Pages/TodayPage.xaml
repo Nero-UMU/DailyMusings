@@ -26,6 +26,25 @@
                     Text="当前连接未加密（HTTP）。密码、设备令牌、录音和文章都可能被同一网络中的他人截获。请优先使用 HTTPS、局域网或 VPN。此提示只说明风险，不代表连接已经安全。" />
             </Border>
 
+            <!-- §9.1: 生成状态 and 待确认或已过期草稿提醒. The reminder is the reason the user opens the app at all
+                 after the evening's generation ran, so it sits above the capture controls, not below them. -->
+            <Grid x:Name="DraftPanel" ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                <VerticalStackLayout Spacing="2">
+                    <Label x:Name="DraftStatus" FontAttributes="Bold" />
+                    <Label x:Name="DraftReminder" FontSize="12" TextColor="#B42318" IsVisible="False" />
+                </VerticalStackLayout>
+                <Button
+                    Grid.Column="1"
+                    Text="打开草稿"
+                    IsVisible="False"
+                    Padding="12,4"
+                    FontSize="13"
+                    Clicked="OnOpenDraftClicked"
+                    x:Name="OpenDraftButton" />
+            </Grid>
+
+            <BoxView x:Name="DraftSeparator" HeightRequest="1" Color="#E1E4E8" />
+
             <!-- The one prominent control on the screen (§9.1). -->
             <Button
                 x:Name="RecordButton"
@@ -110,6 +129,13 @@
 
             <Label Text="今天的输入" FontAttributes="Bold" />
 
+            <!-- Row actions report here, right above the rows they acted on: the queue's own status line sits below
+                 the whole list, which is a long way from the button a user just pressed. -->
+            <Label
+                x:Name="TodayActionStatus"
+                TextColor="#B42318"
+                FontSize="13" />
+
             <Label
                 x:Name="TodayStatus"
                 TextColor="#656D76"
@@ -125,6 +151,35 @@
                             <VerticalStackLayout Spacing="2">
                                 <Label Text="{Binding Title}" />
                                 <Label Text="{Binding Status}" FontSize="12" TextColor="#656D76" />
+                                <Label Text="{Binding Topic}" FontSize="12" TextColor="#656D76" />
+                                <HorizontalStackLayout Spacing="6">
+                                    <Button
+                                        Text="修订文字"
+                                        Padding="8,2"
+                                        FontSize="12"
+                                        Clicked="OnReviseClicked"
+                                        CommandParameter="{Binding Id}" />
+                                    <Button
+                                        Text="调整主题"
+                                        Padding="8,2"
+                                        FontSize="12"
+                                        Clicked="OnAssignTopicClicked"
+                                        CommandParameter="{Binding Id}" />
+                                    <Button
+                                        Text="重试转写"
+                                        IsVisible="{Binding CanRetryTranscription}"
+                                        Padding="8,2"
+                                        FontSize="12"
+                                        Clicked="OnRetryTranscriptionClicked"
+                                        CommandParameter="{Binding Id}" />
+                                    <Button
+                                        Text="播放"
+                                        IsVisible="{Binding CanPlay}"
+                                        Padding="8,2"
+                                        FontSize="12"
+                                        Clicked="OnPlayClicked"
+                                        CommandParameter="{Binding Id}" />
+                                </HorizontalStackLayout>
                             </VerticalStackLayout>
                         </Border>
                     </DataTemplate>

@@ -128,6 +128,27 @@ internal sealed class FakeCaptureApiClient : ICaptureApiClient
     public Task<InputDto?> GetInputAsync(string serverInputId, CancellationToken cancellationToken) =>
         Task.FromResult<InputDto?>(null);
 
+    /// <summary>Corrections the screen asked for, in order.</summary>
+    public List<(string InputId, string? Revised)> Revisions { get; } = [];
+
+    /// <summary>Entries whose transcription the screen asked to retry.</summary>
+    public List<string> TranscriptionRetries { get; } = [];
+
+    public Task<ApiResult<InputDto>> ReviseTranscriptAsync(
+        string inputId,
+        string? revisedTranscript,
+        CancellationToken cancellationToken)
+    {
+        Revisions.Add((inputId, revisedTranscript));
+        return Task.FromResult(ApiResult<InputDto>.Refused("test.not_implemented"));
+    }
+
+    public Task<ApiResult<InputDto>> RetryTranscriptionAsync(string inputId, CancellationToken cancellationToken)
+    {
+        TranscriptionRetries.Add(inputId);
+        return Task.FromResult(ApiResult<InputDto>.Refused("test.not_implemented"));
+    }
+
     /// <summary>What the server would answer when a day is read. Defaults to "reached, nothing there".</summary>
     public ApiResult<IReadOnlyList<InputDto>> InputsResult { get; set; } = ApiResult<IReadOnlyList<InputDto>>.From([]);
 

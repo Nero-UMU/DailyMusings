@@ -14,14 +14,20 @@ public partial class SettingsPage : ContentPage
     private readonly ClientSettings _settings;
     private readonly PairingService _pairing;
     private readonly SecureDeviceTokenProvider _tokens;
+    private readonly DynamicInstanceApiClient _instance;
 
-    public SettingsPage(ClientSettings settings, PairingService pairing, SecureDeviceTokenProvider tokens)
+    public SettingsPage(
+        ClientSettings settings,
+        PairingService pairing,
+        SecureDeviceTokenProvider tokens,
+        DynamicInstanceApiClient instance)
     {
         InitializeComponent();
 
         _settings = settings;
         _pairing = pairing;
         _tokens = tokens;
+        _instance = instance;
     }
 
     protected override async void OnAppearing()
@@ -37,6 +43,56 @@ public partial class SettingsPage : ContentPage
             $"{DeviceInfo.Current.Platform} {DeviceInfo.Current.VersionString}";
 
         await RefreshAsync();
+        await RefreshNotificationsAsync();
+    }
+
+    private async void OnRefreshNotificationsClicked(object? sender, EventArgs e) =>
+        await RefreshNotificationsAsync();
+
+    /// <summary>
+    /// Shows the notification preferences (docs/开发指导.md §9.3 通知偏好, §12) without offering to change them.
+    /// The reason is worth a sentence on screen: a device token that could redirect the instance's mail could send
+    /// the day's date and title to an address of the token holder's choosing, so the recipient and the event switches
+    /// stay an administrator's decision on the admin page. What the client can do honestly is show the state.
+    /// </summary>
+    private async Task RefreshNotificationsAsync()
+    {
+        if (!_settings.IsConfigured || !await _tokens.HasTokenAsync(CancellationToken.None))
+        {
+            NotificationStatus.Text = "配置服务器并配对后可以看到通知偏好。";
+            return;
+        }
+
+        var settings = await _instance.GetAsync(CancellationToken.None);
+
+        if (!settings.Succeeded)
+        {
+            NotificationStatus.Text = settings.FailureCode == "auth.forbidden"
+                ? "通知偏好只对管理员显示；请到管理页的运维页修改。"
+                : DailyMusings.Client.Core.Reflections.ReflectionReview.DescribeTransportFailure(settings.FailureCode);
+            return;
+        }
+
+        var value = settings.Value!;
+        var events = new List<string>();
+
+        if (value.SmtpConfigured)
+        {
+            events.Add("SMTP 已配置");
+        }
+        else
+        {
+            events.Add("SMTP 未配置，不会发信");
+        }
+
+        if (value.DraftReady) events.Add("草稿待确认");
+        if (value.JobFailed) events.Add("任务失败");
+        if (value.AutomaticPublication) events.Add("自动发布");
+
+        NotificationStatus.Text =
+            $"收件地址：{(string.IsNullOrWhiteSpace(value.ToAddress) ? "未设置" : value.ToAddress)}\n" +
+            $"已开启的事件：{string.Join("、", events)}\n" +
+            "改动请到管理页的运维页（设备令牌没有修改收件地址的权限）。";
     }
 
     private async void OnSaveServerClicked(object? sender, EventArgs e)
@@ -135,6 +191,7 @@ public partial class SettingsPage : ContentPage
         // The offline queue is deliberately left alone: unpairing must not throw away thoughts that were never sent.
         PairingStatus.Text = "已解除配对。待上传的内容仍然保留在本机。";
         await RefreshAsync();
+        await RefreshNotificationsAsync();
     }
 
     private async Task RefreshAsync()

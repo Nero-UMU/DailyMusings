@@ -1,7 +1,9 @@
 using DailyMusings.Client.Core;
 using DailyMusings.Client.Core.Capture;
 using DailyMusings.Client.Core.Offline;
+using DailyMusings.Client.Core.Audio;
 using DailyMusings.Client.Core.Reflections;
+using DailyMusings.Client.Core.Settings;
 using DailyMusings.Client.Core.Topics;
 using DailyMusings.Client.Pages;
 using DailyMusings.Client.Services;
@@ -47,6 +49,12 @@ public static class MauiProgram
 		builder.Services.AddSingleton<DynamicReflectionApiClient>();
 		builder.Services.AddSingleton<IReflectionApiClient>(sp => sp.GetRequiredService<DynamicReflectionApiClient>());
 
+		// The two reads that belong to the instance rather than to the capture queue: an entry's stored recording
+		// (§15.2 step 6) and the notification preferences (§9.3, §12).
+		builder.Services.AddSingleton<DynamicInstanceApiClient>();
+		builder.Services.AddSingleton<INotificationSettingsApiClient>(sp => sp.GetRequiredService<DynamicInstanceApiClient>());
+		builder.Services.AddSingleton(new AudioClipCache(Path.Combine(FileSystem.CacheDirectory, "playback")));
+
 		// The topic vocabulary: browsing, renaming, merging and filing by hand (§6.2, §9.3 主题页).
 		builder.Services.AddSingleton<DynamicTopicApiClient>();
 		builder.Services.AddSingleton<ITopicApiClient>(sp => sp.GetRequiredService<DynamicTopicApiClient>());
@@ -56,8 +64,10 @@ public static class MauiProgram
 		// code, which is what §5's Client.Core split was for.
 #if ANDROID
 		builder.Services.AddSingleton<IAudioRecorder, AndroidAudioRecorder>();
+		builder.Services.AddSingleton<IAudioPlayer, AndroidAudioPlayer>();
 #elif WINDOWS
 		builder.Services.AddSingleton<IAudioRecorder, WindowsAudioRecorder>();
+		builder.Services.AddSingleton<IAudioPlayer, WindowsAudioPlayer>();
 #else
 #error Every target needs an IAudioRecorder; add one for this platform rather than shipping a client that cannot record.
 #endif

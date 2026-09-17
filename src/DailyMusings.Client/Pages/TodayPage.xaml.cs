@@ -1,5 +1,8 @@
 using System.Collections.ObjectModel;
 using DailyMusings.Client.Core;
+using DailyMusings.Client.Core.Audio;
+using DailyMusings.Client.Core.Reflections;
+using DailyMusings.Client.Core.Topics;
 using DailyMusings.Client.Core.Capture;
 using DailyMusings.Client.Services;
 using DailyMusings.Contracts;
@@ -10,7 +13,17 @@ namespace DailyMusings.Client.Pages;
 public sealed record PendingRow(string Id, string Title, string Detail, bool CanRetry);
 
 /// <summary>One row of the server's view of today.</summary>
-public sealed record TodayRow(string Title, string Status);
+/// <summary>
+/// One row of the server's view of today (§9.1). The extra fields are what the per-entry actions need: whether the
+/// recording can be played, whether a failed transcription can be retried, and how the entry is filed.
+/// </summary>
+public sealed record TodayRow(
+    string Id,
+    string Title,
+    string Status,
+    string Topic,
+    bool CanPlay,
+    bool CanRetryTranscription);
 
 /// <summary>
 /// The capture screen (docs/开发指导.md §9.1): record, type, see what is waiting, and see what the server has.
@@ -25,7 +38,12 @@ public partial class TodayPage : ContentPage
     private readonly CaptureController _controller;
     private readonly IAudioRecorder _recorder;
     private readonly DynamicCaptureApiClient _api;
+    private readonly DynamicInstanceApiClient _instance;
+    private readonly DynamicReflectionApiClient _reflections;
+    private readonly DynamicTopicApiClient _topics;
     private readonly SecureDeviceTokenProvider _tokens;
+    private readonly IAudioPlayer _player;
+    private readonly AudioClipCache _clips;
 
     private readonly ObservableCollection<PendingRow> _pending = [];
     private readonly ObservableCollection<TodayRow> _today = [];
@@ -53,7 +71,12 @@ public partial class TodayPage : ContentPage
         CaptureController controller,
         IAudioRecorder recorder,
         DynamicCaptureApiClient api,
-        SecureDeviceTokenProvider tokens)
+        DynamicInstanceApiClient instance,
+        DynamicReflectionApiClient reflections,
+        DynamicTopicApiClient topics,
+        SecureDeviceTokenProvider tokens,
+        IAudioPlayer player,
+        AudioClipCache clips)
     {
         InitializeComponent();
 
@@ -61,7 +84,12 @@ public partial class TodayPage : ContentPage
         _controller = controller;
         _recorder = recorder;
         _api = api;
+        _instance = instance;
+        _reflections = reflections;
+        _topics = topics;
         _tokens = tokens;
+        _player = player;
+        _clips = clips;
 
         PendingList.ItemsSource = _pending;
         TodayList.ItemsSource = _today;
@@ -93,6 +121,9 @@ public partial class TodayPage : ContentPage
         base.OnDisappearing();
         StopElapsedTimer();
         StopTranscriptionTimer();
+
+        // A recording must not keep playing over another screen.
+        _ = _player.StopAsync(CancellationToken.None);
     }
 
     private async void OnRecordClicked(object? sender, EventArgs e)
@@ -124,6 +155,149 @@ public partial class TodayPage : ContentPage
         }
     }
 
+    private async void OnOpenDraftClicked(object? sender, EventArgs e) => await GuardAsync(async () =>
+    {
+        var today = DateOnly.FromDateTime(DateTime.Today);
+        await Shell.Current.GoToAsync(DraftPage.RouteFor(today));
+    });
+
+    /// <summary>
+    /// §4.1's 修订转写. The prompt starts from the text generation would use, so a small correction does not mean
+    /// retyping the whole sentence; the server keeps the original beside the revision (§6.1).
+    /// </summary>
+    private async void OnReviseClicked(object? sender, EventArgs e) => await GuardAsync(async () =>
+    {
+        if (sender is not Button { CommandParameter: string inputId })
+        {
+            return;
+        }
+
+        var current = _today.FirstOrDefault(row => row.Id == inputId)?.Title ?? string.Empty;
+
+        var revised = await DisplayPromptAsync(
+            "修订转写",
+            "改完之后，生成与检索都会用这一版；原始转写仍然保留。",
+            accept: "保存",
+            cancel: "取消",
+            initialValue: current,
+            maxLength: 4000);
+
+        if (revised is null)
+        {
+            return;
+        }
+
+        var saved = await _api.ReviseTranscriptAsync(inputId, revised.Trim(), CancellationToken.None);
+
+        if (!saved.Succeeded)
+        {
+            TodayActionStatus.Text = ReflectionReview.DescribeTransportFailure(saved.FailureCode);
+            return;
+        }
+
+        await RefreshAsync();
+        TodayActionStatus.Text = string.IsNullOrWhiteSpace(revised)
+            ? "已清除修订，生成会重新使用原始转写。"
+            : "已保存修订。";
+    });
+
+    /// <summary>
+    /// §4.1's 调整主题: filing an entry by hand, which is the only way an entry whose wording does not match a topic
+    /// name gets filed at all — automatic recognition never invents a topic (§6.2).
+    /// </summary>
+    private async void OnAssignTopicClicked(object? sender, EventArgs e) => await GuardAsync(async () =>
+    {
+        if (sender is not Button { CommandParameter: string inputId })
+        {
+            return;
+        }
+
+        var topics = await _topics.ListAsync(includeMerged: false, CancellationToken.None);
+
+        if (!topics.Succeeded)
+        {
+            TodayActionStatus.Text = ReflectionReview.DescribeTransportFailure(topics.FailureCode);
+            return;
+        }
+
+        if (topics.Value!.Count == 0)
+        {
+            TodayActionStatus.Text = "还没有主题，先到「主题」页添加一个。";
+            return;
+        }
+
+        var names = topics.Value.Select(topic => topic.Name).Append("清除主要主题").ToArray();
+        var choice = await DisplayActionSheetAsync("把这条归入哪个主题", "取消", null, names);
+
+        var chosen = topics.Value.FirstOrDefault(topic => topic.Name == choice);
+
+        if (chosen is null && choice != "清除主要主题")
+        {
+            return;
+        }
+
+        var assigned = await _topics.AssignAsync(
+            inputId,
+            chosen?.Id,
+            secondaryTopicIds: [],
+            CancellationToken.None);
+
+        if (!assigned.Succeeded)
+        {
+            TodayActionStatus.Text = ReflectionReview.DescribeTransportFailure(assigned.FailureCode);
+            return;
+        }
+
+        await RefreshAsync();
+        TodayActionStatus.Text = chosen is null ? "已清除主要主题。" : $"已归入「{chosen.Name}」。";
+    });
+
+    private async void OnRetryTranscriptionClicked(object? sender, EventArgs e) => await GuardAsync(async () =>
+    {
+        if (sender is not Button { CommandParameter: string inputId })
+        {
+            return;
+        }
+
+        var retried = await _api.RetryTranscriptionAsync(inputId, CancellationToken.None);
+
+        if (!retried.Succeeded)
+        {
+            TodayActionStatus.Text = ReflectionReview.DescribeTransportFailure(retried.FailureCode);
+            return;
+        }
+
+        TodayActionStatus.Text = "已重新排队转写。";
+        await RefreshAsync();
+        UpdateTranscriptionPolling(true);
+    });
+
+    /// <summary>
+    /// §15.2 step 6's 语音输入可播放, and the reason A.1 keeps audio for thirty days: a transcript the user doubts has
+    /// to be checkable against the recording it came from.
+    /// </summary>
+    private async void OnPlayClicked(object? sender, EventArgs e) => await GuardAsync(async () =>
+    {
+        if (sender is not Button { CommandParameter: string inputId })
+        {
+            return;
+        }
+
+        var clip = await _instance.GetAudioAsync(inputId, CancellationToken.None);
+
+        if (!clip.Succeeded)
+        {
+            TodayActionStatus.Text = clip.FailureCode == "input.audio.deleted"
+                ? "这段录音已经被保留策略删除了，转写与记录仍然保留。"
+                : ReflectionReview.DescribeTransportFailure(clip.FailureCode);
+            return;
+        }
+
+        var path = await _clips.SaveAsync(inputId, clip.Value!, CancellationToken.None);
+        await _player.PlayAsync(path, CancellationToken.None);
+
+        TodayActionStatus.Text = "正在播放这段录音。";
+    });
     /// <summary>
     /// Runs one handler body and reports instead of propagating.
     /// <para>
@@ -443,7 +617,13 @@ public partial class TodayPage : ContentPage
 
         foreach (var item in items)
         {
-            _today.Add(new TodayRow(DescribeTitle(item), DescribeStatus(item)));
+            _today.Add(new TodayRow(
+                item.Id,
+                DescribeTitle(item),
+                DescribeStatus(item),
+                DescribeTopic(item),
+                CanPlay: item.HasAudio && !item.IsDeleted,
+                CanRetryTranscription: item.TranscriptionStatus == TranscriptionStatusNames.Failed));
         }
 
         TodayStatus.Text = result.FailureCode is null
@@ -455,6 +635,54 @@ public partial class TodayPage : ContentPage
         // A freshly uploaded recording is transcribed asynchronously, so the screen has to look again — otherwise it
         // says "正在转写…" until the user thinks to press sync, which is what testing on a device showed.
         UpdateTranscriptionPolling(items.Any(IsAwaitingTranscription));
+
+        await RefreshDraftAsync(contentDate);
+    }
+
+    /// <summary>
+    /// §9.1's 生成状态 and 待确认或已过期草稿提醒: what the day's draft looks like right now, and a way into it.
+    /// A day with no draft is normal (§7 forbids an empty article), so it says so rather than showing a failure.
+    /// </summary>
+    private async Task RefreshDraftAsync(string contentDate)
+    {
+        var draft = await _reflections.GetAsync(contentDate, CancellationToken.None);
+
+        if (!draft.Succeeded)
+        {
+            DraftStatus.Text = ReflectionReview.IsMissingDraft(draft.FailureCode)
+                ? "今天还没有草稿。"
+                : ReflectionReview.DescribeTransportFailure(draft.FailureCode);
+            DraftReminder.IsVisible = false;
+            OpenDraftButton.IsVisible = ReflectionReview.IsMissingDraft(draft.FailureCode);
+            return;
+        }
+
+        var reflection = draft.Value!;
+        DraftStatus.Text = $"草稿：{ReflectionReview.DescribeStatus(reflection.Status)}";
+        OpenDraftButton.IsVisible = true;
+
+        // The two states worth interrupting the user for: a draft waiting for them, and one that went stale because
+        // something arrived late (A.4).
+        var reminder = ReflectionReview.DescribeWarnings(reflection)
+            .FirstOrDefault(warning => reflection.Status is ReflectionStatusNames.ReviewRequired
+                or ReflectionStatusNames.StaleByLateInput
+                or ReflectionStatusNames.Failed
+                || warning.Contains("存疑", StringComparison.Ordinal));
+
+        DraftReminder.Text = reminder ?? string.Empty;
+        DraftReminder.IsVisible = reminder is not null;
+    }
+
+    private static string DescribeTopic(InputDto item)
+    {
+        if (item.PrimaryTopicId is not { Length: > 0 } primary && item.SecondaryTopicIds.Count == 0)
+        {
+            return "未归类";
+        }
+
+        return item.SecondaryTopicIds.Count == 0
+            ? "已归入 1 个主题"
+            : $"已归入 1 个主要主题和 {item.SecondaryTopicIds.Count} 个次要主题";
     }
 
     private static bool IsAwaitingTranscription(InputDto item) =>

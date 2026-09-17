@@ -84,6 +84,21 @@ public interface ICaptureApiClient
     /// drawing it costs one request instead of one per day.
     /// </param>
     Task<ApiResult<IReadOnlyList<InputDto>>> GetInputsAsync(string? contentDate, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Stores the user's correction to a transcript (§4.1 修订转写). The original is kept beside it — §6.1 keeps both,
+    /// because a correction is a decision the user may want to revisit.
+    /// </summary>
+    Task<ApiResult<InputDto>> ReviseTranscriptAsync(
+        string inputId,
+        string? revisedTranscript,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Asks the server to transcribe an entry again (§9.2's manual retry, for the transcription rather than the
+    /// upload). Only useful when the first attempt failed — the server refuses otherwise.
+    /// </summary>
+    Task<ApiResult<InputDto>> RetryTranscriptionAsync(string inputId, CancellationToken cancellationToken);
 }
 
 

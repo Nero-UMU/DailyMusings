@@ -2,6 +2,7 @@
 @rendermode InteractiveServer
 @attribute [Authorize]
 @inject IServiceScopeFactory ScopeFactory
+@using DailyMusings.Application.Notifications
 
 <h1>运维</h1>
 
@@ -198,6 +199,39 @@ else
     </div>
 }
 
+<h2>通知设置</h2>
+
+<p class="hint">
+    邮件只携带元数据（日期、标题、状态），不含草稿正文（§12）。客户端可以查看这里的偏好，但只有管理员能改：
+    设备令牌若能改收件地址，就等于能把当天标题发到别人邮箱。SMTP 服务器与密码在部署配置里（§10.4）。
+</p>
+
+@if (_notifications is null)
+{
+    <p>正在读取…</p>
+}
+else
+{
+    <div class="form">
+        <label>
+            收件地址
+            <input @bind="_notificationsTo" placeholder="owner@example.com" />
+        </label>
+        <label>
+            实例地址（邮件里的链接）
+            <input @bind="_notificationsInstanceUrl" placeholder="http://192.168.1.10:8080" />
+        </label>
+        <label><input type="checkbox" @bind="_notificationDraftReady" /> 草稿待确认时发信</label>
+        <label><input type="checkbox" @bind="_notificationJobFailed" /> 任务最终失败时发信</label>
+        <label><input type="checkbox" @bind="_notificationAutomatic" /> 自动发布有结果时发信</label>
+        <button @onclick="SaveNotificationsAsync" disabled="@_busy">保存通知设置</button>
+    </div>
+
+    <p class="hint">
+        SMTP：@(_notifications.SmtpConfigured ? "已配置" : "未配置，当前不会发出任何邮件")
+    </p>
+}
+
 <h2>测试连接</h2>
 
 <p class="hint">
@@ -249,6 +283,13 @@ else
     private bool _diagnosticAcknowledged;
     private bool _busy;
 
+    private NotificationSettingsView? _notifications;
+    private string? _notificationsTo;
+    private string? _notificationsInstanceUrl;
+    private bool _notificationDraftReady;
+    private bool _notificationJobFailed;
+    private bool _notificationAutomatic;
+
     protected override async Task OnInitializedAsync() => await LoadAsync();
 
     private async Task LoadAsync()
@@ -263,7 +304,37 @@ else
 
         _index = await services.GetRequiredService<GetIndexStatusUseCase>().ExecuteAsync(CancellationToken.None);
         _diagnostic = await services.GetRequiredService<ManageDiagnosticModeUseCase>().GetAsync(CancellationToken.None);
+
+        _notifications = await services
+            .GetRequiredService<ReadNotificationSettingsUseCase>()
+            .ExecuteAsync(CancellationToken.None);
+
+        _notificationsTo = _notifications.ToAddress;
+        _notificationsInstanceUrl = _notifications.InstanceUrl;
+        _notificationDraftReady = _notifications.DraftReady;
+        _notificationJobFailed = _notifications.JobFailed;
+        _notificationAutomatic = _notifications.AutomaticPublication;
     }
+
+    private async Task SaveNotificationsAsync() => await RunAsync(async services =>
+    {
+        await services
+            .GetRequiredService<UpdateNotificationSettingsUseCase>()
+            .ExecuteAsync(
+                _notificationsTo ?? string.Empty,
+                _notificationsInstanceUrl ?? string.Empty,
+                _notificationDraftReady,
+                _notificationJobFailed,
+                _notificationAutomatic,
+                CancellationToken.None);
+
+        // Read back rather than trusting the form: what the instance stored is what the next mail will use.
+        _notifications = await services
+            .GetRequiredService<ReadNotificationSettingsUseCase>()
+            .ExecuteAsync(CancellationToken.None);
+
+        _message = "已保存通知设置。";
+    });
 
     private async Task CreateExportAsync() => await RunAsync(async services =>
     {

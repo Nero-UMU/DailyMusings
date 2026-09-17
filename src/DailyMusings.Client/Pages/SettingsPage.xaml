@@ -70,6 +70,21 @@
             <Label Text="本机信息" FontAttributes="Bold" />
             <Label x:Name="DeviceInfoLabel" FontSize="12" TextColor="#656D76" />
 
+            <BoxView HeightRequest="1" Color="#E1E4E8" />
+
+            <!-- §9.3's 通知偏好. Read-only, and it says why: an administrator changes where notifications go. -->
+            <Label Text="通知偏好" FontAttributes="Bold" />
+            <Label
+                x:Name="NotificationStatus"
+                FontSize="12"
+                TextColor="#656D76" />
+            <Button
+                Text="刷新通知偏好"
+                Padding="12,4"
+                FontSize="13"
+                HorizontalOptions="Start"
+                Clicked="OnRefreshNotificationsClicked" />
+
             <Label
                 Text="客户端只保存服务器地址和设备令牌，不保存模型密钥或发布凭据。"
                 FontSize="12"

@@ -62,6 +62,27 @@ public sealed class DynamicCaptureApiClient : ICaptureApiClient
             .ConfigureAwait(false);
     }
 
+    public Task<ApiResult<InputDto>> ReviseTranscriptAsync(
+        string inputId,
+        string? revisedTranscript,
+        CancellationToken cancellationToken) =>
+        WithResultAsync(client => client.ReviseTranscriptAsync(inputId, revisedTranscript, cancellationToken));
+
+    public Task<ApiResult<InputDto>> RetryTranscriptionAsync(string inputId, CancellationToken cancellationToken) =>
+        WithResultAsync(client => client.RetryTranscriptionAsync(inputId, cancellationToken));
+
+    private async Task<ApiResult<T>> WithResultAsync<T>(Func<ICaptureApiClient, Task<ApiResult<T>>> work)
+    {
+        if (_settings.ResolveBaseUri() is not { } baseUri)
+        {
+            return ApiResult<T>.Unreachable("client.not_configured");
+        }
+
+        using var http = new HttpClient { BaseAddress = baseUri, Timeout = UploadTimeout };
+
+        return await work(new HttpCaptureApiClient(http, _tokens)).ConfigureAwait(false);
+    }
+
     private async Task<IngestResponse> WithClientAsync(Func<ICaptureApiClient, Task<IngestResponse>> work)
     {
         if (_settings.ResolveBaseUri() is not { } baseUri)

@@ -177,6 +177,10 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<IJobHandler, EmbeddingRebuildJobHandler>();
         services.AddScoped<IJobHandler, PublicationJobHandler>();
         services.AddScoped<IJobHandler, NotificationJobHandler>();
+
+        // The notification preferences, read and written through one place so the admin page and the API agree.
+        services.AddScoped<Application.Notifications.ReadNotificationSettingsUseCase>();
+        services.AddScoped<Application.Notifications.UpdateNotificationSettingsUseCase>();
         services.AddScoped<IJobHandler, AudioCleanupJobHandler>();
         services.AddScoped<IJobHandler, BackupJobHandler>();
 
