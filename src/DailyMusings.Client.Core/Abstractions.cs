@@ -73,6 +73,32 @@ public interface ICaptureApiClient
 
     /// <summary>Reads an entry back, so the UI can show transcription progress after the upload.</summary>
     Task<InputDto?> GetInputAsync(string serverInputId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Reads a day's entries. Returns a result rather than throwing, so the screen can say "连不上服务器" instead of
+    /// showing an empty day: an empty list and an unreachable server look identical to a user, and §9.2's whole
+    /// premise is that the client works with the server gone.
+    /// </summary>
+    Task<InputListResult> GetInputsAsync(string contentDate, CancellationToken cancellationToken);
+}
+
+/// <summary>
+/// What reading a day's entries produced: the entries, and whether the server was reached at all.
+/// <para>
+/// <see cref="FailureCode"/> uses the same vocabulary as <see cref="CaptureUploadException.Code"/>, so the screen has
+/// one way to explain every failure. Found by running the app on a real device with the server switched off: the read
+/// path used to throw straight out of <c>OnAppearing</c> and take the process down.
+/// </para>
+/// </summary>
+public sealed record InputListResult(IReadOnlyList<InputDto> Items, bool ServerReached, string? FailureCode)
+{
+    public static InputListResult FromServer(IReadOnlyList<InputDto> items) => new(items, true, null);
+
+    /// <summary>The request never answered, so nothing is known about the day.</summary>
+    public static InputListResult Unreachable(string failureCode) => new([], false, failureCode);
+
+    /// <summary>The server answered and refused, which is a different situation from not answering.</summary>
+    public static InputListResult Refused(string failureCode) => new([], true, failureCode);
 }
 
 /// <summary>

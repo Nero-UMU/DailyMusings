@@ -164,9 +164,10 @@ class Handler(BaseHTTPRequestHandler):
 
         if self.path.endswith("/audio/transcriptions"):
             load_map()
-            # The upload is multipart, so the audio's own bytes are one of the parts; the driver hashed
-            # exactly those bytes when it built the fixture.
-            text = _transcripts.get(_find_digest(body), "（未登记的音频）")
+            # The upload is multipart, so the audio's own bytes are one of the parts; the driver hashed exactly
+            # those bytes when it built the fixture. A "*" entry stands in for anything not registered, which is
+            # what a run with a real recorder needs: there the client chooses the bytes, not the harness.
+            text = _transcripts.get(_find_digest(body)) or _transcripts.get("*") or "（未登记的音频）"
             bump("transcriptions")
             self._send({"text": text, "language": "zh"})
             return

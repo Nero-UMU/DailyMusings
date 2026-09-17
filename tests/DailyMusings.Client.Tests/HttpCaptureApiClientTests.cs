@@ -237,4 +237,82 @@ public class HttpCaptureApiClientTests
             File.Delete(path);
         }
     }
+
+    /// <summary>
+    /// The read the Today screen makes while it appears. Sounding the same as an empty day when the server is gone
+    /// was the first half of the bug a real device found; the other half was that the exception reached an
+    /// <c>async void</c> handler and killed the process.
+    /// </summary>
+    [TestMethod]
+    public async Task Reading_a_day_reports_an_unreachable_server_instead_of_an_empty_one()
+    {
+        var client = Client(StubHttpHandler.Throwing(new HttpRequestException("connection refused")));
+
+        var result = await client.GetInputsAsync("2026-03-01", CancellationToken.None);
+
+        Assert.IsFalse(result.ServerReached);
+        Assert.AreEqual("client.network_unreachable", result.FailureCode);
+        Assert.AreEqual(0, result.Items.Count);
+    }
+
+    [TestMethod]
+    public async Task Reading_a_day_asks_for_the_date_and_uses_the_device_token()
+    {
+        const string body = """
+            {"items":[{"id":"server-1","sourceType":"text","contentDate":"2026-03-01",
+            "createdAtUtc":"2026-03-01T15:50:00.0000000+00:00","createdOffsetMinutes":480,"originalTranscript":"一句话。",
+            "revisedTranscript":null,"transcript":"一句话。","transcriptionStatus":"notApplicable","failureCode":null,
+            "hasAudio":false,"audioContentType":null,"audioDurationSeconds":null,"isDeleted":false,
+            "transcriptionJobStatus":null,"transcriptionJobAttempts":0,"primaryTopicId":null,"secondaryTopicIds":[]}]}
+            """;
+
+        var handler = StubHttpHandler.AlwaysJson(HttpStatusCode.OK, body);
+        var client = Client(handler);
+
+        var result = await client.GetInputsAsync("2026-03-01", CancellationToken.None);
+
+        Assert.IsTrue(result.ServerReached);
+        Assert.IsNull(result.FailureCode);
+        Assert.AreEqual(1, result.Items.Count);
+        Assert.AreEqual("一句话。", result.Items[0].Transcript);
+
+        var request = handler.Requests.Single();
+        Assert.AreEqual("/api/inputs", request.RequestUri!.AbsolutePath);
+        StringAssert.Contains(request.RequestUri.Query, "date=2026-03-01");
+        Assert.AreEqual("device-token", request.Headers.Authorization!.Parameter);
+    }
+
+    [TestMethod]
+    public async Task Reading_a_day_says_so_when_the_device_token_was_rejected_or_the_answer_was_unreadable()
+    {
+        var rejected = await Client(StubHttpHandler.AlwaysStatus(HttpStatusCode.Unauthorized))
+            .GetInputsAsync("2026-03-01", CancellationToken.None);
+
+        // The server answered, so this is not "unreachable": the user has to pair the device again.
+        Assert.IsTrue(rejected.ServerReached);
+        Assert.AreEqual("auth.device_token_rejected", rejected.FailureCode);
+
+        var unreadable = await Client(StubHttpHandler.AlwaysJson(HttpStatusCode.OK, "this is not json"))
+            .GetInputsAsync("2026-03-01", CancellationToken.None);
+
+        Assert.AreEqual("client.malformed_response", unreadable.FailureCode);
+
+        var broken = await Client(StubHttpHandler.AlwaysStatus(HttpStatusCode.InternalServerError))
+            .GetInputsAsync("2026-03-01", CancellationToken.None);
+
+        Assert.AreEqual("server.rejected.500", broken.FailureCode);
+    }
+
+    [TestMethod]
+    public async Task Reading_a_day_never_sends_a_request_from_an_unpaired_device()
+    {
+        var handler = StubHttpHandler.AlwaysJson(HttpStatusCode.OK, "{}");
+        var client = Client(handler, token: null);
+
+        var result = await client.GetInputsAsync("2026-03-01", CancellationToken.None);
+
+        Assert.IsFalse(result.ServerReached);
+        Assert.AreEqual("client.not_paired", result.FailureCode);
+        Assert.AreEqual(0, handler.Requests.Count);
+    }
 }

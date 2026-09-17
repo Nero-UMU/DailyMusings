@@ -112,6 +112,12 @@ internal sealed class FakeCaptureApiClient : ICaptureApiClient
     public Task<InputDto?> GetInputAsync(string serverInputId, CancellationToken cancellationToken) =>
         Task.FromResult<InputDto?>(null);
 
+    /// <summary>What the server would answer when a day is read. Defaults to "reached, nothing there".</summary>
+    public InputListResult InputsResult { get; set; } = InputListResult.FromServer([]);
+
+    public Task<InputListResult> GetInputsAsync(string contentDate, CancellationToken cancellationToken) =>
+        Task.FromResult(InputsResult);
+
     private IngestResponse BuildResponse(string idempotencyKey, string sourceType)
     {
         var id = $"server-{_nextServerId++}";

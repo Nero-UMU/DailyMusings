@@ -95,6 +95,77 @@ public sealed class HttpCaptureApiClient : ICaptureApiClient
             .ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Reads a day's entries without ever throwing on a transport failure (docs/开发指导.md §9.2).
+    /// <para>
+    /// This is the one read the capture screen makes, and it runs while the screen is appearing — an exception here
+    /// used to escape an <c>async void</c> handler and kill the app. It is also a read that must not lie: an empty
+    /// list means "the server has nothing for today", so a server that could not be reached has to be reported as
+    /// exactly that rather than as an empty day.
+    /// </para>
+    /// </summary>
+    public async Task<InputListResult> GetInputsAsync(string contentDate, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(contentDate);
+
+        using var request = new HttpRequestMessage(
+            HttpMethod.Get,
+            $"/api/inputs?date={Uri.EscapeDataString(contentDate)}");
+
+        try
+        {
+            await AuthorizeAsync(request, cancellationToken).ConfigureAwait(false);
+        }
+        catch (CaptureUploadException exception)
+        {
+            // Not paired: there is nothing to read, and the screen says so in its own words.
+            return InputListResult.Unreachable(exception.Code);
+        }
+
+        HttpResponseMessage response;
+
+        try
+        {
+            response = await _httpClient
+                .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (HttpRequestException)
+        {
+            return InputListResult.Unreachable("client.network_unreachable");
+        }
+        catch (TaskCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return InputListResult.Unreachable("client.timeout");
+        }
+
+        using (response)
+        {
+            if (response.StatusCode == HttpStatusCode.Unauthorized)
+            {
+                return InputListResult.Refused("auth.device_token_rejected");
+            }
+
+            if (!response.IsSuccessStatusCode)
+            {
+                return InputListResult.Refused($"server.rejected.{(int)response.StatusCode}");
+            }
+
+            try
+            {
+                var page = await response.Content
+                    .ReadFromJsonAsync<InputListResponse>(cancellationToken)
+                    .ConfigureAwait(false);
+
+                return InputListResult.FromServer(page?.Items ?? []);
+            }
+            catch (Exception exception) when (exception is JsonException or NotSupportedException)
+            {
+                return InputListResult.Refused("client.malformed_response");
+            }
+        }
+    }
+
     private async Task<IngestResponse> SendAsync(
         Func<HttpRequestMessage> requestFactory,
         CancellationToken cancellationToken)

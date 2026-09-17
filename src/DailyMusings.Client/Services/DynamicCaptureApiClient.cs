@@ -46,35 +46,20 @@ public sealed class DynamicCaptureApiClient : ICaptureApiClient
     }
 
     /// <summary>Reads a day's entries, so the timeline reflects the server rather than a second local copy.</summary>
-    public async Task<IReadOnlyList<InputDto>> GetInputsAsync(string contentDate, CancellationToken cancellationToken)
+    public async Task<InputListResult> GetInputsAsync(string contentDate, CancellationToken cancellationToken)
     {
         if (_settings.ResolveBaseUri() is not { } baseUri)
         {
-            return [];
+            return InputListResult.Unreachable("client.not_configured");
         }
 
         using var http = new HttpClient { BaseAddress = baseUri, Timeout = TimeSpan.FromSeconds(30) };
 
-        if (await _tokens.GetTokenAsync(cancellationToken).ConfigureAwait(false) is not { } token)
-        {
-            return [];
-        }
-
-        using var request = new HttpRequestMessage(HttpMethod.Get, $"api/inputs?date={contentDate}");
-        request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
-
-        using var response = await http.SendAsync(request, cancellationToken).ConfigureAwait(false);
-
-        if (!response.IsSuccessStatusCode)
-        {
-            return [];
-        }
-
-        var page = await response.Content
-            .ReadFromJsonAsync<InputListResponse>(cancellationToken)
+        // The read path classifies its own failures; a token that is missing or rejected comes back as a result
+        // rather than an exception, because the screen has to survive that.
+        return await new HttpCaptureApiClient(http, _tokens)
+            .GetInputsAsync(contentDate, cancellationToken)
             .ConfigureAwait(false);
-
-        return page?.Items ?? [];
     }
 
     private async Task<IngestResponse> WithClientAsync(Func<ICaptureApiClient, Task<IngestResponse>> work)

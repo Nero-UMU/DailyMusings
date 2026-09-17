@@ -71,9 +71,18 @@ public partial class TodayPage : ContentPage
     {
         base.OnAppearing();
 
-        InsecureBanner.IsVisible = _settings.IsInsecureConnection;
+        // Nothing in an async void handler may throw: this one used to take the whole process down when the server
+        // was unreachable, which is the one situation §9.2 requires the screen to handle gracefully.
+        try
+        {
+            InsecureBanner.IsVisible = _settings.IsInsecureConnection;
 
-        await RefreshAsync();
+            await RefreshAsync();
+        }
+        catch (Exception exception)
+        {
+            SyncStatus.Text = $"本机内容读取失败：{exception.Message}";
+        }
 
         // Sync on open, but never block the screen on it: the queue is the source of truth the user sees.
         _ = SyncQuietlyAsync();
@@ -97,18 +106,40 @@ public partial class TodayPage : ContentPage
 
         try
         {
-            if (_recorder.IsRecording)
+            await GuardAsync(async () =>
             {
-                await StopAndSaveAsync();
-            }
-            else
-            {
-                await StartRecordingAsync();
-            }
+                if (_recorder.IsRecording)
+                {
+                    await StopAndSaveAsync();
+                }
+                else
+                {
+                    await StartRecordingAsync();
+                }
+            });
         }
         finally
         {
             _busy = false;
+        }
+    }
+
+    /// <summary>
+    /// Runs one handler body and reports instead of propagating.
+    /// <para>
+    /// Only the top of an <c>async void</c> handler can do this, and it is the difference between "the app told me
+    /// something went wrong" and "the app vanished". A real device with the server switched off found the second.
+    /// </para>
+    /// </summary>
+    private async Task GuardAsync(Func<Task> work)
+    {
+        try
+        {
+            await work();
+        }
+        catch (Exception exception)
+        {
+            RecordStatus.Text = $"操作失败：{exception.Message}";
         }
     }
 
@@ -181,31 +212,34 @@ public partial class TodayPage : ContentPage
 
     private async void OnSaveTextClicked(object? sender, EventArgs e)
     {
-        var text = TextEditor.Text;
-
-        if (string.IsNullOrWhiteSpace(text))
+        await GuardAsync(async () =>
         {
-            RecordStatus.Text = "还没有写内容。";
-            return;
-        }
+            var text = TextEditor.Text;
 
-        PendingCapture capture;
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                RecordStatus.Text = "还没有写内容。";
+                return;
+            }
 
-        try
-        {
-            capture = await _controller.SaveTextCaptureAsync(text, CancellationToken.None);
-            TextEditor.Text = string.Empty;
-            RecordStatus.Text = "已保存到本机，正在上传…";
-        }
-        catch (Exception exception)
-        {
-            RecordStatus.Text = $"保存失败：{exception.Message}";
-            return;
-        }
+            PendingCapture capture;
 
-        await RefreshAsync();
-        await SyncQuietlyAsync();
-        await ReportCaptureOutcomeAsync(capture.Id);
+            try
+            {
+                capture = await _controller.SaveTextCaptureAsync(text, CancellationToken.None);
+                TextEditor.Text = string.Empty;
+                RecordStatus.Text = "已保存到本机，正在上传…";
+            }
+            catch (Exception exception)
+            {
+                RecordStatus.Text = $"保存失败：{exception.Message}";
+                return;
+            }
+
+            await RefreshAsync();
+            await SyncQuietlyAsync();
+            await ReportCaptureOutcomeAsync(capture.Id);
+        });
     }
 
     /// <summary>
@@ -239,7 +273,7 @@ public partial class TodayPage : ContentPage
         };
     }
 
-    private async void OnSyncClicked(object? sender, EventArgs e) => await SyncQuietlyAsync();
+    private async void OnSyncClicked(object? sender, EventArgs e) => await GuardAsync(SyncQuietlyAsync);
 
     private async void OnRetryClicked(object? sender, EventArgs e)
     {
@@ -248,9 +282,12 @@ public partial class TodayPage : ContentPage
             return;
         }
 
-        await _controller.RetryAsync(captureId, CancellationToken.None);
-        await RefreshAsync();
-        await SyncQuietlyAsync();
+        await GuardAsync(async () =>
+        {
+            await _controller.RetryAsync(captureId, CancellationToken.None);
+            await RefreshAsync();
+            await SyncQuietlyAsync();
+        });
     }
 
     private async void OnDiscardClicked(object? sender, EventArgs e)
@@ -271,8 +308,11 @@ public partial class TodayPage : ContentPage
             return;
         }
 
-        await _controller.DiscardAsync(captureId, CancellationToken.None);
-        await RefreshAsync();
+        await GuardAsync(async () =>
+        {
+            await _controller.DiscardAsync(captureId, CancellationToken.None);
+            await RefreshAsync();
+        });
     }
 
     private async Task SyncQuietlyAsync()
@@ -305,7 +345,15 @@ public partial class TodayPage : ContentPage
             SyncStatus.Text = $"同步失败：{exception.Message}";
         }
 
-        await RefreshAsync();
+        // The refresh is inside the same guard: a failed read must not escape from here either.
+        try
+        {
+            await RefreshAsync();
+        }
+        catch (Exception exception)
+        {
+            SyncStatus.Text = $"本机内容读取失败：{exception.Message}";
+        }
     }
 
     private async Task RefreshAsync()
@@ -327,7 +375,6 @@ public partial class TodayPage : ContentPage
 
         await RefreshTodayAsync();
     }
-
     private static string DescribeQueueDetail(PendingCapture capture)
     {
         var preview = capture.Kind == CaptureKind.Text
@@ -366,20 +413,45 @@ public partial class TodayPage : ContentPage
         }
 
         var contentDate = DateTimeOffset.Now.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
-        var items = await _api.GetInputsAsync(contentDate, CancellationToken.None);
+        var result = await _api.GetInputsAsync(contentDate, CancellationToken.None);
 
-        foreach (var item in items)
+        // "Nothing on the server today" and "the server could not be reached" are different facts, and saying the
+        // first when the second is true is the kind of quiet lie this screen must not tell.
+        if (!result.ServerReached)
+        {
+            UpdateTranscriptionPolling(false);
+            TodayStatus.Text = result.FailureCode switch
+            {
+                "client.not_paired" => "尚未配对设备，请到设置页输入配对码。",
+                "client.timeout" => "服务器响应超时，稍后点「立即同步」再试。",
+                "client.not_configured" => "尚未配置服务器地址。",
+                _ => "连不上服务器，暂时看不到服务器上的内容；本机待上传的内容仍在下面。",
+            };
+
+            return;
+        }
+
+        if (result.FailureCode == "auth.device_token_rejected")
+        {
+            UpdateTranscriptionPolling(false);
+            TodayStatus.Text = "设备令牌已失效，请到设置页重新配对。";
+            return;
+        }
+
+        foreach (var item in result.Items)
         {
             _today.Add(new TodayRow(DescribeTitle(item), DescribeStatus(item)));
         }
 
-        TodayStatus.Text = items.Count == 0
-            ? "今天还没有上传任何内容。"
-            : $"共 {items.Count} 条。";
+        TodayStatus.Text = result.FailureCode is null
+            ? result.Items.Count == 0
+                ? "今天还没有上传任何内容。"
+                : $"共 {result.Items.Count} 条。"
+            : $"读取今天的内容失败（{result.FailureCode}）。";
 
         // A freshly uploaded recording is transcribed asynchronously, so the screen has to look again — otherwise it
         // says "正在转写…" until the user thinks to press sync, which is what testing on a device showed.
-        UpdateTranscriptionPolling(items.Any(IsAwaitingTranscription));
+        UpdateTranscriptionPolling(result.Items.Any(IsAwaitingTranscription));
     }
 
     private static bool IsAwaitingTranscription(InputDto item) =>
