@@ -8,6 +8,14 @@
   microphone is requested separately as a device capability — without which MediaCapture refuses to start and
   recording fails on a machine that has a perfectly good microphone. That is the same silent failure the Android
   side hit with RECORD_AUDIO.
+
+  The image attributes say `$placeholder$.png`, and they have to keep saying it. That token is what
+  `Microsoft.Maui.Resizetizer.GeneratePackageAppxManifest` replaces with the names of the icon and splash images
+  the build actually generated (`appiconStoreLogo.png`, `splashSplashScreen.png`, …). Writing the older
+  `Assets\Square150x150Logo.png` paths here — which look right, and are what pre-MAUI templates used — leaves them
+  untouched, so the package ships a manifest pointing at files that are not inside it. Found by installing the
+  MSIX, the one step that had never been taken: `Add-AppxPackage` refused the package with 0x80070003
+  「找不到初始屏幕图像 [SplashScreen.png]」, which is exactly this mismatch.
 -->
 <Package
     xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
@@ -21,7 +29,7 @@
   <Properties>
     <DisplayName>每日随想</DisplayName>
     <PublisherDisplayName>DailyMusings</PublisherDisplayName>
-    <Logo>Assets\StoreLogo.png</Logo>
+    <Logo>$placeholder$.png</Logo>
   </Properties>
 
   <Dependencies>
@@ -38,11 +46,11 @@
       <uap:VisualElements
           DisplayName="每日随想"
           Description="捕捉想法，成文于每日"
-          Square150x150Logo="Assets\Square150x150Logo.png"
-          Square44x44Logo="Assets\Square44x44Logo.png"
+          Square150x150Logo="$placeholder$.png"
+          Square44x44Logo="$placeholder$.png"
           BackgroundColor="transparent">
-        <uap:DefaultTile Wide310x150Logo="Assets\Wide310x150Logo.png" />
-        <uap:SplashScreen Image="Assets\SplashScreen.png" />
+        <uap:DefaultTile Wide310x150Logo="$placeholder$.png" />
+        <uap:SplashScreen Image="$placeholder$.png" />
       </uap:VisualElements>
     </Application>
   </Applications>

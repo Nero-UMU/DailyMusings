@@ -48,8 +48,7 @@ public partial class SettingsPage : ContentPage
         try
         {
             await RefreshAsync();
-            await RefreshNotificationsAsync();
-            await RefreshModelsAsync();
+            await RefreshInstanceInfoAsync();
         }
         catch (Exception exception)
         {
@@ -147,6 +146,7 @@ public partial class SettingsPage : ContentPage
         {
             _settings.ServerBaseUrl = null;
             await RefreshAsync();
+            await RefreshInstanceInfoAsync();
             ServerStatus.Text = "已清除服务器地址。";
             return;
         }
@@ -178,6 +178,7 @@ public partial class SettingsPage : ContentPage
 
         _settings.ServerBaseUrl = uri.ToString();
         await RefreshAsync();
+        await RefreshInstanceInfoAsync();
         ServerStatus.Text = "地址已保存。";
     }
 
@@ -210,7 +211,12 @@ public partial class SettingsPage : ContentPage
         {
             PairingCodeEntry.Text = string.Empty;
             PairingStatus.Text = $"配对成功：{result.DeviceName}。录音与文字现在会自动上传。";
+
+            // Both sections only become readable once the device has a token, so pairing is exactly when they
+            // have to be read. Without this the page kept telling a freshly paired device to go and pair —
+            // found by pairing the packaged Windows client, where the stale hint sat right below the success line.
             await RefreshAsync();
+            await RefreshInstanceInfoAsync();
             return;
         }
 
@@ -235,7 +241,18 @@ public partial class SettingsPage : ContentPage
         // The offline queue is deliberately left alone: unpairing must not throw away thoughts that were never sent.
         PairingStatus.Text = "已解除配对。待上传的内容仍然保留在本机。";
         await RefreshAsync();
+        await RefreshInstanceInfoAsync();
+    }
+
+    /// <summary>
+    /// Re-reads everything the instance tells this device: the notification preferences and the model names.
+    /// They share one lifetime — both need a token, and both go stale the moment the address or the pairing
+    /// changes — so they are refreshed together rather than one caller at a time.
+    /// </summary>
+    private async Task RefreshInstanceInfoAsync()
+    {
         await RefreshNotificationsAsync();
+        await RefreshModelsAsync();
     }
 
     private async Task RefreshAsync()
