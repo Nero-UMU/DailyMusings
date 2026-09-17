@@ -1,7 +1,4 @@
 using System.Globalization;
-using System.Net;
-using System.Net.Mail;
-using System.Text;
 using DailyMusings.Application.Abstractions;
 using DailyMusings.Application.Configuration;
 using DailyMusings.Infrastructure.Configuration;
@@ -43,10 +40,13 @@ public sealed class ConfigurationSmtpSettingsProvider : ISmtpSettingsProvider
             Enabled: StoredSettings.Boolean(stored, SmtpSettingKeys.Enabled, section.GetValue("Enabled", defaults.Enabled)),
             Host: StoredSettings.String(stored, SmtpSettingKeys.Host, section.GetValue("Host", defaults.Host)) ?? defaults.Host,
             Port: StoredSettings.Integer(stored, SmtpSettingKeys.Port, section.GetValue("Port", defaults.Port)),
-            UseStartTls: StoredSettings.Boolean(
+            Security: StoredSettings.Security(
                 stored,
+                SmtpSettingKeys.Security,
                 SmtpSettingKeys.UseStartTls,
-                section.GetValue("UseStartTls", defaults.UseStartTls)),
+                section.GetValue<string?>("Security"),
+                section.GetValue<bool?>("UseStartTls"),
+                defaults.Security),
             Username: StoredSettings.Username(stored, SmtpSettingKeys.Username, section.GetValue<string?>("Username")),
             SecretName: StoredSettings.String(stored, SmtpSettingKeys.SecretName, section.GetValue("SecretName", defaults.SecretName))
                 ?? defaults.SecretName,
@@ -121,10 +121,9 @@ public sealed class ConfigurationNotificationSettingsProvider : INotificationSet
 /// <summary>
 /// Sends mail over plain SMTP (docs/开发指导.md §12).
 /// <para>
-/// <see cref="SmtpClient"/> is the framework's own client and is used deliberately: it covers STARTTLS and
-/// username/password authentication, which is everything a generic SMTP setting needs, and §20 asks this project
-/// not to add machinery before it is needed. A personal instance talking to a relay does not need the features a
-/// third-party library would add.
+/// The protocol lives in <see cref="SmtpMailTransport"/>; this type is the part that knows where the settings and the
+/// password come from (§10.4) and turns "no relay configured" into a failure the job can act on. It replaced the
+/// framework's <c>SmtpClient</c>, which cannot do the implicit TLS that port 465 needs — see the transport for why.
 /// </para>
 /// <para>
 /// The message never contains the user's writing: see <c>NotificationComposer</c>. Failures are classified like
@@ -160,60 +159,25 @@ public sealed class SmtpEmailSender : IEmailSender
                 "No SMTP server is configured.");
         }
 
-        using var client = new SmtpClient(settings.Host, settings.Port)
-        {
-            EnableSsl = settings.UseStartTls,
-            Timeout = (int)settings.Timeout.TotalMilliseconds,
-            DeliveryMethod = SmtpDeliveryMethod.Network,
-        };
-
-        if (!string.IsNullOrWhiteSpace(settings.Username))
-        {
-            var password = _secrets.TryGet(settings.SecretName)
+        // The secret is resolved here, at send time, and handed to the transport — it never reaches the settings
+        // table, an export or a backup (§10.4).
+        var password = string.IsNullOrWhiteSpace(settings.Username)
+            ? null
+            : _secrets.TryGet(settings.SecretName)
                 ?? throw new PermanentExternalFailureException(
                     "notification.secret_missing",
                     $"The secret '{settings.SecretName}' is not provisioned.");
 
-            client.UseDefaultCredentials = false;
-            client.Credentials = new NetworkCredential(settings.Username, password);
-        }
+        var transport = new SmtpMailTransport(settings, password);
 
-        using var mail = new MailMessage
-        {
-            From = new MailAddress(settings.FromAddress, settings.FromName, Encoding.UTF8),
-            Subject = message.Subject,
-            SubjectEncoding = Encoding.UTF8,
-            Body = message.Body,
-            BodyEncoding = Encoding.UTF8,
-            IsBodyHtml = false,
-        };
+        // The transport reports its own failures, already classified as permanent or transient (§14), and the
+        // addresses it was given are refused before anything reaches the wire if they are malformed.
+        await transport.SendAsync(message, cancellationToken).ConfigureAwait(false);
 
-        mail.To.Add(message.To);
-
-        try
-        {
-            await client.SendMailAsync(mail, cancellationToken).ConfigureAwait(false);
-        }
-        catch (SmtpException exception)
-        {
-            // The status code only — never the message body, which names the user's draft (§16).
-            _logger.LogWarning(
-                "SMTP server answered {StatusCode}.",
-                exception.StatusCode);
-
-            // A refused credential or a malformed address will be refused again; a connection problem will not.
-            throw exception.StatusCode is SmtpStatusCode.ClientNotPermitted
-                    or SmtpStatusCode.MustIssueStartTlsFirst
-                ? new PermanentExternalFailureException("notification.rejected", "The SMTP server rejected the message.")
-                : new TransientExternalFailureException("notification.smtp_failed", "The SMTP server could not be reached.", exception);
-        }
-        catch (InvalidOperationException exception)
-        {
-            throw new PermanentExternalFailureException(
-                "notification.invalid_message",
-                $"The notification could not be addressed: {exception.Message}");
-        }
-
-        _logger.LogInformation("Sent a notification.");
+        _logger.LogInformation(
+            "Sent a notification through {Host}:{Port} using {Security}.",
+            settings.Host,
+            settings.Port,
+            SmtpSecurityNames.ToToken(settings.Security));
     }
 }

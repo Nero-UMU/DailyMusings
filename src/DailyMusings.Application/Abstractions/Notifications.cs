@@ -3,6 +3,27 @@ using DailyMusings.Domain.Notifications;
 namespace DailyMusings.Application.Abstractions;
 
 /// <summary>
+/// How the connection to the relay is protected (docs/开发指导.md §12).
+/// <para>
+/// Named after what the wire does rather than after a checkbox, because the two labels every mail form uses mean the
+/// opposite of each other: "SSL: true" is <see cref="ImplicitTls"/> (a handshake from the very first byte, port 465),
+/// while "STARTTLS: true" is <see cref="StartTls"/> (greet in the clear, then upgrade, port 587). An operator copying
+/// a configuration from any other program needs both to be expressible, so both are.
+/// </para>
+/// </summary>
+public enum SmtpSecurity
+{
+    /// <summary>No encryption at all. Only ever right for a relay on localhost (port 25 or a test sink on 1025).</summary>
+    None = 0,
+
+    /// <summary>Explicit TLS: connect in the clear, EHLO, then <c>STARTTLS</c>. What port 587 means.</summary>
+    StartTls = 1,
+
+    /// <summary>Implicit TLS: the connection <em>is</em> a TLS handshake, greeting included. What port 465 means.</summary>
+    ImplicitTls = 2,
+}
+
+/// <summary>
 /// SMTP configuration (docs/开发指导.md §12). Generic on purpose: the guide explicitly does not want a
 /// per-provider integration, and every provider this product will meet speaks plain SMTP.
 /// <para>
@@ -14,7 +35,7 @@ public sealed record SmtpSettings(
     bool Enabled,
     string Host,
     int Port,
-    bool UseStartTls,
+    SmtpSecurity Security,
     string? Username,
     string SecretName,
     string FromAddress,
@@ -26,7 +47,7 @@ public sealed record SmtpSettings(
         Enabled: false,
         Host: "127.0.0.1",
         Port: 1025,
-        UseStartTls: false,
+        Security: SmtpSecurity.None,
         Username: null,
         SecretName: "smtp-password",
         FromAddress: "dailymusings@localhost",

@@ -128,4 +128,56 @@ public class ModelSettingsPrecedenceTests
         Assert.IsTrue(fromAdmin.Enabled);
         Assert.IsNull(fromAdmin.Username, "An empty stored username means 'none', not 'fall back to the environment'.");
     }
+
+    /// <summary>
+    /// The setting was a boolean before implicit TLS existed, and both the old and the new spelling have to keep
+    /// working: an instance that saved "use STARTTLS" must not stop sending, and a compose file that sets
+    /// <c>Smtp__UseStartTls</c> must not be silently ignored.
+    /// </summary>
+    [TestMethod]
+    public async Task Smtp_security_reads_the_new_key_and_still_honours_the_old_boolean()
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        var store = Store(database);
+        var update = new UpdateSmtpSettingsUseCase(store);
+
+        // A deployment configured only from compose, in the old spelling.
+        var legacyCompose = new ConfigurationSmtpSettingsProvider(
+            Configuration(("Smtp:UseStartTls", "true")),
+            store);
+
+        Assert.AreEqual(SmtpSecurity.StartTls, (await legacyCompose.GetAsync(CancellationToken.None)).Security);
+
+        // The new spelling, which can also say "implicit TLS on 465".
+        var newCompose = new ConfigurationSmtpSettingsProvider(Configuration(("Smtp:Security", "ssl")), store);
+        Assert.AreEqual(SmtpSecurity.ImplicitTls, (await newCompose.GetAsync(CancellationToken.None)).Security);
+
+        // An unreadable value falls through to the next source instead of stopping the notification job.
+        var typo = new ConfigurationSmtpSettingsProvider(
+            Configuration(("Smtp:Security", "yes-please"), ("Smtp:UseStartTls", "false")),
+            store);
+
+        Assert.AreEqual(SmtpSecurity.None, (await typo.GetAsync(CancellationToken.None)).Security);
+
+        // The admin page wins over both, in whichever spelling it stored.
+        await update.ExecuteAsync(
+            new SmtpSettingsUpdate(null, null, 465, SmtpSecurity.ImplicitTls, null, null, null, null, null),
+            CancellationToken.None);
+
+        var fromAdmin = await new ConfigurationSmtpSettingsProvider(
+            Configuration(("Smtp:Security", "starttls")),
+            store).GetAsync(CancellationToken.None);
+
+        Assert.AreEqual(SmtpSecurity.ImplicitTls, fromAdmin.Security);
+
+        // And an instance that only ever had the old boolean stored keeps working.
+        await using var legacyDatabase = await TestDatabase.CreateAsync();
+        var legacyStore = Store(legacyDatabase);
+        await legacyStore.SetAsync(SmtpSettingKeys.UseStartTls, "true", CancellationToken.None);
+
+        var fromLegacyStore = await new ConfigurationSmtpSettingsProvider(Configuration(), legacyStore)
+            .GetAsync(CancellationToken.None);
+
+        Assert.AreEqual(SmtpSecurity.StartTls, fromLegacyStore.Security);
+    }
 }

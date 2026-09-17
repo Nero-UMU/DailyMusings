@@ -1,6 +1,8 @@
 using System.Globalization;
 using System.Net.Http.Headers;
+using System.Net.Security;
 using System.Net.Sockets;
+using System.Security.Authentication;
 using System.Text;
 using DailyMusings.Application.Abstractions;
 using DailyMusings.Domain.Publishing;
@@ -107,7 +109,13 @@ public sealed class ExternalServiceProbe : IExternalServiceProbe
     private readonly IPublishTargetRepository _targets;
     private readonly IPublishDestinationProvider _destinations;
     private readonly ILogger<ExternalServiceProbe> _logger;
+    private readonly RemoteCertificateValidationCallback? _trustServer;
 
+    /// <param name="trustServer">
+    /// Certificate validation for the SMTP probe. Null — what the container passes — means the platform's own
+    /// validation, which is the only sane default; the parameter exists so a relay behind a private CA can be trusted
+    /// explicitly, and so the test can point the probe at a throwaway certificate. Same seam as the transport's.
+    /// </param>
     public ExternalServiceProbe(
         HttpClient httpClient,
         ISecretStore secrets,
@@ -117,7 +125,8 @@ public sealed class ExternalServiceProbe : IExternalServiceProbe
         ISmtpSettingsProvider smtp,
         IPublishTargetRepository targets,
         IPublishDestinationProvider destinations,
-        ILogger<ExternalServiceProbe> logger)
+        ILogger<ExternalServiceProbe> logger,
+        RemoteCertificateValidationCallback? trustServer = null)
     {
         _httpClient = httpClient;
         _secrets = secrets;
@@ -128,6 +137,7 @@ public sealed class ExternalServiceProbe : IExternalServiceProbe
         _targets = targets;
         _destinations = destinations;
         _logger = logger;
+        _trustServer = trustServer;
     }
 
     public async Task<ProbeResult> ProbeAsync(ExternalService service, CancellationToken cancellationToken)
@@ -322,7 +332,25 @@ public sealed class ExternalServiceProbe : IExternalServiceProbe
 
             await client.ConnectAsync(settings.Host, settings.Port, timeout.Token).ConfigureAwait(false);
 
-            using var stream = client.GetStream();
+            Stream stream = client.GetStream();
+
+            if (settings.Security == SmtpSecurity.ImplicitTls)
+            {
+                // Port 465 says nothing at all until the handshake is done, so a plaintext greeting read would just
+                // sit there until the timeout and report the relay as unreachable.
+                var secure = new SslStream(stream, leaveInnerStreamOpen: false, _trustServer);
+
+                await secure.AuthenticateAsClientAsync(
+                    new SslClientAuthenticationOptions
+                    {
+                        TargetHost = settings.Host,
+                        EnabledSslProtocols = SslProtocols.None,
+                    },
+                    timeout.Token).ConfigureAwait(false);
+
+                stream = secure;
+            }
+
             var buffer = new byte[256];
 
             var read = await stream.ReadAsync(buffer, timeout.Token).ConfigureAwait(false);
@@ -331,6 +359,11 @@ public sealed class ExternalServiceProbe : IExternalServiceProbe
             return greeting.StartsWith("220", StringComparison.Ordinal)
                 ? ProbeResult.Success($"The SMTP server greeted with {greeting[..3]}.")
                 : ProbeResult.Failure("probe.smtp.unexpected_greeting", "Something answered, but not with an SMTP greeting.");
+        }
+        catch (AuthenticationException exception)
+        {
+            // Permanent by nature: the certificate or the protocol version will not change on its own.
+            return ProbeResult.Failure("probe.smtp.tls_failed", $"TLS failed: {exception.Message}");
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {

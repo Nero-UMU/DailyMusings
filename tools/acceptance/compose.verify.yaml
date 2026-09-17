@@ -37,7 +37,9 @@ services:
       Smtp__Enabled: "true"
       Smtp__Host: 127.0.0.1
       Smtp__Port: "1025"
-      Smtp__UseStartTls: "false"
+      # Mailpit on localhost, so no encryption. The older Smtp__UseStartTls spelling still works and is covered by
+      # the settings-precedence tests.
+      Smtp__Security: none
       Smtp__FromAddress: dailymusings@example.test
       Smtp__FromName: 每日随想
       Smtp__SecretName: smtp-password

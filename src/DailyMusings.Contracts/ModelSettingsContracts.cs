@@ -39,7 +39,12 @@ public sealed record SmtpSettingsDto(
     bool Enabled,
     string Host,
     int Port,
-    bool UseStartTls,
+
+    /// <summary>
+    /// <c>none</c>, <c>starttls</c> (587) or <c>ssl</c> (465) — the three spellings
+    /// <c>SmtpSecurityNames</c> accepts, so a configuration copied from another program can be typed in as-is.
+    /// </summary>
+    string Security,
     string? Username,
 
     /// <summary>The password's <em>name</em>, never its value (§10.4).</summary>
@@ -52,7 +57,7 @@ public sealed record UpdateSmtpSettingsRequest(
     bool? Enabled,
     string? Host,
     int? Port,
-    bool? UseStartTls,
+    string? Security,
     string? Username,
     string? SecretName,
     string? FromAddress,

@@ -109,7 +109,7 @@ public class ModelSettingsApiTests
 
         using var updated = await instance.Client.PatchAsJsonAsync(
             "/api/system/smtp-settings",
-            new UpdateSmtpSettingsRequest(true, "smtp.example.com", 587, true, "owner@example.com", "smtp-password", "dailymusings@example.com", "每日随想", 30));
+            new UpdateSmtpSettingsRequest(true, "smtp.example.com", 587, "starttls", "owner@example.com", "smtp-password", "dailymusings@example.com", "每日随想", 30));
 
         updated.EnsureSuccessStatusCode();
         var smtp = await updated.Content.ReadFromJsonAsync<SmtpSettingsDto>();
@@ -118,13 +118,27 @@ public class ModelSettingsApiTests
         Assert.IsTrue(smtp.Enabled);
         Assert.AreEqual("smtp.example.com", smtp.Host);
         Assert.AreEqual(587, smtp.Port);
+        Assert.AreEqual("starttls", smtp.Security);
         Assert.AreEqual("smtp-password", smtp.SecretName, "The password's name travels; its value never does (§10.4).");
 
-        using var invalid = await instance.Client.PatchAsJsonAsync(
+        // The whole point of the field: what the other program's form calls "SSL" has to be expressible here.
+        using var implicitTls = await instance.Client.PatchAsJsonAsync(
             "/api/system/smtp-settings",
-            new UpdateSmtpSettingsRequest(null, null, 70_000, null, null, null, null, null, null));
+            new UpdateSmtpSettingsRequest(null, null, 465, "ssl", null, null, null, null, null));
 
-        Assert.AreEqual(HttpStatusCode.BadRequest, invalid.StatusCode);
-        Assert.AreEqual("smtp.port.out_of_range", (await invalid.Content.ReadFromJsonAsync<ApiError>())!.Code);
+        implicitTls.EnsureSuccessStatusCode();
+        Assert.AreEqual("ssl", (await implicitTls.Content.ReadFromJsonAsync<SmtpSettingsDto>())!.Security);
+
+        foreach (var (request, code) in new (UpdateSmtpSettingsRequest, string)[]
+                 {
+                     (new UpdateSmtpSettingsRequest(null, null, 70_000, null, null, null, null, null, null), "smtp.port.out_of_range"),
+                     (new UpdateSmtpSettingsRequest(null, null, null, "yes", null, null, null, null, null), "smtp.security.invalid"),
+                 })
+        {
+            using var invalid = await instance.Client.PatchAsJsonAsync("/api/system/smtp-settings", request);
+
+            Assert.AreEqual(HttpStatusCode.BadRequest, invalid.StatusCode);
+            Assert.AreEqual(code, (await invalid.Content.ReadFromJsonAsync<ApiError>())!.Code);
+        }
     }
 }

@@ -149,7 +149,7 @@ public class ModelAndSmtpSettingsTests
                 Enabled: true,
                 Host: "smtp.example.com",
                 Port: 587,
-                UseStartTls: true,
+                Security: SmtpSecurity.StartTls,
                 Username: "owner@example.com",
                 SecretName: "smtp-password",
                 FromAddress: "dailymusings@example.com",
@@ -160,8 +160,21 @@ public class ModelAndSmtpSettingsTests
         var written = store.Snapshot();
         Assert.AreEqual("smtp.example.com", written[SmtpSettingKeys.Host]);
         Assert.AreEqual("587", written[SmtpSettingKeys.Port]);
-        Assert.AreEqual("true", written[SmtpSettingKeys.UseStartTls]);
+        Assert.AreEqual("starttls", written[SmtpSettingKeys.Security]);
         Assert.AreEqual("30", written[SmtpSettingKeys.TimeoutSeconds]);
+
+        // The boolean this setting used to be is kept in step, so an instance rolled back to the previous image still
+        // reads a setting that matches what the administrator chose.
+        Assert.AreEqual("true", written[SmtpSettingKeys.UseStartTls]);
+
+        // And 465 is expressible now, which is the reason the setting stopped being a boolean: this is the
+        // "SSL: true, STARTTLS: false" that every other mail form shows.
+        await update.ExecuteAsync(
+            new SmtpSettingsUpdate(null, null, 465, SmtpSecurity.ImplicitTls, null, null, null, null, null),
+            CancellationToken.None);
+
+        Assert.AreEqual("ssl", store.Snapshot()[SmtpSettingKeys.Security]);
+        Assert.AreEqual("true", store.Snapshot()[SmtpSettingKeys.UseStartTls]);
 
         // Clearing the username has to be possible: a relay that needs none must be able to lose the one it had.
         await update.ExecuteAsync(new SmtpSettingsUpdate(null, null, null, null, string.Empty, null, null, null, null), CancellationToken.None);

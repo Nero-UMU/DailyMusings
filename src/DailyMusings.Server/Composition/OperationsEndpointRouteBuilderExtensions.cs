@@ -279,7 +279,10 @@ public static class OperationsEndpointRouteBuilderExtensions
                         request.Enabled,
                         request.Host,
                         request.Port,
-                        request.UseStartTls,
+
+                        // Parsed here so a typo comes back as 400 with a code, rather than being stored as text that
+                        // silently reads as "no encryption".
+                        request.Security is null ? null : SmtpSecurityNames.Parse(request.Security),
                         request.Username,
                         request.SecretName,
                         request.FromAddress,
@@ -328,7 +331,7 @@ public static class OperationsEndpointRouteBuilderExtensions
         settings.Enabled,
         settings.Host,
         settings.Port,
-        settings.UseStartTls,
+        SmtpSecurityNames.ToToken(settings.Security),
         settings.Username,
         settings.SecretName,
         settings.FromAddress,

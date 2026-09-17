@@ -15,7 +15,7 @@ public sealed record SmtpSettingsView(
     bool Enabled,
     string Host,
     int Port,
-    bool UseStartTls,
+    SmtpSecurity Security,
     string? Username,
     string SecretName,
     string FromAddress,
@@ -26,7 +26,7 @@ public sealed record SmtpSettingsUpdate(
     bool? Enabled,
     string? Host,
     int? Port,
-    bool? UseStartTls,
+    SmtpSecurity? Security,
     string? Username,
     string? SecretName,
     string? FromAddress,
@@ -38,12 +38,84 @@ public static class SmtpSettingKeys
     public const string Enabled = "smtp.enabled";
     public const string Host = "smtp.host";
     public const string Port = "smtp.port";
+
+    /// <summary>One of <see cref="SmtpSecurityNames"/>: <c>none</c>, <c>starttls</c> or <c>ssl</c>.</summary>
+    public const string Security = "smtp.security";
+
+    /// <summary>
+    /// The boolean this setting used to be, kept readable (and kept in step when written) so an instance that saved
+    /// "use STARTTLS" before implicit TLS existed keeps sending, and a rollback to the previous image still works.
+    /// </summary>
     public const string UseStartTls = "smtp.useStartTls";
+
     public const string Username = "smtp.username";
     public const string SecretName = "smtp.secretName";
     public const string FromAddress = "smtp.fromAddress";
     public const string FromName = "smtp.fromName";
     public const string TimeoutSeconds = "smtp.timeoutSeconds";
+}
+
+/// <summary>
+/// The spelling of <see cref="SmtpSecurity"/> in the settings table, the deployment configuration and the API.
+/// <para>
+/// Short tokens rather than enum names because they are what an operator types into an environment variable
+/// (<c>Smtp__Security=ssl</c>), and <c>ssl</c> rather than <c>implicit</c> because that is the word on every other
+/// mail form — the point of this setting is that a configuration can be copied from one program to another.
+/// </para>
+/// </summary>
+public static class SmtpSecurityNames
+{
+    public const string None = "none";
+    public const string StartTls = "starttls";
+    public const string Ssl = "ssl";
+
+    /// <summary>The stored/configured spelling of a mode.</summary>
+    public static string ToToken(SmtpSecurity security) => security switch
+    {
+        SmtpSecurity.StartTls => StartTls,
+        SmtpSecurity.ImplicitTls => Ssl,
+        _ => None,
+    };
+
+    /// <summary>
+    /// Reads a mode. Beyond the three tokens it accepts the spellings other software's dump uses, because refusing
+    /// "tls" or "implicit" would send an operator back to a form that cannot say what their old program said.
+    /// </summary>
+    public static bool TryParse(string? value, out SmtpSecurity security)
+    {
+        switch (value?.Trim().ToLowerInvariant())
+        {
+            case None:
+            case "off":
+            case "false":
+            case "plain":
+                security = SmtpSecurity.None;
+                return true;
+            case StartTls:
+            case "starttlsrequired":
+            case "explicit":
+                security = SmtpSecurity.StartTls;
+                return true;
+            case Ssl:
+            case "tls":
+            case "implicit":
+            case "smtps":
+            case "true":
+                security = SmtpSecurity.ImplicitTls;
+                return true;
+            default:
+                security = SmtpSecurity.None;
+                return false;
+        }
+    }
+
+    /// <summary>Parses or throws the validation failure the API and the admin page both report.</summary>
+    public static SmtpSecurity Parse(string? value) =>
+        TryParse(value, out var security)
+            ? security
+            : throw new UseCaseException(
+                "smtp.security.invalid",
+                "安全方式只能是 none（不加密）、starttls（587）或 ssl（465）。");
 }
 
 public sealed class ReadSmtpSettingsUseCase
@@ -60,7 +132,7 @@ public sealed class ReadSmtpSettingsUseCase
             settings.Enabled,
             settings.Host,
             settings.Port,
-            settings.UseStartTls,
+            settings.Security,
             settings.Username,
             settings.SecretName,
             settings.FromAddress,
@@ -127,9 +199,16 @@ public sealed class UpdateSmtpSettingsUseCase
             await SetAsync(SmtpSettingKeys.Username, username.Trim(), cancellationToken).ConfigureAwait(false);
         }
 
-        if (update.UseStartTls is { } useStartTls)
+        if (update.Security is { } security)
         {
-            await SetAsync(SmtpSettingKeys.UseStartTls, useStartTls ? "true" : "false", cancellationToken).ConfigureAwait(false);
+            await SetAsync(SmtpSettingKeys.Security, SmtpSecurityNames.ToToken(security), cancellationToken).ConfigureAwait(false);
+
+            // The old boolean is written alongside so that an instance rolled back to the previous image — which only
+            // knows "use STARTTLS" — still reads a setting that matches what the administrator just chose.
+            await SetAsync(
+                SmtpSettingKeys.UseStartTls,
+                security == SmtpSecurity.None ? "false" : "true",
+                cancellationToken).ConfigureAwait(false);
         }
 
         if (update.Enabled is { } enabled)

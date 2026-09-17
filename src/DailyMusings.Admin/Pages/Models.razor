@@ -110,16 +110,23 @@ else
         {
             @* The fields below are bound to the staged values, not to the row that was loaded: a preset fills the
                staged values, and a form that displayed the stored row would look as if the click did nothing. *@
-            <p class="hint">常用邮箱：点一下就把主机、端口与 TLS 填好，用户名与密码按下面的提示填。</p>
+            <p class="hint">
+                常用邮箱：点一下就把主机、端口与安全方式填好，用户名与密码按下面的提示填。按钮按安全方式分成两组，
+                和别的软件对得上——别的软件写 STARTTLS 的选上面那组，写「SSL：是」的选下面那组。
+            </p>
 
-            <div class="actions">
-                @foreach (var preset in SmtpPresets.All)
-                {
-                    <button type="button" class="btn-sm" @onclick="() => ApplySmtpPreset(preset)" disabled="@_busy">
-                        @preset.Label
-                    </button>
-                }
-            </div>
+            @foreach (var group in SmtpPresetGroups)
+            {
+                <div class="actions">
+                    <span class="hint">@group.Title</span>
+                    @foreach (var preset in group.Presets)
+                    {
+                        <button type="button" class="btn-sm" @onclick="() => ApplySmtpPreset(preset)" disabled="@_busy">
+                            @preset.Label
+                        </button>
+                    }
+                </div>
+            }
 
             <div class="form-grid">
                 <label class="checkbox">
@@ -134,9 +141,14 @@ else
                     端口
                     <input type="number" value="@_smtpPort" @onchange="e => _smtpPort = (string?)e.Value" />
                 </label>
-                <label class="checkbox">
-                    <input type="checkbox" checked="@_smtpStartTls" @onchange="e => _smtpStartTls = (bool)e.Value!" />
-                    使用 STARTTLS
+                <label>
+                    安全方式
+                    <select value="@SmtpSecurityNames.ToToken(_smtpSecurity)" @onchange="e => SetSecurity((string?)e.Value)">
+                        @foreach (var (token, label) in SecurityChoices)
+                        {
+                            <option value="@token">@label</option>
+                        }
+                    </select>
                 </label>
                 <label>
                     用户名（可留空）
@@ -166,11 +178,12 @@ else
             }
 
             <p class="hint">
-                这里只支持 <strong>STARTTLS</strong>：先明文打招呼、再升级加密，服务商对应的端口是 <strong>587</strong>。
-                <strong>465 是隐式 TLS</strong>（连上立刻握手，别的软件写成「SSL：是，STARTTLS：否」），这个发送器连不上，
-                填了会一直等到超时并报「SMTP server could not be reached」——「测试连接」若只说 did not answer in time，
-                十有八九就是这个原因。163、126 与阿里云企业邮只提供 465，所以它们当前用不了。发信还需要勾选「启用发信」、
-                在「运维」页填好收件地址并打开至少一个通知事件。
+                三种安全方式与别的软件一一对应：<strong>STARTTLS</strong>（端口 587）先明文打招呼再升级加密，对应别的软件的
+                「STARTTLS：是」；<strong>SSL/TLS</strong>（端口 465）连上立刻握手，对应「SSL：是、STARTTLS：否」；
+                <strong>不加密</strong>只适合本机中继。端口与安全方式要对得上，否则会一直等到超时并报
+                「SMTP server could not be reached」——「测试连接」若只说 did not answer in time，十有八九就是这里不匹配。
+                配了用户名与密码时必须选加密方式，明文连接会被直接拒绝。发信还需要勾选「启用发信」、在「运维」页填好收件地址
+                并打开至少一个通知事件。
             </p>
 
             <div class="actions">
@@ -221,12 +234,25 @@ else
     private bool _smtpEnabled;
     private string? _smtpHost;
     private string? _smtpPort;
-    private bool _smtpStartTls;
+    private SmtpSecurity _smtpSecurity = SmtpSecurity.None;
     private string? _smtpUsername;
     private string? _smtpSecretName;
     private string? _smtpFromAddress;
     private string? _smtpFromName;
     private string? _smtpTimeout;
+
+    /// <summary>
+    /// The three modes in the order an operator meets them: the one most relays want first, then the "SSL" one every
+    /// other mail form shows, then the unencrypted case that only a relay on localhost should ever need.
+    /// </summary>
+    private static readonly (string Token, string Label)[] SecurityChoices =
+    [
+        (SmtpSecurityNames.StartTls, "STARTTLS（587）"),
+        (SmtpSecurityNames.Ssl, "SSL/TLS（465）"),
+        (SmtpSecurityNames.None, "不加密（本机中继）"),
+    ];
+
+    private static readonly SmtpPresetGroup[] SmtpPresetGroups = SmtpPresets.Grouped();
 
     /// <summary>What a preset filled, and the part of it only the operator can supply. Null until one is used.</summary>
     private string? _smtpPresetNote;
@@ -291,7 +317,7 @@ else
         _smtpEnabled = _smtp.Enabled;
         _smtpHost = _smtp.Host;
         _smtpPort = _smtp.Port.ToString(System.Globalization.CultureInfo.InvariantCulture);
-        _smtpStartTls = _smtp.UseStartTls;
+        _smtpSecurity = _smtp.Security;
         _smtpUsername = _smtp.Username;
         _smtpSecretName = _smtp.SecretName;
         _smtpFromAddress = _smtp.FromAddress;
@@ -312,7 +338,7 @@ else
     private void SetDimensions(string? value) => _dimensions = value;
 
     /// <summary>
-    /// Fills the three fields that are the same for every user of a provider. It deliberately does not tick
+    /// Fills the fields that are the same for every user of a provider. It deliberately does not tick
     /// 「启用发信」: sending mail is a decision, and a preset is only a convenience.
     /// </summary>
     private void ApplySmtpPreset(SmtpPreset preset)
@@ -321,9 +347,18 @@ else
 
         _smtpHost = preset.Host;
         _smtpPort = preset.Port.ToString(CultureInfo.InvariantCulture);
-        _smtpStartTls = preset.UseStartTls;
-        _smtpPresetNote = $"已填入 {preset.Label}（{preset.Host}:{preset.Port}，STARTTLS）。{preset.Note}"
+        _smtpSecurity = preset.Security;
+        _smtpPresetNote = $"已填入 {preset.Label}（{preset.Host}:{preset.Port}，{preset.SecurityLabel}）。{preset.Note}"
             + " 别忘了勾选「启用发信」再点保存。";
+    }
+
+    /// <summary>The dropdown only offers values this knows, so an unreadable one leaves the current choice alone.</summary>
+    private void SetSecurity(string? token)
+    {
+        if (SmtpSecurityNames.TryParse(token, out var security))
+        {
+            _smtpSecurity = security;
+        }
     }
 
     private async Task SaveEndpointAsync(string service) => await RunAsync(async services =>
@@ -373,7 +408,7 @@ else
                     _smtpEnabled,
                     _smtpHost,
                     int.TryParse(_smtpPort, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var port) ? port : null,
-                    _smtpStartTls,
+                    _smtpSecurity,
                     _smtpUsername,
                     _smtpSecretName,
                     _smtpFromAddress,

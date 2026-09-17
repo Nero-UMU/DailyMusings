@@ -1,5 +1,6 @@
 using System.Globalization;
 using DailyMusings.Application.Abstractions;
+using DailyMusings.Application.Configuration;
 
 namespace DailyMusings.Infrastructure.Configuration;
 
@@ -78,6 +79,43 @@ internal static class StoredSettings
         TimeOnly.TryParseExact(value, "HH:mm", CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed)
             ? parsed
             : configured;
+
+    /// <summary>
+    /// How the SMTP connection is protected, with the boolean it replaced still honoured.
+    /// <para>
+    /// Source precedence first (settings table, then deployment configuration, then the default), and within one
+    /// source the newer key wins over the older flag — an instance that saved "use STARTTLS" before implicit TLS
+    /// existed keeps sending without anyone touching the page, and an instance configured from compose with
+    /// <c>Smtp__UseStartTls=true</c> keeps working too. An unreadable value never throws: it falls through to the
+    /// next source, because a typo in an environment variable must not stop the notification job from starting.
+    /// </para>
+    /// </summary>
+    public static SmtpSecurity Security(
+        IReadOnlyDictionary<string, string> stored,
+        string securityKey,
+        string legacyKey,
+        string? configuredSecurity,
+        bool? configuredLegacy,
+        SmtpSecurity fallback)
+    {
+        if (stored.TryGetValue(securityKey, out var storedToken) &&
+            SmtpSecurityNames.TryParse(storedToken, out var fromSettings))
+        {
+            return fromSettings;
+        }
+
+        if (stored.TryGetValue(legacyKey, out var storedFlag) && bool.TryParse(storedFlag, out var fromStoredFlag))
+        {
+            return fromStoredFlag ? SmtpSecurity.StartTls : SmtpSecurity.None;
+        }
+
+        if (SmtpSecurityNames.TryParse(configuredSecurity, out var fromConfiguration))
+        {
+            return fromConfiguration;
+        }
+
+        return configuredLegacy is { } flag ? flag ? SmtpSecurity.StartTls : SmtpSecurity.None : fallback;
+    }
 
     /// <summary>A ratio or threshold. Invariant culture, so a stored "0.35" cannot be read as 35 on a comma locale.</summary>
     public static double Decimal(
