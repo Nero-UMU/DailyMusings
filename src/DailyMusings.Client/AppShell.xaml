@@ -6,13 +6,17 @@
     xmlns:pages="clr-namespace:DailyMusings.Client.Pages"
     Title="每日随想">
 
-    <!-- §9.3: 今日 and 设置 are the two screens the capture loop needs. 日历 / 主题 / 草稿 arrive with the phases
-         that produce content to show on them. -->
+    <!-- §9.3: 今日 / 草稿 / 设置 are the screens the loop needs — capture, review and publish, then config.
+         日历 and 主题 follow on top of the same read APIs. -->
     <TabBar>
         <ShellContent
             Title="今日"
             ContentTemplate="{DataTemplate pages:TodayPage}"
             Route="today" />
+        <ShellContent
+            Title="草稿"
+            ContentTemplate="{DataTemplate pages:DraftPage}"
+            Route="draft" />
         <ShellContent
             Title="设置"
             ContentTemplate="{DataTemplate pages:SettingsPage}"

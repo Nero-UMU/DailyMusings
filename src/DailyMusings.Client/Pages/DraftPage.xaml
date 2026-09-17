@@ -1,0 +1,222 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage
+    x:Class="DailyMusings.Client.Pages.DraftPage"
+    xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+    xmlns:pages="clr-namespace:DailyMusings.Client.Pages"
+    Title="草稿">
+
+    <ScrollView>
+        <VerticalStackLayout Padding="16" Spacing="14">
+
+            <!-- §10.3: shown for as long as an insecure connection is configured, on every screen. -->
+            <Border
+                x:Name="InsecureBanner"
+                IsVisible="False"
+                Stroke="#B42318"
+                StrokeThickness="1"
+                BackgroundColor="#FFEBE9"
+                Padding="12">
+                <Border.StrokeShape>
+                    <RoundRectangle CornerRadius="8" />
+                </Border.StrokeShape>
+                <Label
+                    TextColor="#7A271A"
+                    FontSize="13"
+                    Text="当前连接未加密（HTTP）。密码、设备令牌、录音和文章都可能被同一网络中的他人截获。请优先使用 HTTPS、局域网或 VPN。此提示只说明风险，不代表连接已经安全。" />
+            </Border>
+
+            <!-- Which day is being reviewed (§9.3 草稿). -->
+            <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
+                <Label Text="日期" VerticalOptions="Center" />
+                <DatePicker
+                    x:Name="DateSelector"
+                    Grid.Column="1"
+                    DateSelected="OnDateSelected" />
+                <Button
+                    Grid.Column="2"
+                    Text="载入"
+                    Padding="12,4"
+                    Clicked="OnLoadClicked" />
+            </Grid>
+
+            <Label x:Name="DraftStatus" FontAttributes="Bold" />
+            <Label x:Name="DraftDetail" FontSize="12" TextColor="#656D76" />
+
+            <CollectionView x:Name="WarningList" SelectionMode="None" IsVisible="False">
+                <CollectionView.ItemTemplate>
+                    <DataTemplate x:DataType="x:String">
+                        <Label Text="{Binding .}" FontSize="12" TextColor="#B42318" Margin="0,2" />
+                    </DataTemplate>
+                </CollectionView.ItemTemplate>
+            </CollectionView>
+
+            <BoxView HeightRequest="1" Color="#E1E4E8" />
+
+            <!-- Three slots, never overwritten silently (§6.4). -->
+            <Label Text="版本" FontAttributes="Bold" />
+            <Label x:Name="VersionSummary" FontSize="12" TextColor="#656D76" />
+            <CollectionView x:Name="VersionList" SelectionMode="None">
+                <CollectionView.ItemTemplate>
+                    <DataTemplate x:DataType="pages:VersionRow">
+                        <Border Padding="10" Margin="0,4" Stroke="#E1E4E8" StrokeThickness="1">
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="8" />
+                            </Border.StrokeShape>
+                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                <VerticalStackLayout Spacing="2">
+                                    <Label Text="{Binding Slot}" FontAttributes="Bold" />
+                                    <Label Text="{Binding Detail}" FontSize="12" TextColor="#656D76" />
+                                </VerticalStackLayout>
+                                <Button
+                                    Grid.Column="1"
+                                    Text="切到这一版"
+                                    IsVisible="{Binding CanSwitch}"
+                                    Padding="10,2"
+                                    FontSize="12"
+                                    Clicked="OnSwitchVersionClicked"
+                                    CommandParameter="{Binding VersionId}" />
+                            </Grid>
+                        </Border>
+                    </DataTemplate>
+                </CollectionView.ItemTemplate>
+            </CollectionView>
+
+            <BoxView HeightRequest="1" Color="#E1E4E8" />
+
+            <!-- Editing the working version (§9.3). -->
+            <Label Text="编辑当前版本" FontAttributes="Bold" />
+            <Entry x:Name="TitleEntry" Placeholder="标题" />
+            <Entry x:Name="SummaryEntry" Placeholder="摘要" />
+            <Editor
+                x:Name="BodyEditor"
+                Placeholder="正文"
+                AutoSize="TextChanges"
+                HeightRequest="220" />
+            <Button Text="保存修改" Clicked="OnSaveEditClicked" />
+
+            <BoxView HeightRequest="1" Color="#E1E4E8" />
+
+            <!-- Source verification and the untraced sentences (§8.4). -->
+            <Label Text="来源核验" FontAttributes="Bold" />
+            <Label
+                x:Name="SourceStatus"
+                FontSize="12"
+                TextColor="#656D76" />
+            <CollectionView x:Name="SourceList" SelectionMode="None">
+                <CollectionView.ItemTemplate>
+                    <DataTemplate x:DataType="pages:SourceRow">
+                        <Border Padding="10" Margin="0,4" Stroke="#E1E4E8" StrokeThickness="1">
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="8" />
+                            </Border.StrokeShape>
+                            <VerticalStackLayout Spacing="2">
+                                <Label Text="{Binding Quote}" />
+                                <Label Text="{Binding Origin}" FontSize="12" TextColor="#656D76" />
+                                <Label
+                                    Text="{Binding DriftNote}"
+                                    FontSize="12"
+                                    TextColor="#B42318"
+                                    IsVisible="{Binding HasDriftNote}" />
+                            </VerticalStackLayout>
+                        </Border>
+                    </DataTemplate>
+                </CollectionView.ItemTemplate>
+            </CollectionView>
+
+            <Label x:Name="UnsourcedStatus" FontSize="12" TextColor="#656D76" />
+            <CollectionView x:Name="UnsourcedList" SelectionMode="None">
+                <CollectionView.ItemTemplate>
+                    <DataTemplate x:DataType="pages:UnsourcedRow">
+                        <Border Padding="10" Margin="0,4" Stroke="#B42318" StrokeThickness="1" BackgroundColor="#FFEBE9">
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="8" />
+                            </Border.StrokeShape>
+                            <VerticalStackLayout Spacing="2">
+                                <Label Text="{Binding Quote}" TextColor="#7A271A" />
+                                <Label Text="{Binding Reason}" FontSize="12" TextColor="#7A271A" />
+                            </VerticalStackLayout>
+                        </Border>
+                    </DataTemplate>
+                </CollectionView.ItemTemplate>
+            </CollectionView>
+
+            <HorizontalStackLayout Spacing="8">
+                <CheckBox x:Name="AcceptUnsourced" IsVisible="False" VerticalOptions="Center" />
+                <Label
+                    x:Name="AcceptUnsourcedLabel"
+                    IsVisible="False"
+                    FontSize="12"
+                    TextColor="#B42318"
+                    VerticalOptions="Center"
+                    Text="我接受这些无法追溯的句子，仍然确认这一版" />
+            </HorizontalStackLayout>
+
+            <BoxView HeightRequest="1" Color="#E1E4E8" />
+
+            <!-- Actions (§6.4, §8.4, §7). -->
+            <Button x:Name="ConfirmButton" Text="确认这一版" IsEnabled="False" Clicked="OnConfirmClicked" />
+
+            <HorizontalStackLayout Spacing="8">
+                <CheckBox x:Name="IgnoreTranscriptionFailures" VerticalOptions="Center" />
+                <Label
+                    FontSize="12"
+                    TextColor="#656D76"
+                    VerticalOptions="Center"
+                    Text="忽略转写失败的输入" />
+            </HorizontalStackLayout>
+            <Button x:Name="RegenerateButton" Text="重新生成" IsEnabled="False" Clicked="OnRegenerateClicked" />
+
+            <BoxView HeightRequest="1" Color="#E1E4E8" />
+
+            <!-- Publishing (§11.1, §11.2). -->
+            <Label Text="发布" FontAttributes="Bold" />
+            <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
+                <Picker x:Name="TargetPicker" Title="发布目标" />
+                <Picker x:Name="VisibilityPicker" Grid.Column="1" Title="可见性" />
+            </Grid>
+            <Button x:Name="PublishButton" Text="发布这一版" IsEnabled="False" Clicked="OnPublishClicked" />
+
+            <Label x:Name="PublicationStatus" FontSize="12" TextColor="#656D76" />
+            <Button
+                Text="刷新发布状态"
+                Padding="12,4"
+                FontSize="13"
+                HorizontalOptions="Start"
+                Clicked="OnRefreshPublicationsClicked" />
+            <CollectionView x:Name="PublicationList" SelectionMode="None">
+                <CollectionView.ItemTemplate>
+                    <DataTemplate x:DataType="pages:PublicationRow">
+                        <Border Padding="10" Margin="0,4" Stroke="#E1E4E8" StrokeThickness="1">
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="8" />
+                            </Border.StrokeShape>
+                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                <VerticalStackLayout Spacing="2">
+                                    <Label Text="{Binding Summary}" />
+                                    <Label
+                                        Text="{Binding Detail}"
+                                        FontSize="12"
+                                        TextColor="#656D76"
+                                        IsVisible="{Binding HasDetail}" />
+                                </VerticalStackLayout>
+                                <Button
+                                    Grid.Column="1"
+                                    Text="检查远程"
+                                    IsVisible="{Binding CanCheckRemote}"
+                                    Padding="10,2"
+                                    FontSize="12"
+                                    Clicked="OnCheckRemoteClicked"
+                                    CommandParameter="{Binding PublicationId}" />
+                            </Grid>
+                        </Border>
+                    </DataTemplate>
+                </CollectionView.ItemTemplate>
+            </CollectionView>
+
+            <Label x:Name="ActionStatus" FontSize="13" TextColor="#656D76" />
+
+        </VerticalStackLayout>
+    </ScrollView>
+
+</ContentPage>

@@ -1,6 +1,7 @@
 using DailyMusings.Client.Core;
 using DailyMusings.Client.Core.Capture;
 using DailyMusings.Client.Core.Offline;
+using DailyMusings.Client.Core.Reflections;
 using DailyMusings.Client.Pages;
 using DailyMusings.Client.Services;
 using Microsoft.Extensions.Logging;
@@ -40,6 +41,11 @@ public static class MauiProgram
 		builder.Services.AddSingleton<ICaptureApiClient>(sp => sp.GetRequiredService<DynamicCaptureApiClient>());
 		builder.Services.AddSingleton<CaptureController>();
 
+		// The draft screen talks to the reflection endpoints, which are a separate contract with their own failure
+		// classification (several of their refusals are instructions to the user rather than errors).
+		builder.Services.AddSingleton<DynamicReflectionApiClient>();
+		builder.Services.AddSingleton<IReflectionApiClient>(sp => sp.GetRequiredService<DynamicReflectionApiClient>());
+
 		// The recorder is the one platform-specific piece of the capture path, so it is the one registration that
 		// differs between the two clients. Everything else — the offline queue, the upload, the pages — is the same
 		// code, which is what §5's Client.Core split was for.
@@ -52,6 +58,7 @@ public static class MauiProgram
 #endif
 
 		builder.Services.AddTransient<TodayPage>();
+		builder.Services.AddTransient<DraftPage>();
 		builder.Services.AddTransient<SettingsPage>();
 		builder.Services.AddSingleton<AppShell>();
 
