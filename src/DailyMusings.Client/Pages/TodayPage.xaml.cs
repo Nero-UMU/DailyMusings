@@ -394,6 +394,7 @@ public partial class TodayPage : ContentPage
     {
         "client.network_unreachable" => "连不上服务器",
         "client.timeout" => "服务器响应超时",
+        "client.upload_failed" => "上传失败，稍后再试",
         "client.not_configured" => "未配置服务器",
         "client.not_paired" => "设备未配对",
         "auth.device_token_rejected" or "auth.unauthenticated" => "设备令牌已失效，需要重新配对",

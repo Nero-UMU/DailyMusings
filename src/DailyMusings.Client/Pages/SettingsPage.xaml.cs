@@ -30,9 +30,11 @@ public partial class SettingsPage : ContentPage
 
         ServerUrlEntry.Text = _settings.ServerBaseUrl ?? string.Empty;
 
+        // The platform and its version, in that order: the label used to read "Android <windows version>" on Windows,
+        // which is exactly the sort of small lie that makes a screenshot untrustworthy.
         DeviceInfoLabel.Text =
-            $"{DeviceInfo.Current.Manufacturer} {DeviceInfo.Current.Model} · Android {DeviceInfo.Current.VersionString} · " +
-            $"{DeviceInfo.Current.Platform}";
+            $"{DeviceInfo.Current.Manufacturer} {DeviceInfo.Current.Model} · " +
+            $"{DeviceInfo.Current.Platform} {DeviceInfo.Current.VersionString}";
 
         await RefreshAsync();
     }

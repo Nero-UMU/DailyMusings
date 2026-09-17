@@ -82,12 +82,23 @@ internal sealed class FakeCaptureApiClient : ICaptureApiClient
     /// <summary>Codes to fail with, consumed in order. Empty means succeed.</summary>
     public Queue<CaptureUploadException> Failures { get; } = new();
 
+    /// <summary>
+    /// Raw exceptions to throw instead, consumed in order. Used for the failures the API client does not classify —
+    /// the ones a blackholed network produces — which must still end up as a retryable row.
+    /// </summary>
+    public Queue<Exception> Exceptions { get; } = new();
+
     public bool ReportAlreadyStored { get; set; }
 
     public Task<IngestResponse> UploadVoiceAsync(VoiceUpload upload, CancellationToken cancellationToken)
     {
         VoiceUploads.Add(upload);
         LocalAudioPresentAtUpload.Add(File.Exists(upload.LocalAudioPath));
+
+        if (Exceptions.Count > 0)
+        {
+            throw Exceptions.Dequeue();
+        }
 
         if (Failures.Count > 0)
         {
@@ -100,6 +111,11 @@ internal sealed class FakeCaptureApiClient : ICaptureApiClient
     public Task<IngestResponse> UploadTextAsync(TextUpload upload, CancellationToken cancellationToken)
     {
         TextUploads.Add(upload);
+
+        if (Exceptions.Count > 0)
+        {
+            throw Exceptions.Dequeue();
+        }
 
         if (Failures.Count > 0)
         {

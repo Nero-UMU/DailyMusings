@@ -249,6 +249,51 @@ public class CaptureControllerTests
         }
     }
 
+    /// <summary>
+    /// Found on a real phone with the network path blackholed rather than refused: the HTTP stack surfaced a bare
+    /// "Canceled" that was not a <see cref="CaptureUploadException"/>, so it escaped the sync loop, and the screen
+    /// reported it as an operation failure while the queue still claimed the capture was waiting to upload. A capture
+    /// that is already durable on disk must always come out of a failed attempt as a retryable failure.
+    /// </summary>
+    [TestMethod]
+    public async Task An_unclassified_upload_failure_becomes_a_retryable_row_instead_of_escaping()
+    {
+        var root = NewRoot();
+
+        try
+        {
+            var (controller, _, api) = Arrange(root);
+            var capture = await controller.SaveTextCaptureAsync("网络黑洞里写的一句。", CancellationToken.None);
+
+            api.Exceptions.Enqueue(new TaskCanceledException("Canceled"));
+
+            var outcome = await controller.SyncAsync(CancellationToken.None);
+
+            Assert.AreEqual(0, outcome.Uploaded);
+            Assert.AreEqual(1, outcome.Failed);
+            Assert.AreEqual(1, outcome.StillQueued);
+
+            var queued = await controller.FindAsync(capture.Id, CancellationToken.None);
+            Assert.IsNotNull(queued, "The capture must still be on the device.");
+            Assert.AreEqual(CaptureUploadState.Failed, queued.State);
+            Assert.AreEqual("client.upload_failed", queued.FailureCode);
+            Assert.AreEqual(1, queued.AttemptCount);
+            Assert.AreEqual("Canceled", queued.FailureSummary);
+
+            // And the retry path clears it, so the next sync tries again with the same idempotency key.
+            var retried = await controller.RetryAsync(capture.Id, CancellationToken.None);
+            Assert.AreEqual(CaptureUploadState.Queued, retried!.State);
+            Assert.AreEqual(capture.IdempotencyKey, retried.IdempotencyKey);
+
+            var second = await controller.SyncAsync(CancellationToken.None);
+            Assert.AreEqual(1, second.Uploaded);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     [TestMethod]
     public async Task Discarding_removes_the_capture_and_its_audio()
     {

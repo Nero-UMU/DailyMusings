@@ -137,6 +137,24 @@ public sealed class CaptureController
                 await _store.UpsertAsync(updated, cancellationToken).ConfigureAwait(false);
                 failed++;
             }
+            catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+            {
+                // Anything the API client did not classify is still a failed upload, never a lost capture and never a
+                // reason to take the screen down. Found on a real phone with the network path blackholed (Tailscale
+                // stopped on the server's side): the HTTP stack surfaced a bare "Canceled", it escaped this method,
+                // and the screen reported "操作失败：Canceled" while the row still claimed to be waiting to upload —
+                // the same lesson the server's job handlers learned about unclassified exceptions.
+                var updated = capture with
+                {
+                    State = CaptureUploadState.Failed,
+                    AttemptCount = capture.AttemptCount + 1,
+                    FailureCode = "client.upload_failed",
+                    FailureSummary = exception.Message,
+                };
+
+                await _store.UpsertAsync(updated, cancellationToken).ConfigureAwait(false);
+                failed++;
+            }
         }
 
         var remaining = (await _store.ListAsync(cancellationToken).ConfigureAwait(false)).Count;

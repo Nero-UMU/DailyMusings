@@ -45,7 +45,14 @@ public sealed class WindowsAudioRecorder : IAudioRecorder
                 MediaCategory = MediaCategory.Speech,
             }).AsTask(cancellationToken).ConfigureAwait(true);
 
-            var folder = ApplicationData.Current.TemporaryFolder;
+            // NOT ApplicationData.Current: an unpackaged Windows app (the zip we ship, WindowsPackageType=None) has no
+            // package identity, and that API throws "Operation is not valid due to the current state of the object"
+            // there — found by pressing 开始录音 in the unpackaged build, where the failure looked like a microphone
+            // problem. A directory under the user's temp path works both packaged and unpackaged.
+            var directory = Path.Combine(Path.GetTempPath(), "DailyMusings");
+            Directory.CreateDirectory(directory);
+
+            var folder = await StorageFolder.GetFolderFromPathAsync(directory).AsTask(cancellationToken).ConfigureAwait(true);
 
             var file = await folder
                 .CreateFileAsync($"capture-{Guid.CreateVersion7():N}.m4a", CreationCollisionOption.GenerateUniqueName)
