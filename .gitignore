@@ -33,7 +33,7 @@ deploy/secrets/
 deploy/*.local.yaml
 
 ## Scratch
-.tmp-*/
+.tmp-*
 *.tmp
 
 ## Agent working memory (local tooling state, not product source)
