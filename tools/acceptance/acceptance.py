@@ -197,11 +197,32 @@ def main():
     check("content settings are administrable (zone, schedule, retention)",
           settings.status == 200, "status=%s body=%s" % (settings.status, settings.text()[:300]))
 
+    # The draft-ready event has to be switched on explicitly: an instance with no switches set sends nothing at
+    # all ("silence is the default"), so a run that only filled in the recipient would never mail anything — and
+    # the §17.3 step 5 check below would be testing the harness's assumption instead of the product.
     notifications = admin.patch_json(
         "/api/notification-settings",
-        {"toAddress": "owner@example.test", "instanceUrl": "http://127.0.0.1:8080"},
+        {"toAddress": "owner@example.test", "instanceUrl": "http://127.0.0.1:8080", "draftReady": True},
     )
-    check("notification recipient is configurable", notifications.status == 200, notifications.text()[:200])
+    notification_body = notifications.json() or {}
+    check("notification recipient and the draft-ready switch are configurable",
+          notifications.status == 200
+          and notification_body.get("toAddress") == "owner@example.test"
+          and notification_body.get("draftReady") is True,
+          notifications.text()[:250])
+
+    # A partial update is the normal case from the admin page: the fields it does not name must be left alone.
+    partial = admin.patch_json("/api/notification-settings", {"jobFailed": True})
+    partial_body = partial.json() or {}
+    check("a partial notification update changes only what it names",
+          partial.status == 200
+          and partial_body.get("jobFailed") is True
+          and partial_body.get("draftReady") is True
+          and partial_body.get("toAddress") == "owner@example.test",
+          partial.text()[:250])
+
+    # Switched back off, so failure mails cannot add noise to the mailbox checks later in the run.
+    admin.patch_json("/api/notification-settings", {"jobFailed": False})
 
     wp_target = admin.post_json("/api/publish-targets", {"name": "测试博客", "type": "wordPress", "destinationReference": None})
     hexo_target = admin.post_json("/api/publish-targets", {"name": "Hexo 输出", "type": "markdown", "destinationReference": "hexo"})
