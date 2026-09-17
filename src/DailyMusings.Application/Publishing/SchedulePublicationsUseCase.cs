@@ -107,7 +107,14 @@ public sealed class SchedulePublicationsUseCase
                     .ExecuteAsync(
                         reflection.ContentDate,
                         target.Id,
-                        PublicationVisibility.Draft,
+
+                        // §11.1: the per-target opt-in decides whether the unattended run may go public. This used
+                        // to pass Draft unconditionally, which made the switch unreachable rather than merely
+                        // conservative: the planner publishes publicly only when the record *wants* public and the
+                        // target opted in, so "自动公开" was stored, audited and shown on the settings page while
+                        // nothing could ever go public through it.
+                        target.AutomaticPublishEnabled ? PublicationVisibility.Public : PublicationVisibility.Draft,
+
                         actor: "system:scheduler",
                         replaceExistingFile: false,
                         manual: false,

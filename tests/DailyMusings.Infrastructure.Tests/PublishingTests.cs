@@ -48,6 +48,142 @@ public class PublishingTests
         Assert.AreEqual(0, await context.Database.CountAsync("publication"));
     }
 
+    /// <summary>
+    /// §11.1's per-target opt-in decides whether the unattended run goes public. This is the regression test for a
+    /// switch that was stored, audited and shown on the settings page while being unreachable: the scheduler asked
+    /// for a draft unconditionally, and the planner publishes publicly only when the record wants public <em>and</em>
+    /// the target opted in — so the two conditions could never both hold.
+    /// </summary>
+    [TestMethod]
+    public async Task An_unattended_run_goes_public_when_the_target_opted_in()
+    {
+        await using var context = await PublishingTestContext.CreateAsync();
+        var target = await context.AddTargetAsync("blog");
+
+        target.EnableAutomaticPublish("owner", context.Clock.UtcNow);
+        await context.Targets.UpdateAsync(target, CancellationToken.None);
+
+        var day = Day(context);
+        await context.SeedConfirmedDraftAsync(day);
+        AdvanceToJustAfterThePublishSlot(context, day);
+
+        var result = await context.Schedule.ExecuteAsync(CancellationToken.None);
+
+        Assert.AreEqual(1, result.Queued, "The slot has arrived, so the day is due.");
+
+        var publication = (await context.Publications.ListOutstandingAsync(50, CancellationToken.None)).Single();
+
+        Assert.AreEqual(
+            PublicationVisibility.Public,
+            publication.RequestedVisibility,
+            "An opted-in target means the unattended run was asked for publicly, not for a draft.");
+        Assert.AreEqual(
+            PublicationIntent.PublishPublicly,
+            PublicationPlanner.Decide(
+                publication,
+                target,
+                context.Content.Settings.PublishWindow,
+                context.Clock.UtcNow));
+    }
+
+    /// <summary>The other half of the switch: without the opt-in the very same run stays a private draft.</summary>
+    [TestMethod]
+    public async Task An_unattended_run_stays_a_draft_when_the_target_did_not_opt_in()
+    {
+        await using var context = await PublishingTestContext.CreateAsync();
+        var target = await context.AddTargetAsync("blog");
+
+        var day = Day(context);
+        await context.SeedConfirmedDraftAsync(day);
+        AdvanceToJustAfterThePublishSlot(context, day);
+
+        var result = await context.Schedule.ExecuteAsync(CancellationToken.None);
+
+        Assert.AreEqual(1, result.Queued);
+
+        var publication = (await context.Publications.ListOutstandingAsync(50, CancellationToken.None)).Single();
+
+        Assert.AreEqual(PublicationVisibility.Draft, publication.RequestedVisibility);
+        Assert.AreEqual(
+            PublicationIntent.UploadDraft,
+            PublicationPlanner.Decide(
+                publication,
+                target,
+                context.Content.Settings.PublishWindow,
+                context.Clock.UtcNow));
+    }
+
+    /// <summary>
+    /// A person asking again for an already-uploaded draft decides for itself. That record was created by the
+    /// scheduler, so without the requeue path marking it manual the planner kept applying the unattended gate and
+    /// answered "queued" while quietly uploading another draft.
+    /// </summary>
+    [TestMethod]
+    public async Task Asking_again_by_hand_makes_an_unattended_record_manual()
+    {
+        await using var context = await PublishingTestContext.CreateAsync();
+        var target = await context.AddTargetAsync("blog");
+
+        var day = Day(context);
+        await context.SeedConfirmedDraftAsync(day);
+        AdvanceToJustAfterThePublishSlot(context, day);
+
+        await context.Schedule.ExecuteAsync(CancellationToken.None);
+
+        // The slot uploaded a private draft, as it must for a target that never opted in.
+        await context.QueueAndRunAsync(
+            (await context.Publications.ListOutstandingAsync(50, CancellationToken.None)).Single());
+
+        Assert.AreEqual("draft", context.Remote.WrittenStatuses[^1]);
+
+        // The user now asks for that day to be public.
+        var again = await context.Request.ExecuteAsync(
+            day,
+            target.Id,
+            PublicationVisibility.Public,
+            actor: "owner",
+            replaceExistingFile: false,
+            manual: true,
+            CancellationToken.None);
+
+        Assert.AreEqual(PublicationRequestOutcome.Created, again.Outcome, again.Detail);
+        Assert.AreEqual(
+            PublicationTrigger.Manual,
+            again.Publication!.Trigger,
+            "A human re-request must stop being judged as an unattended run.");
+
+        var run = await context.Run.ExecuteAsync(
+            again.Publication!.Id,
+            new PublicationPayload(false),
+            CancellationToken.None);
+
+        var stored = await context.Publications.FindByIdAsync(again.Publication.Id, CancellationToken.None);
+
+        Assert.AreEqual(
+            PublicationRunOutcome.Published,
+            run.Outcome,
+            $"outcome={run.Outcome} status={stored!.Status} trigger={stored.Trigger} " +
+            $"visibility={stored.RequestedVisibility} round={stored.ExportRound} " +
+            $"writes=[{string.Join(",", context.Remote.WrittenStatuses)}]");
+
+        Assert.AreEqual(
+            "publish",
+            context.Remote.WrittenStatuses[^1],
+            $"The explicit public request has to reach the remote as public, not as another draft. " +
+            $"outcome={run.Outcome} writes=[{string.Join(",", context.Remote.WrittenStatuses)}] " +
+            $"createCalls={context.Remote.CreateCalls} updateCalls={context.Remote.UpdateCalls} " +
+            $"remoteId={stored.RemoteId} status={stored.Status}");
+    }
+
+    /// <summary>Moves the clock to the moment the day's publish slot has just opened.</summary>
+    private static void AdvanceToJustAfterThePublishSlot(PublishingTestContext context, ContentDate day)
+    {
+        var settings = context.Content.Settings;
+        var slot = settings.CreateCalendar().AtLocalTime(day.AddDays(1), settings.PublishLocalTime);
+
+        context.Clock.UtcNow = slot.AddMinutes(1);
+    }
+
     [TestMethod]
     public async Task A_manual_publish_uploads_the_confirmed_version_and_records_what_it_sent()
     {

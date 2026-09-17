@@ -208,6 +208,7 @@ public sealed class SqlitePublicationRepository : IPublicationRepository
                    remote_id = $remoteId,
                    attempt_count = $attempts,
                    scheduled_at_utc = $scheduledAt,
+                   trigger_kind = $trigger,
                    triggered_by = $triggeredBy,
                    triggered_at_utc = $triggeredAt,
                    completed_at_utc = $completedAt,

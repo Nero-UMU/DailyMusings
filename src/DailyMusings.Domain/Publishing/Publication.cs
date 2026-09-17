@@ -111,7 +111,12 @@ public sealed class Publication
 
     public PublishTargetId PublishTargetId { get; }
 
-    public PublicationTrigger Trigger { get; }
+    /// <summary>
+    /// How this publication was asked for. Settable rather than get-only because a record the scheduler created can
+    /// be re-requested by a person (see <see cref="RequeueForReExport"/>), and at that moment the opt-in gate stops
+    /// applying: it exists to constrain <em>unattended</em> runs, not to overrule someone who is standing there.
+    /// </summary>
+    public PublicationTrigger Trigger { get; private set; }
 
     /// <summary>
     /// What was asked for when this record was created. For an automatic request it is recorded rather than
@@ -414,6 +419,12 @@ public sealed class Publication
     public void RequeueForReExport(PublicationVisibility visibility, string actor, DateTimeOffset at)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(actor);
+
+        // A person asked for this, even when the record started life as an unattended run. Without this the planner
+        // kept treating it as unattended, so a manual "publish publicly" against an already-uploaded draft was
+        // silently downgraded to a draft upload whenever the target had not opted in: the user asked for public and
+        // the API answered 200 "queued".
+        Trigger = PublicationTrigger.Manual;
 
         Transition(PublicationStatus.Queued, at);
         AttemptCount = 0;
