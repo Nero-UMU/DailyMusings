@@ -15,10 +15,22 @@ COPY src/DailyMusings.Server/DailyMusings.Server.csproj src/DailyMusings.Server/
 RUN dotnet restore src/DailyMusings.Server/DailyMusings.Server.csproj
 
 COPY src/ ./src/
+
+# No --no-restore here, deliberately. The restore layer above is keyed on the project files only, so adding or moving
+# a Razor component — which is what makes the framework publish _framework/blazor.web.js — does not invalidate it.
+# Publishing against that stale graph silently builds the project without Razor support and drops the script: the
+# assertion below caught exactly that. Restoring again costs nothing (the packages are already in the layer) and
+# keeps the build honest.
 RUN dotnet publish src/DailyMusings.Server/DailyMusings.Server.csproj \
         --configuration Release \
-        --no-restore \
         --output /app
+
+# The admin pages reference _framework/blazor.web.js, and the framework does not publish it unless the host project
+# itself contains a Razor component. Without the script the pages render and every button on them silently does
+# nothing, which is a defect nobody sees until they try to use the page — so the build fails here instead of shipping
+# that. The stylesheet is asserted alongside it for the same reason.
+RUN test -f /app/wwwroot/_framework/blazor.web.js \
+    && test -f /app/wwwroot/_content/DailyMusings.Admin/admin.css
 
 # Runtime stage.
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
@@ -35,20 +47,21 @@ WORKDIR /app
 # The key ring gets its own directory on purpose: it signs the admin's auth cookies, so it must survive a
 # container recreate but must NOT be inside the directory that gets backed up (§10.4, decision A.13).
 # Creating both here, owned by the runtime user, means fresh named volumes inherit that ownership.
-RUN mkdir -p /var/lib/dailymusings /var/lib/dailymusings-keys \
-    && chown -R "$APP_UID" /var/lib/dailymusings /var/lib/dailymusings-keys
+RUN mkdir -p /var/lib/dailymusings /var/lib/dailymusings-keys /var/lib/dailymusings-config \
+    && chown -R "$APP_UID" /var/lib/dailymusings /var/lib/dailymusings-keys /var/lib/dailymusings-config
 
 COPY --from=build /app ./
 
-ENV ASPNETCORE_URLS=http://+:8080 \
+ENV ASPNETCORE_URLS=http://+:18321 \
     ASPNETCORE_ENVIRONMENT=Production \
     DOTNET_NOLOGO=true \
     DOTNET_CLI_TELEMETRY_OPTOUT=true \
     Storage__RootPath=/var/lib/dailymusings \
     Storage__SecretsPath=/run/secrets \
-    Storage__KeyRingPath=/var/lib/dailymusings-keys
+    Storage__KeyRingPath=/var/lib/dailymusings-keys \
+    Storage__RuntimeConfigPath=/var/lib/dailymusings-config/runtime.json
 
-EXPOSE 8080
+EXPOSE 18321
 
 USER $APP_UID
 

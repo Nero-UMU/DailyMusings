@@ -51,6 +51,12 @@ public static class WebApplicationExtensions
         // First, so every later failure is answered with a stable error code instead of an empty 500.
         app.UseMiddleware<ExceptionHandlingMiddleware>();
 
+        // UseStaticFiles rather than MapStaticAssets, deliberately. MapStaticAssets serves the static-asset manifest
+        // of the *entry* assembly and throws "The static resources manifest file '...' was not found" when there is
+        // none — which is exactly what happens whenever this app is hosted inside another process, as the API
+        // integration tests do. It also did not fix the missing framework script (see App.razor): that needs the
+        // Components package in this project's graph, not a different static-file middleware. The published output
+        // places the admin stylesheet under wwwroot/_content, which this serves.
         app.UseStaticFiles();
 
         app.UseAuthentication();
@@ -65,7 +71,17 @@ public static class WebApplicationExtensions
         app.UseAntiforgery();
 
         app.MapDailyMusingsEndpoints();
-        app.MapRazorComponents<App>().AddInteractiveServerRenderMode();
+
+        // App is this project's, not the admin library's — see the note in App.razor: the host has to be a Razor
+        // project for the framework to publish _framework/blazor.web.js, and without that script the interactive
+        // pages have no circuit and their buttons do nothing.
+        //
+        // AddAdditionalAssemblies is what keeps the pages reachable: MapRazorComponents discovers routable
+        // components in the root component's own assembly, and every @page lives in DailyMusings.Admin. Without
+        // this line the script is served and the whole admin surface answers 404.
+        app.MapRazorComponents<App>()
+            .AddAdditionalAssemblies(typeof(Routes).Assembly)
+            .AddInteractiveServerRenderMode();
 
         return app;
     }

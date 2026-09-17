@@ -1,0 +1,35 @@
+@* The document shell for the admin UI.
+   <para>
+   It lives in the host project rather than in DailyMusings.Admin, and that placement is load-bearing rather than
+   cosmetic: the framework only publishes its _framework assets — including blazor.web.js, the script that
+   establishes the Blazor circuit — when the *host* project is itself a Razor project. With the shell in the class
+   library the host contained no Razor component at all, so nothing ever published that script: the pages rendered
+   and every button on them silently did nothing, while plain form posts (sign-in, sign-out) kept working.
+   </para>
+   <para>
+   Verified by publishing the project with and without a component in it: the script appears under
+   wwwroot/_framework only in the former. deploy/Dockerfile asserts it is present so this cannot regress silently.
+   </para>
+   <para>
+   Everything else — pages, layouts, routing, its own imports — stays in the class library, which is what keeps the
+   admin surface separate from the host. *@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>每日随想 · 管理</title>
+    <base href="/" />
+    <link rel="stylesheet" href="_content/DailyMusings.Admin/admin.css" />
+    <HeadOutlet @rendermode="InteractiveServer" />
+</head>
+
+<body>
+    @* Static SSR for the shell: the forms post to real endpoints and need the HTTP request context, while the
+       data pages opt into interactivity themselves. *@
+    <Routes />
+    <script src="_framework/blazor.web.js"></script>
+</body>
+
+</html>
