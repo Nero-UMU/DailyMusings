@@ -1,5 +1,6 @@
 using System.Globalization;
 using DailyMusings.Application.Abstractions;
+using DailyMusings.Application.Configuration;
 using DailyMusings.Application.Operations;
 using DailyMusings.Contracts;
 using DailyMusings.Domain.Jobs;
@@ -52,7 +53,17 @@ public static class OperationsEndpointRouteBuilderExtensions
             .MapGroup("/api/system")
             .RequireAuthorization(ServerAuthenticationPolicies.AdminOnly);
 
+        // §8.1: a client may see the model name and whether it is on, and nothing else — the Base URL and the
+        // secret's name stay with the administrator who configured them.
+        endpoints
+            .MapGet("/api/system/models", GetModelNamesAsync)
+            .RequireAuthorization(ServerAuthenticationPolicies.DeviceOrAdmin);
+
         system.MapGet("/index", GetIndexAsync);
+        system.MapGet("/model-endpoints", GetModelEndpointsAsync);
+        system.MapPatch("/model-endpoints/{service}", UpdateModelEndpointAsync);
+        system.MapGet("/smtp-settings", GetSmtpSettingsAsync);
+        system.MapPatch("/smtp-settings", UpdateSmtpSettingsAsync);
         system.MapPost("/index/rebuild", RebuildIndexAsync).DisableAntiforgery();
         system.MapGet("/diagnostic-mode", GetDiagnosticModeAsync);
         system.MapPost("/diagnostic-mode", EnableDiagnosticModeAsync).DisableAntiforgery();
@@ -171,6 +182,148 @@ public static class OperationsEndpointRouteBuilderExtensions
             result.FailedDeletions,
             result.ReleasedBytes));
     }
+
+    private static async Task<IResult> GetModelNamesAsync(
+        ReadModelEndpointsUseCase read,
+        CancellationToken cancellationToken)
+    {
+        var endpoints = await read.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+        return Results.Ok(new ModelNameListResponse(
+            endpoints.Select(endpoint => new ModelNameDto(endpoint.Service, endpoint.Model, endpoint.Enabled)).ToArray()));
+    }
+
+    private static async Task<IResult> GetModelEndpointsAsync(
+        ReadModelEndpointsUseCase read,
+        CancellationToken cancellationToken)
+    {
+        var endpoints = await read.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+        return Results.Ok(new ModelEndpointListResponse(endpoints.Select(ToDto).ToArray()));
+    }
+
+    private static async Task<IResult> UpdateModelEndpointAsync(
+        string service,
+        [FromBody] UpdateModelEndpointRequest? request,
+        UpdateModelEndpointUseCase update,
+        ReadModelEndpointsUseCase read,
+        CancellationToken cancellationToken)
+    {
+        if (request is null)
+        {
+            return Invalid("A body is required.");
+        }
+
+        if (!TryParseModelService(service, out var parsed))
+        {
+            return Invalid("The service must be one of transcription, generation or embedding.");
+        }
+
+        try
+        {
+            await update
+                .ExecuteAsync(
+                    parsed,
+                    new ModelEndpointUpdate(
+                        request.Enabled,
+                        request.BaseUrl,
+                        request.Model,
+                        request.SecretName,
+                        request.TimeoutSeconds,
+                        request.Dimensions),
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (UseCaseException exception)
+        {
+            return Results.Json(new ApiError(exception.Code, exception.Message), statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        // Read back rather than echoing the request: what the instance will actually use is the answer that matters.
+        var endpoints = await read.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+        return Results.Ok(ToDto(endpoints.Single(endpoint => endpoint.Service == service.Trim().ToLowerInvariant())));
+    }
+
+    private static async Task<IResult> GetSmtpSettingsAsync(
+        ReadSmtpSettingsUseCase read,
+        CancellationToken cancellationToken) =>
+        Results.Ok(ToDto(await read.ExecuteAsync(cancellationToken).ConfigureAwait(false)));
+
+    private static async Task<IResult> UpdateSmtpSettingsAsync(
+        [FromBody] UpdateSmtpSettingsRequest? request,
+        UpdateSmtpSettingsUseCase update,
+        ReadSmtpSettingsUseCase read,
+        CancellationToken cancellationToken)
+    {
+        if (request is null)
+        {
+            return Invalid("A body is required.");
+        }
+
+        try
+        {
+            await update
+                .ExecuteAsync(
+                    new SmtpSettingsUpdate(
+                        request.Enabled,
+                        request.Host,
+                        request.Port,
+                        request.UseStartTls,
+                        request.Username,
+                        request.SecretName,
+                        request.FromAddress,
+                        request.FromName,
+                        request.TimeoutSeconds),
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (UseCaseException exception)
+        {
+            return Results.Json(new ApiError(exception.Code, exception.Message), statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        return Results.Ok(ToDto(await read.ExecuteAsync(cancellationToken).ConfigureAwait(false)));
+    }
+
+    private static bool TryParseModelService(string? value, out ModelService service)
+    {
+        service = ModelService.Transcription;
+
+        switch (value?.Trim().ToLowerInvariant())
+        {
+            case "transcription":
+                return true;
+            case "generation":
+                service = ModelService.Generation;
+                return true;
+            case "embedding":
+                service = ModelService.Embedding;
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    private static ModelEndpointDto ToDto(ModelEndpointView endpoint) => new(
+        endpoint.Service,
+        endpoint.Enabled,
+        endpoint.BaseUrl,
+        endpoint.Model,
+        endpoint.SecretName,
+        endpoint.TimeoutSeconds,
+        endpoint.Dimensions);
+
+    private static SmtpSettingsDto ToDto(SmtpSettingsView settings) => new(
+        settings.Enabled,
+        settings.Host,
+        settings.Port,
+        settings.UseStartTls,
+        settings.Username,
+        settings.SecretName,
+        settings.FromAddress,
+        settings.FromName,
+        settings.TimeoutSeconds);
 
     private static async Task<IResult> GetIndexAsync(
         GetIndexStatusUseCase get,

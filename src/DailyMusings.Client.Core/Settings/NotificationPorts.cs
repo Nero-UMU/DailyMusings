@@ -15,3 +15,15 @@ public interface INotificationSettingsApiClient
 {
     Task<ApiResult<NotificationSettingsDto>> GetAsync(CancellationToken cancellationToken);
 }
+
+/// <summary>
+/// The model names this instance is configured with (docs/开发指导.md §8.1: 客户端只能查看模型名与健康状态).
+/// <para>
+/// Names and on/off only. The Base URL and the secret's name stay with the administrator: a phone does not need to
+/// know where an instance's endpoints or its credentials live, and §8.1 asks for the name specifically.
+/// </para>
+/// </summary>
+public interface IModelNameApiClient
+{
+    Task<ApiResult<IReadOnlyList<ModelNameDto>>> GetAsync(CancellationToken cancellationToken);
+}

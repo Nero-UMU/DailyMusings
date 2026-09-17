@@ -53,6 +53,7 @@ public static class MauiProgram
 		// (§15.2 step 6) and the notification preferences (§9.3, §12).
 		builder.Services.AddSingleton<DynamicInstanceApiClient>();
 		builder.Services.AddSingleton<INotificationSettingsApiClient>(sp => sp.GetRequiredService<DynamicInstanceApiClient>());
+		builder.Services.AddSingleton<IModelNameApiClient>(sp => sp.GetRequiredService<DynamicInstanceApiClient>());
 		builder.Services.AddSingleton(new AudioClipCache(Path.Combine(FileSystem.CacheDirectory, "playback")));
 
 		// The topic vocabulary: browsing, renaming, merging and filing by hand (§6.2, §9.3 主题页).

@@ -153,6 +153,52 @@ public sealed class HttpInstanceApiClient
         }
     }
 
+    /// <summary>Reads the configured model names, for the settings screen.</summary>
+    public async Task<ApiResult<IReadOnlyList<ModelNameDto>>> GetModelNamesAsync(CancellationToken cancellationToken)
+    {
+        using var request = await AuthorizeAsync(HttpMethod.Get, "/api/system/models", cancellationToken).ConfigureAwait(false);
+
+        if (request is null)
+        {
+            return ApiResult<IReadOnlyList<ModelNameDto>>.Unreachable("client.not_paired");
+        }
+
+        try
+        {
+            using var response = await _httpClient
+                .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
+                .ConfigureAwait(false);
+
+            if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
+            {
+                return ApiResult<IReadOnlyList<ModelNameDto>>.Refused("auth.device_token_rejected");
+            }
+
+            if (!response.IsSuccessStatusCode)
+            {
+                return ApiResult<IReadOnlyList<ModelNameDto>>.Refused($"server.rejected.{(int)response.StatusCode}");
+            }
+
+            var page = await response.Content
+                .ReadFromJsonAsync<ModelNameListResponse>(cancellationToken)
+                .ConfigureAwait(false);
+
+            return ApiResult<IReadOnlyList<ModelNameDto>>.From(page?.Items ?? []);
+        }
+        catch (HttpRequestException)
+        {
+            return ApiResult<IReadOnlyList<ModelNameDto>>.Unreachable("client.network_unreachable");
+        }
+        catch (TaskCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return ApiResult<IReadOnlyList<ModelNameDto>>.Unreachable("client.timeout");
+        }
+        catch (Exception exception) when (exception is JsonException or NotSupportedException)
+        {
+            return ApiResult<IReadOnlyList<ModelNameDto>>.Refused("client.malformed_response");
+        }
+    }
+
     private async Task<HttpRequestMessage?> AuthorizeAsync(
         HttpMethod method,
         string path,

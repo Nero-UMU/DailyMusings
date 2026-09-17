@@ -1,3 +1,4 @@
+using DailyMusings.Client.Core.Settings;
 using DailyMusings.Client.Services;
 
 namespace DailyMusings.Client.Pages;
@@ -42,12 +43,55 @@ public partial class SettingsPage : ContentPage
             $"{DeviceInfo.Current.Manufacturer} {DeviceInfo.Current.Model} · " +
             $"{DeviceInfo.Current.Platform} {DeviceInfo.Current.VersionString}";
 
-        await RefreshAsync();
-        await RefreshNotificationsAsync();
+        // Nothing in an async void handler may throw: this screen reads three things from the server, and any of them
+        // failing must not take the process down. (The capture and draft screens learned this on a real device.)
+        try
+        {
+            await RefreshAsync();
+            await RefreshNotificationsAsync();
+            await RefreshModelsAsync();
+        }
+        catch (Exception exception)
+        {
+            ServerStatus.Text = $"载入失败：{exception.Message}";
+        }
     }
 
     private async void OnRefreshNotificationsClicked(object? sender, EventArgs e) =>
         await RefreshNotificationsAsync();
+
+    /// <summary>
+    /// §8.1's client-side half: which model each job will use, and whether it is switched on. Names only — the Base
+    /// URL and the secret's name belong to the administrator who configured them.
+    /// </summary>
+    private async Task RefreshModelsAsync()
+    {
+        if (!_settings.IsConfigured || !await _tokens.HasTokenAsync(CancellationToken.None))
+        {
+            ModelStatus.Text = "配置服务器并配对后可以看到模型名。";
+            return;
+        }
+
+        var models = await ((IModelNameApiClient)_instance).GetAsync(CancellationToken.None);
+
+        if (!models.Succeeded)
+        {
+            ModelStatus.Text = DailyMusings.Client.Core.Reflections.ReflectionReview.DescribeTransportFailure(models.FailureCode);
+            return;
+        }
+
+        ModelStatus.Text = string.Join(
+            "\n",
+            models.Value!.Select(model => $"{DescribeService(model.Service)}：{(model.Enabled ? model.Model : "未启用")}"));
+    }
+
+    private static string DescribeService(string service) => service switch
+    {
+        "transcription" => "语音转写",
+        "generation" => "文章生成",
+        "embedding" => "语义检索",
+        _ => service,
+    };
 
     /// <summary>
     /// Shows the notification preferences (docs/开发指导.md §9.3 通知偏好, §12) without offering to change them.
@@ -63,7 +107,7 @@ public partial class SettingsPage : ContentPage
             return;
         }
 
-        var settings = await _instance.GetAsync(CancellationToken.None);
+        var settings = await ((INotificationSettingsApiClient)_instance).GetAsync(CancellationToken.None);
 
         if (!settings.Succeeded)
         {

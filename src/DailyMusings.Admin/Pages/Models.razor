@@ -1,0 +1,309 @@
+@page "/models"
+@rendermode InteractiveServer
+@attribute [Authorize]
+@inject IServiceScopeFactory ScopeFactory
+@using DailyMusings.Application.Abstractions
+@using DailyMusings.Application.Configuration
+
+<h1>模型与邮件</h1>
+
+<p class="hint">
+    §8.1 要求这三项在这里配置：OpenAI 兼容的转写、生成与可选的 Embedding 接口，每项含 Base URL、模型名、
+    Secret 引用、超时和启用状态。<strong>这里只保存 Secret 的名字</strong>，值仍然放在 Secrets 目录里（§10.4），
+    所以这个页面永远看不到密钥。留空的项沿用部署配置（环境变量），保存后<strong>下一次调用即生效</strong>，无需重启。
+</p>
+
+@if (_message is not null)
+{
+    <p class="notice ok">@_message</p>
+}
+
+@if (_error is not null)
+{
+    <p class="notice error">@_error</p>
+}
+
+@if (_endpoints.Count == 0 && _smtp is null)
+{
+    <p>正在读取…</p>
+}
+else
+{
+    @foreach (var service in new[] { "transcription", "generation", "embedding" })
+    {
+        var endpoint = _endpoints.FirstOrDefault(item => item.Service == service);
+
+        <h2>@Describe(service)</h2>
+
+        @if (endpoint is null)
+        {
+            <p>未知的服务。</p>
+        }
+        else
+        {
+            <div class="form">
+                <label><input type="checkbox" checked="@endpoint.Enabled" @onchange="e => SetEnabled(service, (bool)e.Value!)" /> 启用</label>
+                <label>Base URL <input value="@endpoint.BaseUrl" @onchange="e => SetBaseUrl(service, (string?)e.Value)" /></label>
+                <label>模型名 <input value="@endpoint.Model" @onchange="e => SetModel(service, (string?)e.Value)" /></label>
+                <label>Secret 名 <input value="@endpoint.SecretName" @onchange="e => SetSecretName(service, (string?)e.Value)" /></label>
+                <label>超时（秒） <input type="number" value="@endpoint.TimeoutSeconds" @onchange="e => SetTimeout(service, (string?)e.Value)" /></label>
+                @if (service == "embedding")
+                {
+                    <label>维度（可选） <input type="number" value="@endpoint.Dimensions" @onchange="e => SetDimensions((string?)e.Value)" /></label>
+                }
+                <button @onclick="() => SaveEndpointAsync(service)" disabled="@_busy">保存</button>
+                <button @onclick="() => ProbeAsync(service)" disabled="@_busy">测试连接</button>
+            </div>
+        }
+    }
+
+    <h2>SMTP</h2>
+
+    @if (_smtp is null)
+    {
+        <p>未知的邮件配置。</p>
+    }
+    else
+    {
+        <div class="form">
+            <label><input type="checkbox" checked="@_smtp.Enabled" @onchange="e => _smtpEnabled = (bool)e.Value!" /> 启用发信</label>
+            <label>主机 <input value="@_smtp.Host" @onchange="e => _smtpHost = (string?)e.Value" /></label>
+            <label>端口 <input type="number" value="@_smtp.Port" @onchange="e => _smtpPort = (string?)e.Value" /></label>
+            <label><input type="checkbox" checked="@_smtp.UseStartTls" @onchange="e => _smtpStartTls = (bool)e.Value!" /> 使用 STARTTLS</label>
+            <label>用户名（可留空） <input value="@_smtp.Username" @onchange="e => _smtpUsername = (string?)e.Value" /></label>
+            <label>密码 Secret 名 <input value="@_smtp.SecretName" @onchange="e => _smtpSecretName = (string?)e.Value" /></label>
+            <label>发件地址 <input value="@_smtp.FromAddress" @onchange="e => _smtpFromAddress = (string?)e.Value" /></label>
+            <label>发件人名称 <input value="@_smtp.FromName" @onchange="e => _smtpFromName = (string?)e.Value" /></label>
+            <label>超时（秒） <input type="number" value="@_smtp.TimeoutSeconds" @onchange="e => _smtpTimeout = (string?)e.Value" /></label>
+            <button @onclick="SaveSmtpAsync" disabled="@_busy">保存</button>
+            <button @onclick="ProbeSmtpAsync" disabled="@_busy">测试连接</button>
+        </div>
+    }
+
+    @if (_probes.Count > 0)
+    {
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>服务</th>
+                    <th>结果</th>
+                    <th>说明</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var probe in _probes)
+                {
+                    <tr>
+                        <td>@probe.Service</td>
+                        <td>@(probe.Ok ? "可达" : "失败")</td>
+                        <td>@probe.Detail（@probe.Code）</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+}
+
+@code {
+    private readonly List<ModelEndpointView> _endpoints = [];
+    /// <summary>One test-connection result, with the service it belongs to: the probe itself reports only the outcome.</summary>
+    private sealed record ProbeRow(string Service, bool Ok, string Code, string Detail);
+
+    private readonly List<ProbeRow> _probes = [];
+
+    private SmtpSettingsView? _smtp;
+    private bool _smtpEnabled;
+    private string? _smtpHost;
+    private string? _smtpPort;
+    private bool _smtpStartTls;
+    private string? _smtpUsername;
+    private string? _smtpSecretName;
+    private string? _smtpFromAddress;
+    private string? _smtpFromName;
+    private string? _smtpTimeout;
+
+    private string? _message;
+    private string? _error;
+    private bool _busy;
+
+    // Staged edits, keyed by service. A form that wrote on every keystroke would save half-typed URLs.
+    private readonly Dictionary<string, bool> _enabled = [];
+    private readonly Dictionary<string, string?> _baseUrls = [];
+    private readonly Dictionary<string, string?> _models = [];
+    private readonly Dictionary<string, string?> _secretNames = [];
+    private readonly Dictionary<string, string?> _timeouts = [];
+    private string? _dimensions;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private static string Describe(string service) => service switch
+    {
+        "transcription" => "语音转写",
+        "generation" => "文章生成",
+        _ => "Embedding（可选）",
+    };
+
+    private async Task LoadAsync()
+    {
+        await using var scope = ScopeFactory.CreateAsyncScope();
+        var services = scope.ServiceProvider;
+
+        var endpoints = await services
+            .GetRequiredService<ReadModelEndpointsUseCase>()
+            .ExecuteAsync(CancellationToken.None);
+
+        _endpoints.Clear();
+        _endpoints.AddRange(endpoints);
+
+        foreach (var endpoint in endpoints)
+        {
+            _enabled[endpoint.Service] = endpoint.Enabled;
+            _baseUrls[endpoint.Service] = endpoint.BaseUrl;
+            _models[endpoint.Service] = endpoint.Model;
+            _secretNames[endpoint.Service] = endpoint.SecretName;
+            _timeouts[endpoint.Service] = endpoint.TimeoutSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        _dimensions = endpoints.FirstOrDefault(endpoint => endpoint.Service == "embedding")?.Dimensions?.ToString(
+            System.Globalization.CultureInfo.InvariantCulture);
+
+        _smtp = await services.GetRequiredService<ReadSmtpSettingsUseCase>().ExecuteAsync(CancellationToken.None);
+        _smtpEnabled = _smtp.Enabled;
+        _smtpHost = _smtp.Host;
+        _smtpPort = _smtp.Port.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        _smtpStartTls = _smtp.UseStartTls;
+        _smtpUsername = _smtp.Username;
+        _smtpSecretName = _smtp.SecretName;
+        _smtpFromAddress = _smtp.FromAddress;
+        _smtpFromName = _smtp.FromName;
+        _smtpTimeout = _smtp.TimeoutSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    private void SetEnabled(string service, bool value) => _enabled[service] = value;
+
+    private void SetBaseUrl(string service, string? value) => _baseUrls[service] = value;
+
+    private void SetModel(string service, string? value) => _models[service] = value;
+
+    private void SetSecretName(string service, string? value) => _secretNames[service] = value;
+
+    private void SetTimeout(string service, string? value) => _timeouts[service] = value;
+
+    private void SetDimensions(string? value) => _dimensions = value;
+
+    private async Task SaveEndpointAsync(string service) => await RunAsync(async services =>
+    {
+        var timeout = int.TryParse(
+            _timeouts.GetValueOrDefault(service),
+            System.Globalization.NumberStyles.Integer,
+            System.Globalization.CultureInfo.InvariantCulture,
+            out var parsedTimeout)
+                ? parsedTimeout
+                : (int?)null;
+
+        int? dimensions = null;
+        if (service == "embedding" &&
+            int.TryParse(
+                _dimensions,
+                System.Globalization.NumberStyles.Integer,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out var parsedDimensions))
+        {
+            dimensions = parsedDimensions;
+        }
+
+        await services
+            .GetRequiredService<UpdateModelEndpointUseCase>()
+            .ExecuteAsync(
+                ParseModelService(service),
+                new ModelEndpointUpdate(
+                    _enabled.GetValueOrDefault(service),
+                    _baseUrls.GetValueOrDefault(service),
+                    _models.GetValueOrDefault(service),
+                    _secretNames.GetValueOrDefault(service),
+                    timeout,
+                    dimensions),
+                CancellationToken.None);
+
+        await LoadAsync();
+        _message = $"已保存{Describe(service)}的配置，下一次调用即生效。";
+    });
+
+    private async Task SaveSmtpAsync() => await RunAsync(async services =>
+    {
+        await services
+            .GetRequiredService<UpdateSmtpSettingsUseCase>()
+            .ExecuteAsync(
+                new SmtpSettingsUpdate(
+                    _smtpEnabled,
+                    _smtpHost,
+                    int.TryParse(_smtpPort, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var port) ? port : null,
+                    _smtpStartTls,
+                    _smtpUsername,
+                    _smtpSecretName,
+                    _smtpFromAddress,
+                    _smtpFromName,
+                    int.TryParse(_smtpTimeout, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var timeout) ? timeout : null),
+                CancellationToken.None);
+
+        await LoadAsync();
+        _message = "已保存 SMTP 配置。密码仍然只按名字引用，值在 Secrets 目录里。";
+    });
+
+    private async Task ProbeAsync(string service) => await RunAsync(async services =>
+    {
+        var probe = services.GetRequiredService<ProbeExternalServiceUseCase>();
+
+        var result = await probe.ExecuteAsync(ParseService(service), CancellationToken.None);
+
+        _probes.RemoveAll(item => item.Service.Equals(service, StringComparison.OrdinalIgnoreCase));
+        _probes.Add(new ProbeRow(service, result.Ok, result.Code, result.Detail));
+
+        _message = $"已测试 {Describe(service)}。";
+    });
+
+    private Task ProbeSmtpAsync() => ProbeAsync("smtp");
+
+    /// <summary>The three endpoints §8.1 lists, for the settings write path.</summary>
+    private static ModelService ParseModelService(string service) => service switch
+    {
+        "transcription" => ModelService.Transcription,
+        "generation" => ModelService.Generation,
+        _ => ModelService.Embedding,
+    };
+
+    /// <summary>Every service the probe knows, which also covers SMTP.</summary>
+    private static ExternalService ParseService(string service) => service switch
+    {
+        "transcription" => ExternalService.Transcription,
+        "generation" => ExternalService.Generation,
+        "embedding" => ExternalService.Embedding,
+        "smtp" => ExternalService.Smtp,
+        _ => ExternalService.WordPress,
+    };
+
+    private async Task RunAsync(Func<IServiceProvider, Task> work)
+    {
+        _busy = true;
+        _message = null;
+        _error = null;
+
+        try
+        {
+            await using var scope = ScopeFactory.CreateAsyncScope();
+            await work(scope.ServiceProvider);
+        }
+        catch (UseCaseException exception)
+        {
+            _error = $"{exception.Message}（{exception.Code}）";
+        }
+        catch (Exception exception)
+        {
+            _error = $"操作失败：{exception.Message}";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

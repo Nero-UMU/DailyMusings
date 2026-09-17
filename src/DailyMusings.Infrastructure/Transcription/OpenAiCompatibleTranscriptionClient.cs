@@ -4,43 +4,65 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using DailyMusings.Application.Abstractions;
+using DailyMusings.Infrastructure.Configuration;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
 namespace DailyMusings.Infrastructure.Transcription;
 
 /// <summary>
-/// Reads the transcription endpoint's configuration from the deployment configuration
-/// (docs/开发指导.md §8.1). Disabled unless an operator turns it on, so a fresh instance never sends audio
-/// anywhere by accident.
+/// Reads the transcription endpoint's configuration (docs/开发指导.md §8.1). Disabled unless an operator turns it on,
+/// so a fresh instance never sends audio anywhere by accident.
 /// <para>
-/// The admin-page editor for these values belongs to the phase that owns model configuration; until then the
-/// environment is the configuration surface, and the shape is already the one the editor will write.
+/// The settings table comes first — the admin page writes there — and the deployment configuration is the fallback,
+/// so an instance can be configured either way. The read happens per call so a saved change takes effect on the next
+/// transcription instead of the next restart.
 /// </para>
 /// </summary>
 public sealed class ConfigurationTranscriptionSettingsProvider : ITranscriptionSettingsProvider
 {
     public const string SectionName = "Transcription";
 
-    private readonly TranscriptionSettings _settings;
+    private readonly IConfiguration _configuration;
+    private readonly IAppSettingStore _settings;
 
-    public ConfigurationTranscriptionSettingsProvider(IConfiguration configuration)
+    public ConfigurationTranscriptionSettingsProvider(IConfiguration configuration, IAppSettingStore settings)
     {
-        ArgumentNullException.ThrowIfNull(configuration);
-
-        var section = configuration.GetSection(SectionName);
-
-        _settings = new TranscriptionSettings(
-            Enabled: section.GetValue("Enabled", TranscriptionSettings.Default.Enabled),
-            BaseUrl: section.GetValue("BaseUrl", TranscriptionSettings.Default.BaseUrl) ?? TranscriptionSettings.Default.BaseUrl,
-            Model: section.GetValue("Model", TranscriptionSettings.Default.Model) ?? TranscriptionSettings.Default.Model,
-            SecretName: section.GetValue("SecretName", TranscriptionSettings.Default.SecretName) ?? TranscriptionSettings.Default.SecretName,
-            Timeout: TimeSpan.FromSeconds(section.GetValue("TimeoutSeconds", 120)),
-            LanguageHint: section.GetValue<string?>("LanguageHint"));
+        _configuration = configuration;
+        _settings = settings;
     }
 
-    public Task<TranscriptionSettings> GetAsync(CancellationToken cancellationToken) =>
-        Task.FromResult(_settings);
+    public async Task<TranscriptionSettings> GetAsync(CancellationToken cancellationToken)
+    {
+        var stored = await _settings.GetAllAsync(cancellationToken).ConfigureAwait(false);
+
+        var section = _configuration.GetSection(SectionName);
+        var defaults = TranscriptionSettings.Default;
+        var service = DailyMusings.Application.Configuration.ModelService.Transcription;
+
+        return new TranscriptionSettings(
+            Enabled: StoredSettings.Boolean(
+                stored,
+                DailyMusings.Application.Configuration.ModelSettingKeys.Enabled(service),
+                section.GetValue("Enabled", defaults.Enabled)),
+            BaseUrl: StoredSettings.String(
+                stored,
+                DailyMusings.Application.Configuration.ModelSettingKeys.BaseUrl(service),
+                section.GetValue("BaseUrl", defaults.BaseUrl)) ?? defaults.BaseUrl,
+            Model: StoredSettings.String(
+                stored,
+                DailyMusings.Application.Configuration.ModelSettingKeys.Model(service),
+                section.GetValue("Model", defaults.Model)) ?? defaults.Model,
+            SecretName: StoredSettings.String(
+                stored,
+                DailyMusings.Application.Configuration.ModelSettingKeys.SecretName(service),
+                section.GetValue("SecretName", defaults.SecretName)) ?? defaults.SecretName,
+            Timeout: TimeSpan.FromSeconds(StoredSettings.Integer(
+                stored,
+                DailyMusings.Application.Configuration.ModelSettingKeys.TimeoutSeconds(service),
+                section.GetValue("TimeoutSeconds", (int)defaults.Timeout.TotalSeconds))),
+            LanguageHint: section.GetValue<string?>("LanguageHint"));
+    }
 }
 
 /// <summary>

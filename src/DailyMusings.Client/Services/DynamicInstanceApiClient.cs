@@ -11,7 +11,7 @@ namespace DailyMusings.Client.Services;
 /// This is the wrapper for the two reads that belong to the instance rather than to the capture queue: an entry's
 /// stored recording, and the notification preferences (§9.3, §12, §15.2 step 6).
 /// </summary>
-public sealed class DynamicInstanceApiClient : INotificationSettingsApiClient
+public sealed class DynamicInstanceApiClient : INotificationSettingsApiClient, IModelNameApiClient
 {
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(60);
 
@@ -27,8 +27,11 @@ public sealed class DynamicInstanceApiClient : INotificationSettingsApiClient
     public Task<ApiResult<AudioClip>> GetAudioAsync(string inputId, CancellationToken cancellationToken) =>
         WithClientAsync(client => client.GetAudioAsync(inputId, cancellationToken));
 
-    public Task<ApiResult<NotificationSettingsDto>> GetAsync(CancellationToken cancellationToken) =>
+    Task<ApiResult<NotificationSettingsDto>> INotificationSettingsApiClient.GetAsync(CancellationToken cancellationToken) =>
         WithClientAsync(client => client.GetNotificationSettingsAsync(cancellationToken));
+
+    Task<ApiResult<IReadOnlyList<ModelNameDto>>> IModelNameApiClient.GetAsync(CancellationToken cancellationToken) =>
+        WithClientAsync(client => client.GetModelNamesAsync(cancellationToken));
 
     private async Task<ApiResult<T>> WithClientAsync<T>(Func<HttpInstanceApiClient, Task<ApiResult<T>>> work)
     {

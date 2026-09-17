@@ -181,6 +181,12 @@ public static class InfrastructureServiceCollectionExtensions
         // The notification preferences, read and written through one place so the admin page and the API agree.
         services.AddScoped<Application.Notifications.ReadNotificationSettingsUseCase>();
         services.AddScoped<Application.Notifications.UpdateNotificationSettingsUseCase>();
+
+        // §8.1's admin-side configuration of the three model endpoints and §12's SMTP server.
+        services.AddScoped<Application.Configuration.ReadModelEndpointsUseCase>();
+        services.AddScoped<Application.Configuration.UpdateModelEndpointUseCase>();
+        services.AddScoped<Application.Configuration.ReadSmtpSettingsUseCase>();
+        services.AddScoped<Application.Configuration.UpdateSmtpSettingsUseCase>();
         services.AddScoped<IJobHandler, AudioCleanupJobHandler>();
         services.AddScoped<IJobHandler, BackupJobHandler>();
 

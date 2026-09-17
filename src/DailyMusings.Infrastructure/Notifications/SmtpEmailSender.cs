@@ -3,6 +3,8 @@ using System.Net;
 using System.Net.Mail;
 using System.Text;
 using DailyMusings.Application.Abstractions;
+using DailyMusings.Application.Configuration;
+using DailyMusings.Infrastructure.Configuration;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
@@ -19,28 +21,44 @@ public sealed class ConfigurationSmtpSettingsProvider : ISmtpSettingsProvider
 {
     public const string SectionName = "Smtp";
 
-    private readonly SmtpSettings _settings;
+    private readonly IConfiguration _configuration;
+    private readonly IAppSettingStore _settings;
 
-    public ConfigurationSmtpSettingsProvider(IConfiguration configuration)
+    public ConfigurationSmtpSettingsProvider(IConfiguration configuration, IAppSettingStore settings)
     {
-        ArgumentNullException.ThrowIfNull(configuration);
-
-        var section = configuration.GetSection(SectionName);
-        var defaults = SmtpSettings.Default;
-
-        _settings = new SmtpSettings(
-            Enabled: section.GetValue("Enabled", defaults.Enabled),
-            Host: section.GetValue("Host", defaults.Host) ?? defaults.Host,
-            Port: section.GetValue("Port", defaults.Port),
-            UseStartTls: section.GetValue("UseStartTls", defaults.UseStartTls),
-            Username: section.GetValue<string?>("Username"),
-            SecretName: section.GetValue("SecretName", defaults.SecretName) ?? defaults.SecretName,
-            FromAddress: section.GetValue("FromAddress", defaults.FromAddress) ?? defaults.FromAddress,
-            FromName: section.GetValue("FromName", defaults.FromName) ?? defaults.FromName,
-            Timeout: TimeSpan.FromSeconds(section.GetValue("TimeoutSeconds", (int)defaults.Timeout.TotalSeconds)));
+        _configuration = configuration;
+        _settings = settings;
     }
 
-    public Task<SmtpSettings> GetAsync(CancellationToken cancellationToken) => Task.FromResult(_settings);
+    public async Task<SmtpSettings> GetAsync(CancellationToken cancellationToken)
+    {
+        // Settings table first (the admin page writes there), deployment configuration second, defaults last, and a
+        // read per call so a saved change is used by the next mail rather than the next restart.
+        var stored = await _settings.GetAllAsync(cancellationToken).ConfigureAwait(false);
+
+        var section = _configuration.GetSection(SectionName);
+        var defaults = SmtpSettings.Default;
+
+        return new SmtpSettings(
+            Enabled: StoredSettings.Boolean(stored, SmtpSettingKeys.Enabled, section.GetValue("Enabled", defaults.Enabled)),
+            Host: StoredSettings.String(stored, SmtpSettingKeys.Host, section.GetValue("Host", defaults.Host)) ?? defaults.Host,
+            Port: StoredSettings.Integer(stored, SmtpSettingKeys.Port, section.GetValue("Port", defaults.Port)),
+            UseStartTls: StoredSettings.Boolean(
+                stored,
+                SmtpSettingKeys.UseStartTls,
+                section.GetValue("UseStartTls", defaults.UseStartTls)),
+            Username: StoredSettings.Username(stored, SmtpSettingKeys.Username, section.GetValue<string?>("Username")),
+            SecretName: StoredSettings.String(stored, SmtpSettingKeys.SecretName, section.GetValue("SecretName", defaults.SecretName))
+                ?? defaults.SecretName,
+            FromAddress: StoredSettings.String(stored, SmtpSettingKeys.FromAddress, section.GetValue("FromAddress", defaults.FromAddress))
+                ?? defaults.FromAddress,
+            FromName: StoredSettings.String(stored, SmtpSettingKeys.FromName, section.GetValue("FromName", defaults.FromName))
+                ?? defaults.FromName,
+            Timeout: TimeSpan.FromSeconds(StoredSettings.Integer(
+                stored,
+                SmtpSettingKeys.TimeoutSeconds,
+                section.GetValue("TimeoutSeconds", (int)defaults.Timeout.TotalSeconds))));
+    }
 }
 
 /// <summary>
