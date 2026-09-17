@@ -2,60 +2,107 @@
 @rendermode InteractiveServer
 @attribute [Authorize]
 @inject IServiceScopeFactory ScopeFactory
+@inject ILoggerFactory LoggerFactory
 
 <h1>已配对设备</h1>
+<p class="hint">
+    每台设备用自己独立的令牌访问实例。令牌以哈希保存，可单独轮换或撤销；
+    撤销在<strong>下一次请求</strong>即生效，不需要重启服务。
+</p>
+
+@if (_error is not null)
+{
+    <p class="notice error">@_error</p>
+}
 
 @if (_rotated is not null)
 {
     <p class="notice ok">
-        设备 <strong>@_rotated.DeviceId</strong> 的新令牌：
+        设备 <code>@_rotated.DeviceId</code> 的新令牌：
+        <br />
         <code class="code">@_rotated.Token</code>
         <br />
-        旧令牌已立即失效。此值只显示这一次，请立刻填入客户端。
+        旧令牌已立即失效。<strong>此值只显示这一次</strong>，请立刻填入客户端。
     </p>
 }
 
 @if (_devices is null)
 {
-    <p>正在读取…</p>
+    <p class="muted">正在读取…</p>
 }
 else if (_devices.Count == 0)
 {
-    <p>尚未配对任何设备。回到<a href="/">状态</a>页生成配对码。</p>
+    <div class="card">
+        <p>尚未配对任何设备。</p>
+        <div class="actions">
+            <a class="btn btn-primary" href="/">去状态页生成配对码</a>
+        </div>
+    </div>
 }
 else
 {
-    <table class="table">
-        <thead>
-            <tr>
-                <th>名称</th>
-                <th>平台</th>
-                <th>配对时间（UTC）</th>
-                <th>最近活动（UTC）</th>
-                <th>状态</th>
-                <th>操作</th>
-            </tr>
-        </thead>
-        <tbody>
-            @foreach (var device in _devices)
-            {
+    <div class="table-wrap">
+        <table class="table">
+            <thead>
                 <tr>
-                    <td>@device.Name</td>
-                    <td>@(device.Platform ?? "—")</td>
-                    <td>@device.CreatedAtUtc.ToString("u")</td>
-                    <td>@(device.LastSeenAtUtc?.ToString("u") ?? "—")</td>
-                    <td>@(device.IsRevoked ? "已撤销" : "有效")</td>
-                    <td>
-                        @if (!device.IsRevoked)
-                        {
-                            <button @onclick="() => RotateAsync(device.Id)" disabled="@_busy">轮换令牌</button>
-                            <button @onclick="() => RevokeAsync(device.Id)" disabled="@_busy">撤销</button>
-                        }
-                    </td>
+                    <th>名称</th>
+                    <th>平台</th>
+                    <th>状态</th>
+                    <th>配对时间（UTC）</th>
+                    <th>最近活动（UTC）</th>
+                    <th>操作</th>
                 </tr>
-            }
-        </tbody>
-    </table>
+            </thead>
+            <tbody>
+                @foreach (var device in _devices)
+                {
+                    <tr>
+                        <td><strong>@device.Name</strong></td>
+                        <td>@(device.Platform ?? "—")</td>
+                        <td>
+                            <span class="badge @(device.IsRevoked ? "badge-muted" : "badge-ok")">
+                                @(device.IsRevoked ? "已撤销" : "有效")
+                            </span>
+                        </td>
+                        <td class="nowrap">@device.CreatedAtUtc.ToString("u")</td>
+                        <td class="nowrap">@(device.LastSeenAtUtc?.ToString("u") ?? "—")</td>
+                        <td>
+                            @if (!device.IsRevoked)
+                            {
+                                @if (_confirmingRevoke == device.Id)
+                                {
+                                    <div class="stack">
+                                        <span class="hint">撤销后该设备立刻失效，需要重新配对。</span>
+                                        <div class="actions">
+                                            <button class="btn-danger btn-sm" @onclick="() => RevokeAsync(device.Id)" disabled="@_busy">
+                                                确认撤销
+                                            </button>
+                                            <button class="btn-sm" @onclick="CancelRevoke" disabled="@_busy">取消</button>
+                                        </div>
+                                    </div>
+                                }
+                                else
+                                {
+                                    <div class="actions">
+                                        <button class="btn-sm" @onclick="() => RotateAsync(device.Id)" disabled="@_busy">
+                                            轮换令牌
+                                        </button>
+                                        <button class="btn-sm" @onclick="() => BeginRevoke(device.Id)" disabled="@_busy">
+                                            撤销…
+                                        </button>
+                                    </div>
+                                }
+                            }
+                            else
+                            {
+                                <span class="muted">—</span>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
 }
 
 @code {
@@ -63,7 +110,17 @@ else
     private RotatedDeviceToken? _rotated;
     private bool _busy;
 
-    protected override async Task OnInitializedAsync() => await LoadAsync();
+    /// <summary>Which device the operator has asked to revoke, so a destructive action takes two clicks.</summary>
+    private DeviceId? _confirmingRevoke;
+
+    private string? _error;
+
+    private ILogger Logger => LoggerFactory.CreateLogger("DailyMusings.Admin.Devices");
+
+    protected override async Task OnInitializedAsync()
+    {
+        _error = await AdminOperation.RunAsync(LoadAsync, Logger);
+    }
 
     private async Task LoadAsync()
     {
@@ -73,18 +130,43 @@ else
             .ExecuteAsync(CancellationToken.None);
     }
 
+    private void BeginRevoke(DeviceId deviceId)
+    {
+        _error = null;
+        _rotated = null;
+        _confirmingRevoke = deviceId;
+    }
+
+    private void CancelRevoke() => _confirmingRevoke = null;
+
     private async Task RevokeAsync(DeviceId deviceId)
     {
         _busy = true;
+        _error = null;
 
         try
         {
-            await using var scope = ScopeFactory.CreateAsyncScope();
-            await scope.ServiceProvider
-                .GetRequiredService<RevokeDeviceUseCase>()
-                .ExecuteAsync(deviceId, CancellationToken.None);
+            // Guarded: an exception escaping an @onclick handler terminates the Blazor circuit, after which every
+            // control on this page is inert. That is the real shape of "轮换令牌 / 撤销 点不了".
+            var failure = await AdminOperation.RunAsync(
+                async () =>
+                {
+                    await using var scope = ScopeFactory.CreateAsyncScope();
+                    await scope.ServiceProvider
+                        .GetRequiredService<RevokeDeviceUseCase>()
+                        .ExecuteAsync(deviceId, CancellationToken.None);
 
-            await LoadAsync();
+                    await LoadAsync();
+                },
+                Logger);
+
+            if (failure is not null)
+            {
+                _error = failure;
+                return;
+            }
+
+            _confirmingRevoke = null;
         }
         finally
         {
@@ -95,15 +177,26 @@ else
     private async Task RotateAsync(DeviceId deviceId)
     {
         _busy = true;
+        _error = null;
 
         try
         {
-            await using var scope = ScopeFactory.CreateAsyncScope();
-            _rotated = await scope.ServiceProvider
-                .GetRequiredService<RotateDeviceTokenUseCase>()
-                .ExecuteAsync(deviceId, CancellationToken.None);
+            var failure = await AdminOperation.RunAsync(
+                async () =>
+                {
+                    await using var scope = ScopeFactory.CreateAsyncScope();
+                    _rotated = await scope.ServiceProvider
+                        .GetRequiredService<RotateDeviceTokenUseCase>()
+                        .ExecuteAsync(deviceId, CancellationToken.None);
 
-            await LoadAsync();
+                    await LoadAsync();
+                },
+                Logger);
+
+            if (failure is not null)
+            {
+                _error = failure;
+            }
         }
         finally
         {

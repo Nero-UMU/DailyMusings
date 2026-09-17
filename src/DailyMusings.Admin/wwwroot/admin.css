@@ -1,157 +1,732 @@
-:root {
-    color-scheme: light dark;
-    --bg: #ffffff;
-    --fg: #1f2328;
-    --muted: #656d76;
-    --line: #d0d7de;
-    --accent: #0969da;
-    --ok-bg: #dafbe1;
-    --err-bg: #ffebe9;
-}
+/* ============================================================================
+   每日随想 · 管理页样式
+   ----------------------------------------------------------------------------
+   Light-only by design (the operator asked for a light theme): a self-hosted tool
+   is read in daylight, and one theme that is actually finished beats two that are
+   half-tuned. Everything is expressed through the tokens below, so a dark variant
+   later is a second :root block rather than a rewrite.
 
-@media (prefers-color-scheme: dark) {
-    :root {
-        --bg: #0d1117;
-        --fg: #e6edf3;
-        --muted: #8b949e;
-        --line: #30363d;
-        --accent: #4493f8;
-        --ok-bg: #12261e;
-        --err-bg: #2d1418;
-    }
+   Two class families coexist on purpose:
+     - components (.card, .btn, .badge, .notice, .field …) — what new markup uses;
+     - legacy aliases (.shell, .form, .table, .code …) — kept working so a page that
+       has not been restyled yet still renders correctly instead of unstyled.
+   ========================================================================== */
+
+:root {
+    color-scheme: light;
+
+    /* Surfaces */
+    --bg: #f6f7f9;
+    --surface: #ffffff;
+    --surface-2: #fbfcfd;
+    --sidebar-bg: #10151c;
+    --sidebar-fg: #c6ced9;
+    --sidebar-fg-strong: #ffffff;
+    --sidebar-active: #1d2733;
+
+    /* Text */
+    --fg: #16191d;
+    --fg-soft: #4a5462;
+    --muted: #6b7480;
+
+    /* Lines */
+    --line: #e2e5ea;
+    --line-strong: #cdd3db;
+
+    /* Accent + semantics */
+    --accent: #2f5fd0;
+    --accent-hover: #274fae;
+    --accent-soft: #eaf0fd;
+    --ok: #1a7f4b;
+    --ok-soft: #e8f6ee;
+    --warn: #9a6100;
+    --warn-soft: #fdf3e2;
+    --err: #b3261e;
+    --err-soft: #fdecea;
+
+    /* Shape + depth */
+    --radius: 10px;
+    --radius-sm: 6px;
+    --shadow: 0 1px 2px rgba(16, 21, 28, 0.05), 0 1px 3px rgba(16, 21, 28, 0.06);
+    --shadow-lg: 0 8px 24px rgba(16, 21, 28, 0.10);
+
+    --mono: ui-monospace, "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
 }
 
 * {
     box-sizing: border-box;
 }
 
+html,
+body {
+    height: 100%;
+}
+
 body {
     margin: 0;
     background: var(--bg);
     color: var(--fg);
-    font-family: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
-    line-height: 1.6;
+    font-family: var(--sans);
+    font-size: 15px;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
 }
 
-.shell {
-    max-width: 60rem;
-    margin: 0 auto;
-    padding: 1.5rem;
-}
+/* ---------------------------------------------------------------- layout --- */
 
-.shell-header {
+.app {
     display: flex;
-    align-items: center;
-    gap: 1.5rem;
-    border-bottom: 1px solid var(--line);
-    padding-bottom: 0.75rem;
+    min-height: 100vh;
+}
+
+.sidebar {
+    flex: 0 0 15.5rem;
+    background: var(--sidebar-bg);
+    color: var(--sidebar-fg);
+    display: flex;
+    flex-direction: column;
+    padding: 1.25rem 0.9rem;
+    position: sticky;
+    top: 0;
+    height: 100vh;
 }
 
 .brand {
-    font-weight: 600;
-    color: var(--fg);
-    text-decoration: none;
-}
-
-.shell-nav {
     display: flex;
-    gap: 1rem;
-}
-
-.shell-nav a {
-    color: var(--accent);
+    align-items: center;
+    gap: 0.65rem;
+    color: var(--sidebar-fg-strong);
     text-decoration: none;
+    padding: 0.35rem 0.5rem 1.25rem;
 }
 
-.shell-footer {
-    margin-top: 3rem;
+.brand-mark {
+    display: grid;
+    place-items: center;
+    width: 2rem;
+    height: 2rem;
+    border-radius: 8px;
+    background: var(--accent);
+    color: #fff;
+    font-weight: 700;
+    font-size: 0.95rem;
+}
+
+.brand-text {
+    display: flex;
+    flex-direction: column;
+    font-weight: 600;
+    line-height: 1.2;
+}
+
+.brand-text small {
+    color: var(--sidebar-fg);
+    font-weight: 500;
+    font-size: 0.72rem;
+    letter-spacing: 0.08em;
+}
+
+.nav {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+}
+
+.nav a {
+    display: block;
+    padding: 0.5rem 0.7rem;
+    border-radius: var(--radius-sm);
+    color: var(--sidebar-fg);
+    text-decoration: none;
+    font-size: 0.94rem;
+}
+
+.nav a:hover {
+    background: var(--sidebar-active);
+    color: var(--sidebar-fg-strong);
+}
+
+/* NavLink adds .active to the matching route. */
+.nav a.active {
+    background: var(--accent);
+    color: #fff;
+    font-weight: 600;
+}
+
+.sidebar-footer {
+    margin-top: auto;
     padding-top: 1rem;
-    border-top: 1px solid var(--line);
+    border-top: 1px solid rgba(255, 255, 255, 0.09);
+}
+
+.content {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.main {
+    flex: 1 1 auto;
+    width: 100%;
+    max-width: 62rem;
+    margin: 0 auto;
+    padding: 2rem 2rem 3rem;
+}
+
+.footer {
+    max-width: 62rem;
+    width: 100%;
+    margin: 0 auto;
+    padding: 1rem 2rem 2rem;
     color: var(--muted);
-    font-size: 0.875rem;
+    font-size: 0.82rem;
+}
+
+/* Unauthenticated pages (login, credential change when the shell has no nav). */
+.shell {
+    max-width: 26rem;
+    margin: 3rem auto;
+    padding: 1.75rem;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-lg);
+}
+
+/* ------------------------------------------------------------ typography --- */
+
+h1 {
+    font-size: 1.5rem;
+    line-height: 1.3;
+    margin: 0 0 0.35rem;
+    letter-spacing: -0.01em;
+}
+
+h2 {
+    font-size: 1.08rem;
+    margin: 2rem 0 0.6rem;
+    padding-bottom: 0.4rem;
+    border-bottom: 1px solid var(--line);
+}
+
+h3 {
+    font-size: 0.98rem;
+    margin: 1.25rem 0 0.4rem;
+}
+
+p {
+    margin: 0.5rem 0;
+}
+
+a {
+    color: var(--accent);
+}
+
+hr {
+    border: 0;
+    border-top: 1px solid var(--line);
+    margin: 1.5rem 0;
+}
+
+/* ---------------------------------------------------------------- blocks --- */
+
+.card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 1.1rem 1.25rem;
+    margin: 1rem 0;
+}
+
+.card-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 0.6rem;
+}
+
+.card-head h2,
+.card-head h3 {
+    margin: 0;
+    padding: 0;
+    border: 0;
+}
+
+/* --------------------------------------------------------------- notices --- */
+
+.notice {
+    padding: 0.8rem 0.95rem;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--line-strong);
+    background: var(--surface-2);
+    margin: 0.9rem 0;
+}
+
+.notice p:first-child {
+    margin-top: 0;
+}
+
+.notice p:last-child {
+    margin-bottom: 0;
+}
+
+.notice.ok {
+    background: var(--ok-soft);
+    border-color: #bfe3cd;
+    border-left-color: var(--ok);
+    color: #14532d;
+}
+
+.notice.error {
+    background: var(--err-soft);
+    border-color: #f3c9c5;
+    border-left-color: var(--err);
+    color: #7f1d1d;
+}
+
+.notice.warn {
+    background: var(--warn-soft);
+    border-color: #f0dcb8;
+    border-left-color: var(--warn);
+    color: #6b4700;
+}
+
+.notice.info {
+    background: var(--accent-soft);
+    border-color: #cad9f7;
+    border-left-color: var(--accent);
+    color: #1e3a8a;
+}
+
+/* A consequential decision: enabling unattended publishing, restoring a backup … */
+.risk {
+    background: var(--warn-soft);
+    border: 1px solid #f0dcb8;
+    border-left: 3px solid var(--warn);
+    border-radius: var(--radius-sm);
+    padding: 0.9rem 1rem;
+    margin: 0.9rem 0;
+    color: #5c3d00;
+}
+
+.risk > strong {
+    display: block;
+    margin-bottom: 0.25rem;
+}
+
+.risk p,
+.risk ol,
+.risk ul {
+    margin: 0.4rem 0;
+}
+
+.risk ol,
+.risk ul {
+    padding-left: 1.2rem;
+}
+
+/* --------------------------------------------------------------- buttons --- */
+
+button,
+.btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    padding: 0.45rem 0.85rem;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    color: var(--fg);
+    font: inherit;
+    font-size: 0.92rem;
+    line-height: 1.4;
+    cursor: pointer;
+    text-decoration: none;
+    white-space: nowrap;
+    transition: background 0.12s ease, border-color 0.12s ease;
+}
+
+button:hover:not([disabled]),
+.btn:hover {
+    background: var(--surface-2);
+    border-color: var(--muted);
+}
+
+button[disabled],
+.btn[disabled] {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.btn-primary,
+button.btn-primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+    font-weight: 600;
+}
+
+.btn-primary:hover:not([disabled]) {
+    background: var(--accent-hover);
+    border-color: var(--accent-hover);
+}
+
+.btn-danger {
+    background: var(--err);
+    border-color: var(--err);
+    color: #fff;
+    font-weight: 600;
+}
+
+.btn-danger:hover:not([disabled]) {
+    background: #95201a;
+    border-color: #95201a;
+}
+
+.btn-ghost {
+    background: transparent;
+    border-color: transparent;
+    color: inherit;
+}
+
+.btn-ghost:hover:not([disabled]) {
+    background: rgba(255, 255, 255, 0.09);
+    border-color: transparent;
+}
+
+.btn-sm {
+    padding: 0.28rem 0.6rem;
+    font-size: 0.85rem;
+}
+
+.btn-block {
+    width: 100%;
+}
+
+/* A row of related actions. */
+.actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+    margin: 0.75rem 0;
 }
 
 .inline {
-    margin-left: auto;
+    display: inline;
+    margin: 0;
 }
 
-.form {
-    display: grid;
-    gap: 0.75rem;
-    max-width: 26rem;
-}
+/* --------------------------------------------------------------- tables --- */
 
-.form label {
-    display: grid;
-    gap: 0.25rem;
-}
-
-input {
-    padding: 0.5rem;
+.table-wrap {
+    overflow-x: auto;
     border: 1px solid var(--line);
-    border-radius: 6px;
-    background: var(--bg);
-    color: var(--fg);
-    font: inherit;
-}
-
-button {
-    padding: 0.5rem 0.9rem;
-    border: 1px solid var(--line);
-    border-radius: 6px;
-    background: var(--bg);
-    color: var(--fg);
-    font: inherit;
-    cursor: pointer;
-}
-
-button[disabled] {
-    opacity: 0.5;
-    cursor: default;
+    border-radius: var(--radius);
+    background: var(--surface);
 }
 
 .table {
     width: 100%;
     border-collapse: collapse;
-    margin: 1rem 0;
+    margin: 0;
+    font-size: 0.93rem;
 }
 
-.table th,
+.table th {
+    text-align: left;
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    font-weight: 600;
+    padding: 0.65rem 0.85rem;
+    background: var(--surface-2);
+    border-bottom: 1px solid var(--line);
+    white-space: nowrap;
+}
+
 .table td {
     text-align: left;
-    padding: 0.5rem;
+    padding: 0.7rem 0.85rem;
     border-bottom: 1px solid var(--line);
     vertical-align: top;
 }
 
-.notice {
-    padding: 0.75rem;
-    border-radius: 6px;
+.table tbody tr:last-child td {
+    border-bottom: 0;
+}
+
+.table tbody tr:hover td {
+    background: var(--surface-2);
+}
+
+/* A table used as a label/value list (no header row). */
+.table td:first-child {
+    color: var(--fg-soft);
+    white-space: nowrap;
+}
+
+/* ---------------------------------------------------------------- forms --- */
+
+.form {
+    display: grid;
+    gap: 0.9rem;
+    max-width: 28rem;
+    margin: 1rem 0;
+}
+
+/* Several short fields side by side. */
+.form-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+    gap: 0.9rem 1.1rem;
+    margin: 1rem 0;
+}
+
+label {
+    display: grid;
+    gap: 0.3rem;
+    font-size: 0.92rem;
+    color: var(--fg-soft);
+}
+
+input,
+select,
+textarea {
+    padding: 0.48rem 0.6rem;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    color: var(--fg);
+    font: inherit;
+    font-size: 0.95rem;
+    width: 100%;
+    max-width: 100%;
+}
+
+input:focus,
+select:focus,
+textarea:focus,
+button:focus-visible,
+.btn:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+    border-color: var(--accent);
+}
+
+input[type="checkbox"] {
+    width: auto;
+    margin: 0;
+}
+
+.checkbox {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+    color: inherit;
+}
+
+.field-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+/* --------------------------------------------------------------- badges --- */
+
+.badge {
+    display: inline-block;
+    padding: 0.1rem 0.5rem;
+    border-radius: 999px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    border: 1px solid transparent;
+    white-space: nowrap;
+}
+
+.badge-ok {
+    background: var(--ok-soft);
+    color: var(--ok);
+    border-color: #bfe3cd;
+}
+
+.badge-warn {
+    background: var(--warn-soft);
+    color: var(--warn);
+    border-color: #f0dcb8;
+}
+
+.badge-err {
+    background: var(--err-soft);
+    color: var(--err);
+    border-color: #f3c9c5;
+}
+
+.badge-muted {
+    background: var(--surface-2);
+    color: var(--muted);
+    border-color: var(--line);
+}
+
+/* ----------------------------------------------------------------- code --- */
+
+code {
+    font-family: var(--mono);
+    font-size: 0.88em;
+    background: var(--surface-2);
     border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 0.05rem 0.3rem;
 }
 
-.notice.ok {
-    background: var(--ok-bg);
+.code {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 1rem;
+    letter-spacing: 0.06em;
+    background: var(--surface);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-sm);
+    padding: 0.3rem 0.5rem;
+    margin: 0.15rem 0;
+    user-select: all;
 }
 
-.notice.error {
-    background: var(--err-bg);
+pre {
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    padding: 0.8rem 0.9rem;
+    overflow-x: auto;
+    font-size: 0.88rem;
+    margin: 0.6rem 0;
 }
+
+pre code {
+    background: none;
+    border: 0;
+    padding: 0;
+}
+
+/* ------------------------------------------------------------ utilities --- */
 
 .hint,
 .muted {
     color: var(--muted);
-    font-size: 0.875rem;
+    font-size: 0.87rem;
 }
 
-code {
-    font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+.hint {
+    margin: 0.6rem 0;
 }
 
-.code {
-    font-size: 1.125rem;
-    letter-spacing: 0.08em;
-    padding: 0.15rem 0.4rem;
+.stack {
+    display: grid;
+    gap: 0.5rem;
+}
+
+.row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.nowrap {
+    white-space: nowrap;
+}
+
+/* A captured recording's transcript, or a draft's body. pre-wrap keeps the paragraphing the model produced
+   without letting one long line stretch the table it sits in. */
+.transcript {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    max-width: 44rem;
+    margin: 0.25rem 0;
+}
+
+.right {
+    margin-left: auto;
+}
+
+.summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+    gap: 0.85rem;
+    margin: 1rem 0;
+}
+
+.summary-item {
+    background: var(--surface);
     border: 1px solid var(--line);
-    border-radius: 4px;
+    border-radius: var(--radius);
+    padding: 0.85rem 1rem;
+    box-shadow: var(--shadow);
+}
+
+.summary-item .label {
+    display: block;
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+}
+
+.summary-item .value {
+    display: block;
+    font-size: 1.15rem;
+    font-weight: 600;
+    margin-top: 0.15rem;
+}
+
+/* ----------------------------------------------------------- responsive --- */
+
+@media (max-width: 48rem) {
+    .app {
+        flex-direction: column;
+    }
+
+    .sidebar {
+        position: static;
+        height: auto;
+        flex: 0 0 auto;
+        padding: 1rem 0.75rem;
+    }
+
+    .nav {
+        flex-direction: row;
+        flex-wrap: wrap;
+        gap: 0.3rem;
+    }
+
+    .nav a {
+        padding: 0.4rem 0.6rem;
+        font-size: 0.9rem;
+    }
+
+    .main,
+    .footer {
+        padding: 1.25rem 1rem 2rem;
+    }
+
+    .shell {
+        margin: 1rem;
+        padding: 1.25rem;
+    }
+}
+
+@media print {
+    .sidebar,
+    .footer,
+    .actions,
+    button {
+        display: none !important;
+    }
 }

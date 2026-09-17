@@ -2,12 +2,13 @@
 @rendermode InteractiveServer
 @attribute [Authorize]
 @inject IServiceScopeFactory ScopeFactory
+@inject ILoggerFactory LoggerFactory
 
 <h1>发布目标</h1>
 
 <p class="hint">
     发布默认只把文章作为<strong>私人草稿</strong>上传，等你在客户端确认后才公开。
-    「自动公开」是唯一一种无人确认也会公开的路径，因此它只能在这里开启，且需要重新输入管理员密码。
+    「自动公开」是唯一一种无人确认也会公开的路径，因此它只能在这里开启，且开启与关闭都要求重新输入管理员密码。
 </p>
 
 @if (_error is not null)
@@ -31,77 +32,162 @@
 
 @if (_targets is null)
 {
-    <p>正在读取…</p>
+    <p class="muted">正在读取…</p>
 }
 else if (_targets.Count == 0)
 {
-    <p>还没有发布目标。用下面的表单添加一个 WordPress 站点或一个 Markdown 目录。</p>
+    <p class="notice info">还没有发布目标。用下面的表单添加一个 WordPress 站点或一个 Markdown 目录。</p>
 }
 else
 {
-    <table class="table">
-        <thead>
-            <tr>
-                <th>名称</th>
-                <th>类型</th>
-                <th>目标</th>
-                <th>自动公开</th>
-                <th>操作</th>
-            </tr>
-        </thead>
-        <tbody>
-            @foreach (var target in _targets)
-            {
+    <div class="table-wrap">
+        <table class="table">
+            <thead>
                 <tr>
-                    <td>@target.Name</td>
-                    <td>@(target.Type == PublishTargetType.Markdown ? "Markdown" : "WordPress")</td>
-                    <td>@(target.DestinationReference ?? "（默认）")</td>
-                    <td>
-                        @if (target.AutomaticPublishEnabled)
-                        {
-                            <strong>已开启</strong>
-                            <br />
-                            <span class="hint">
-                                @target.AutomaticPublishEnabledBy
-                                @(target.AutomaticPublishEnabledAtUtc?.ToString("u"))
-                            </span>
-                        }
-                        else
-                        {
-                            <span>关闭（只上传草稿）</span>
-                        }
-                    </td>
-                    <td>
-                        @if (_confirming == target.Id)
-                        {
-                            <div class="risk">
-                                <strong>开启后，@target.Name 会在无人确认的情况下公开文章。</strong>
-                                <p>
-                                    只有在你有意让这个目标自动公开时才继续。请重新输入管理员密码以确认：
-                                </p>
-                                <input type="password" @bind="_password" placeholder="当前密码" />
-                                <button @onclick="() => EnableAsync(target)" disabled="@_busy">确认开启</button>
-                                <button @onclick="CancelConfirm" disabled="@_busy">取消</button>
-                            </div>
-                        }
-                        else if (target.AutomaticPublishEnabled)
-                        {
-                            <button @onclick="() => DisableAsync(target)" disabled="@_busy">关闭自动公开</button>
-                        }
-                        else
-                        {
-                            <button @onclick="() => BeginConfirm(target)" disabled="@_busy">开启自动公开…</button>
-                        }
-                    </td>
+                    <th>名称</th>
+                    <th>类型</th>
+                    <th>目标</th>
+                    <th>自动公开</th>
+                    <th>操作</th>
                 </tr>
-            }
-        </tbody>
-    </table>
+            </thead>
+            <tbody>
+                @foreach (var target in _targets)
+                {
+                    <tr>
+                        <td><strong>@target.Name</strong></td>
+                        <td>@(target.Type == PublishTargetType.Markdown ? "Markdown" : "WordPress")</td>
+                        <td><code>@(target.DestinationReference ?? "（默认）")</code></td>
+                        <td>
+                            @if (target.AutomaticPublishEnabled)
+                            {
+                                <span class="badge badge-warn">已开启</span>
+                                <div class="hint">
+                                    @target.AutomaticPublishEnabledBy
+                                    @(target.AutomaticPublishEnabledAtUtc?.ToString("u"))
+                                </div>
+                            }
+                            else
+                            {
+                                <span class="badge badge-muted">关闭</span>
+                                <div class="hint">只上传草稿</div>
+                            }
+                        </td>
+                        <td>
+                            @if (_confirming == target.Id)
+                            {
+                                <div class="risk">
+                                    @if (_confirmActionIsEnable)
+                                    {
+                                        <strong>开启后，@target.Name 会在无人确认的情况下公开文章。</strong>
+                                        <p>只有在你有意让这个目标自动公开时才继续。请重新输入管理员密码以确认：</p>
+                                    }
+                                    else
+                                    {
+                                        <strong>关闭后，@target.Name 只会收到私人草稿。</strong>
+                                        <p>服务端对开启和关闭都要求当前密码，所以要撤销它同样需要重新输入：</p>
+                                    }
+
+                                    <input type="password" @bind="_password" placeholder="当前密码" />
+                                    <div class="actions">
+                                        <button class="btn-primary btn-sm"
+                                                @onclick="() => ApplyConfirmAsync(target)"
+                                                disabled="@_busy">
+                                            @(_confirmActionIsEnable ? "确认开启" : "确认关闭")
+                                        </button>
+                                        <button class="btn-sm" @onclick="CancelConfirm" disabled="@_busy">取消</button>
+                                    </div>
+                                </div>
+                            }
+                            else if (target.AutomaticPublishEnabled)
+                            {
+                                <button class="btn-sm" @onclick="() => BeginConfirm(target, enable: false)" disabled="@_busy">
+                                    关闭自动公开…
+                                </button>
+                            }
+                            else
+                            {
+                                <button class="btn-sm" @onclick="() => BeginConfirm(target, enable: true)" disabled="@_busy">
+                                    开启自动公开…
+                                </button>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@if (_targets is not null && _targets.Any(target => target.Type == PublishTargetType.WordPress))
+{
+    <h2>WordPress 站点设置</h2>
+
+    <p class="hint">
+        站点地址与应用密码的<strong>名字</strong>默认来自部署配置
+        （<code>Publishing:WordPress:Targets:&lt;配置键&gt;</code>）。下面可以为某一个目标单独覆盖，
+        <strong>留空的字段继续沿用配置</strong>；四个字段全空即清除覆盖。
+        密码的<strong>值</strong>永远只放在 Docker Secrets 里，这里只能填名字。
+    </p>
+
+    @if (_siteError is not null)
+    {
+        <p class="notice error">@_siteError</p>
+    }
+
+    @if (_siteSaved is not null)
+    {
+        <p class="notice ok">@_siteSaved</p>
+    }
+
+    <div class="form-grid">
+        <label>
+            目标
+            <select @bind="_siteTargetId" @bind:after="LoadSiteAsync">
+                @foreach (var target in _targets.Where(t => t.Type == PublishTargetType.WordPress))
+                {
+                    <option value="@target.Id.ToString()">@target.Name</option>
+                }
+            </select>
+        </label>
+        <label>
+            站点地址
+            <input @bind="_siteBaseUrl" placeholder="https://blog.example.com" />
+        </label>
+        <label>
+            用户名
+            <input @bind="_siteUsername" placeholder="wordpress 登录名" />
+        </label>
+        <label>
+            Secret 名
+            <input @bind="_siteSecretName" placeholder="wordpress-application-password" />
+        </label>
+        <label>
+            请求超时（秒）
+            <input type="number" @bind="_siteTimeoutSeconds" />
+        </label>
+    </div>
+
+    <div class="actions">
+        <button class="btn-primary" @onclick="SaveSiteAsync" disabled="@_siteBusy">保存站点设置</button>
+        <button @onclick="ClearSiteAsync" disabled="@_siteBusy">清除覆盖</button>
+    </div>
+
+    @if (_siteEffective is not null)
+    {
+        <p class="hint">
+            当前<strong>实际生效</strong>的组合：地址 <code>@_siteEffective.EffectiveBaseUrl</code>，
+            用户名 <code>@_siteEffective.EffectiveUsername</code>，
+            Secret <code>@_siteEffective.EffectiveSecretName</code>，
+            超时 @_siteEffective.EffectiveTimeoutSeconds 秒。
+            @(_siteEffective.Overridden ? "其中部分字段来自本页覆盖。" : "全部来自部署配置。")
+        </p>
+    }
 }
 
 <h2>添加目标</h2>
 
-<div class="form">
+<div class="form-grid">
     <label>
         名称
         <input @bind="_newName" placeholder="blog" />
@@ -117,7 +203,10 @@ else
         目标
         <input @bind="_newDestination" placeholder="WordPress 用配置键，Markdown 用相对目录" />
     </label>
-    <button @onclick="CreateAsync" disabled="@_busy">添加</button>
+</div>
+
+<div class="actions">
+    <button class="btn-primary" @onclick="CreateAsync" disabled="@_busy">添加</button>
 </div>
 
 <p class="hint">
@@ -145,11 +234,11 @@ else
 
 @if (_settings is null)
 {
-    <p>正在读取…</p>
+    <p class="muted">正在读取…</p>
 }
 else
 {
-    <div class="form">
+    <div class="form-grid">
         <label>
             内容时区
             <input @bind="_timeZoneId" />
@@ -170,19 +259,22 @@ else
             音频保留天数
             <input type="number" @bind="_audioRetentionDays" />
         </label>
-        <button @onclick="SaveSettingsAsync" disabled="@_busy">保存</button>
+    </div>
+
+    <div class="actions">
+        <button class="btn-primary" @onclick="SaveSettingsAsync" disabled="@_busy">保存</button>
     </div>
 
     <p class="hint">
-        音频保留填 <code>-1</code> 表示永久保留。改时区<strong>不会</strong>重算既有记录的内容日——
-        内容日一经写入即不可变，这正是「一天一篇」「补跑资格」与已发布文章日期能够稳定的原因；
-        新时区只影响之后的采集。
+        音频保留：<code>-1</code> = 永久保留，<code>0</code> = 当天草稿确认后立即删除，默认 30 天。
+        到期只删音频文件，转写与输入记录保留。
     </p>
 }
 
 @code {
     private IReadOnlyList<PublishTarget>? _targets;
     private PublishTargetId? _confirming;
+    private bool _confirmActionIsEnable;
     private string _password = string.Empty;
     private string _newName = string.Empty;
     private string _newType = "wordPress";
@@ -201,10 +293,40 @@ else
     private string? _scheduleError;
     private string? _scheduleSaved;
 
+    // The WordPress site editor (§8.1). Kept as strings because that is what an <input> binds to; the use case turns
+    // blank into "stop overriding this field".
+    private string _siteTargetId = string.Empty;
+    private string _siteBaseUrl = string.Empty;
+    private string _siteUsername = string.Empty;
+    private string _siteSecretName = string.Empty;
+    private int? _siteTimeoutSeconds;
+    private WordPressSiteDto? _siteEffective;
+    private string? _siteError;
+    private string? _siteSaved;
+    private bool _siteBusy;
+
+    private ILogger Logger => LoggerFactory.CreateLogger("DailyMusings.Admin.Publishing");
+
     protected override async Task OnInitializedAsync()
     {
-        await LoadAsync();
-        await LoadSettingsAsync();
+        _error = await AdminOperation.RunAsync(
+            async () =>
+            {
+                await LoadAsync();
+                await LoadSettingsAsync();
+
+                // Default the site editor to the first WordPress target, so the section is useful on arrival rather
+                // than empty until the operator picks something.
+                _siteTargetId = _targets?
+                    .FirstOrDefault(target => target.Type == PublishTargetType.WordPress)?
+                    .Id.ToString() ?? string.Empty;
+
+                if (!string.IsNullOrEmpty(_siteTargetId))
+                {
+                    await LoadSiteAsync();
+                }
+            },
+            Logger);
     }
 
     private async Task LoadAsync()
@@ -249,20 +371,32 @@ else
                 return;
             }
 
-            await using var scope = ScopeFactory.CreateAsyncScope();
-            var saved = await scope.ServiceProvider
-                .GetRequiredService<UpdateContentSettingsUseCase>()
-                .ExecuteAsync(
-                    new ContentSettingsUpdate(_timeZoneId, generation, publish, _publishWindow, _audioRetentionDays),
-                    CancellationToken.None);
+            ContentSettings? saved = null;
 
-            _settings = saved;
-            _scheduleSaved = $"时区 {saved.TimeZoneId}，生成 {ContentSettings.FormatTime(saved.GenerationLocalTime)}，" +
-                             $"发布 {ContentSettings.FormatTime(saved.PublishLocalTime)}，窗口 {saved.PublishWindowMinutes} 分钟。";
-        }
-        catch (Exception exception) when (exception is DomainException or UseCaseException)
-        {
-            _scheduleError = exception.Message;
+            var failure = await AdminOperation.RunAsync(
+                async () =>
+                {
+                    await using var scope = ScopeFactory.CreateAsyncScope();
+                    saved = await scope.ServiceProvider
+                        .GetRequiredService<UpdateContentSettingsUseCase>()
+                        .ExecuteAsync(
+                            new ContentSettingsUpdate(_timeZoneId, generation, publish, _publishWindow, _audioRetentionDays),
+                            CancellationToken.None);
+                },
+                Logger);
+
+            if (failure is not null)
+            {
+                _scheduleError = failure;
+                return;
+            }
+
+            if (saved is not null)
+            {
+                _settings = saved;
+                _scheduleSaved = $"时区 {saved.TimeZoneId}，生成 {ContentSettings.FormatTime(saved.GenerationLocalTime)}，"
+                    + $"发布 {ContentSettings.FormatTime(saved.PublishLocalTime)}，窗口 {saved.PublishWindowMinutes} 分钟。";
+            }
         }
         finally
         {
@@ -270,9 +404,16 @@ else
         }
     }
 
-    private void BeginConfirm(PublishTarget target)
+    /// <summary>
+    /// Starts the confirmation for either direction. Both need the password, because the use case requires it to
+    /// turn the switch off as well — and the previous version rendered the password box only on the way in, so
+    /// "关闭自动公开" always submitted an empty password, could never succeed, and left the opt-in impossible to
+    /// revoke from the UI.
+    /// </summary>
+    private void BeginConfirm(PublishTarget target, bool enable)
     {
         _confirming = target.Id;
+        _confirmActionIsEnable = enable;
         _password = string.Empty;
         _error = null;
         _enabled = null;
@@ -292,52 +433,90 @@ else
 
         try
         {
-            var type = _newType == "markdown" ? PublishTargetType.Markdown : PublishTargetType.WordPress;
+            // Checked here as well as inside the use case: the use case rejects a blank name with ArgumentException,
+            // which is not an operator-facing failure type, and an exception escaping an @onclick handler kills the
+            // whole circuit — one empty click and every button on this page stops responding.
+            if (string.IsNullOrWhiteSpace(_newName))
+            {
+                _error = "名称不能为空。";
+                return;
+            }
 
-            await using var scope = ScopeFactory.CreateAsyncScope();
-            await scope.ServiceProvider
-                .GetRequiredService<CreatePublishTargetUseCase>()
-                .ExecuteAsync(
-                    _newName,
-                    type,
-                    string.IsNullOrWhiteSpace(_newDestination) ? null : _newDestination,
-                    CancellationToken.None);
+            var type = _newType == "markdown" ? PublishTargetType.Markdown : PublishTargetType.WordPress;
+            var name = _newName;
+            var destination = string.IsNullOrWhiteSpace(_newDestination) ? null : _newDestination;
+
+            var failure = await AdminOperation.RunAsync(
+                async () =>
+                {
+                    await using var scope = ScopeFactory.CreateAsyncScope();
+                    await scope.ServiceProvider
+                        .GetRequiredService<CreatePublishTargetUseCase>()
+                        .ExecuteAsync(name, type, destination, CancellationToken.None);
+                },
+                Logger);
+
+            if (failure is not null)
+            {
+                _error = failure;
+                return;
+            }
 
             _newName = string.Empty;
             _newDestination = string.Empty;
             await LoadAsync();
         }
-        catch (Exception exception) when (exception is DomainException or UseCaseException)
-        {
-            _error = exception.Message;
-        }
         finally
         {
             _busy = false;
         }
     }
 
-    private async Task EnableAsync(PublishTarget target)
+    /// <summary>
+    /// Applies the confirmed direction. One path for both directions, so the password requirement and the error
+    /// reporting cannot drift apart the way they did when only the enable path had a password box.
+    /// </summary>
+    private async Task ApplyConfirmAsync(PublishTarget target)
     {
         _busy = true;
         _error = null;
 
         try
         {
-            await using var scope = ScopeFactory.CreateAsyncScope();
-            _enabled = await scope.ServiceProvider
-                .GetRequiredService<SetAutomaticPublishUseCase>()
-                .ExecuteAsync(target.Id, enabled: true, _password, CancellationToken.None);
+            var enable = _confirmActionIsEnable;
+            PublishTarget? updated = null;
+
+            var failure = await AdminOperation.RunAsync(
+                async () =>
+                {
+                    await using var scope = ScopeFactory.CreateAsyncScope();
+                    updated = await scope.ServiceProvider
+                        .GetRequiredService<SetAutomaticPublishUseCase>()
+                        .ExecuteAsync(target.Id, enable, _password, CancellationToken.None);
+                },
+                Logger);
+
+            if (failure is not null)
+            {
+                // §11.1: a rejected password matters more than a generic failure here — the operator has to know
+                // that the switch is still in its previous position.
+                _error = failure;
+                return;
+            }
 
             _confirming = null;
             _password = string.Empty;
+
+            if (enable)
+            {
+                _enabled = updated;
+            }
+            else
+            {
+                _disabled = target.Name;
+            }
+
             await LoadAsync();
-        }
-        catch (Exception exception) when (exception is DomainException or UseCaseException)
-        {
-            // §11.1: a rejected password is reported here rather than being treated as a generic failure, because
-            // the operator has to know that the switch is still off.
-            _error = exception.Message;
         }
         finally
         {
@@ -345,28 +524,154 @@ else
         }
     }
 
-    private async Task DisableAsync(PublishTarget target)
+    /// <summary>
+    /// Loads the selected target's site settings: the stored override (to populate the fields) and the values that
+    /// will actually be used (to show what the operator is really getting, since a field can come from either layer).
+    /// </summary>
+    private async Task LoadSiteAsync()
     {
-        _busy = true;
-        _error = null;
+        _siteError = null;
+        _siteSaved = null;
+
+        if (_targets is null || !Guid.TryParse(_siteTargetId, out var parsed))
+        {
+            return;
+        }
+
+        var targetId = new PublishTargetId(parsed);
+
+        var failure = await AdminOperation.RunAsync(
+            async () =>
+            {
+                var target = _targets.FirstOrDefault(candidate => candidate.Id == targetId);
+                if (target is null)
+                {
+                    return;
+                }
+
+                await using var scope = ScopeFactory.CreateAsyncScope();
+                var services = scope.ServiceProvider;
+
+                var overrides = await services
+                    .GetRequiredService<IWordPressSiteOverrideStore>()
+                    .GetAsync(targetId, CancellationToken.None);
+
+                var destination = await services
+                    .GetRequiredService<IPublishDestinationProvider>()
+                    .ResolveAsync(target, CancellationToken.None);
+
+                var site = destination.RequireWordPress();
+
+                _siteBaseUrl = overrides.BaseUrl ?? string.Empty;
+                _siteUsername = overrides.Username ?? string.Empty;
+                _siteSecretName = overrides.SecretName ?? string.Empty;
+                _siteTimeoutSeconds = overrides.TimeoutSeconds;
+
+                _siteEffective = new WordPressSiteDto(
+                    !overrides.IsEmpty,
+                    overrides.BaseUrl,
+                    overrides.Username,
+                    overrides.SecretName,
+                    overrides.TimeoutSeconds,
+                    site.BaseUrl,
+                    site.Username,
+                    site.SecretName,
+                    (int)site.Timeout.TotalSeconds);
+            },
+            Logger);
+
+        if (failure is not null)
+        {
+            _siteError = failure;
+        }
+    }
+
+    private async Task SaveSiteAsync()
+    {
+        _siteBusy = true;
+        _siteError = null;
+        _siteSaved = null;
 
         try
         {
-            await using var scope = ScopeFactory.CreateAsyncScope();
-            await scope.ServiceProvider
-                .GetRequiredService<SetAutomaticPublishUseCase>()
-                .ExecuteAsync(target.Id, enabled: false, _password, CancellationToken.None);
+            if (!Guid.TryParse(_siteTargetId, out var parsed))
+            {
+                _siteError = "请先选择一个 WordPress 目标。";
+                return;
+            }
 
-            _disabled = target.Name;
-            await LoadAsync();
-        }
-        catch (Exception exception) when (exception is DomainException or UseCaseException)
-        {
-            _error = exception.Message;
+            var targetId = new PublishTargetId(parsed);
+
+            var failure = await AdminOperation.RunAsync(
+                async () =>
+                {
+                    await using var scope = ScopeFactory.CreateAsyncScope();
+                    await scope.ServiceProvider
+                        .GetRequiredService<UpdateWordPressSiteOverrideUseCase>()
+                        .ExecuteAsync(
+                            targetId,
+                            new WordPressSiteOverride(
+                                _siteBaseUrl,
+                                _siteUsername,
+                                _siteSecretName,
+                                _siteTimeoutSeconds),
+                            CancellationToken.None);
+                },
+                Logger);
+
+            if (failure is not null)
+            {
+                _siteError = failure;
+                return;
+            }
+
+            await LoadSiteAsync();
+            _siteSaved = "已保存。下一次发布与「测试连接」都会使用这些值。";
         }
         finally
         {
-            _busy = false;
+            _siteBusy = false;
+        }
+    }
+
+    private async Task ClearSiteAsync()
+    {
+        _siteBusy = true;
+        _siteError = null;
+        _siteSaved = null;
+
+        try
+        {
+            if (!Guid.TryParse(_siteTargetId, out var parsed))
+            {
+                _siteError = "请先选择一个 WordPress 目标。";
+                return;
+            }
+
+            var targetId = new PublishTargetId(parsed);
+
+            var failure = await AdminOperation.RunAsync(
+                async () =>
+                {
+                    await using var scope = ScopeFactory.CreateAsyncScope();
+                    await scope.ServiceProvider
+                        .GetRequiredService<UpdateWordPressSiteOverrideUseCase>()
+                        .ExecuteAsync(targetId, WordPressSiteOverride.None, CancellationToken.None);
+                },
+                Logger);
+
+            if (failure is not null)
+            {
+                _siteError = failure;
+                return;
+            }
+
+            await LoadSiteAsync();
+            _siteSaved = "已清除覆盖，该目标回到部署配置里的站点设置。";
+        }
+        finally
+        {
+            _siteBusy = false;
         }
     }
 }

@@ -2,65 +2,103 @@
 @rendermode InteractiveServer
 @attribute [Authorize]
 @inject IServiceScopeFactory ScopeFactory
+@inject ILoggerFactory LoggerFactory
 
 <h1>实例状态</h1>
+<p class="hint">
+    基础检查只覆盖本实例能控制的部分：数据库可写、媒体目录可写、后台任务执行器存活。
+    外部模型、SMTP 与 WordPress 的连通性<strong>故意不参与</strong>这里，它们各自有「测试连接」。
+</p>
+
+@if (_error is not null)
+{
+    <p class="notice error">@_error</p>
+}
 
 @if (_health is null)
 {
-    <p>正在读取…</p>
+    <p class="muted">正在读取…</p>
 }
 else
 {
-    <p class="@(_health.Healthy ? "notice ok" : "notice error")">
-        @(_health.Healthy ? "基础健康检查全部通过。" : "存在失败的检查项，请按下表处理。")
-        <span class="muted">检查时间 @_health.CheckedAtUtc.ToString("u")</span>
+    <p class="notice @(_health.Healthy ? "ok" : "error")">
+        <strong>@(_health.Healthy ? "全部正常。" : "存在失败的检查项。")</strong>
+        检查时间 @_health.CheckedAtUtc.ToString("u")
     </p>
 
-    <table class="table">
-        <thead>
-            <tr><th>检查项</th><th>结果</th><th>说明</th></tr>
-        </thead>
-        <tbody>
-            @foreach (var probe in _health.Probes)
-            {
+    <div class="table-wrap">
+        <table class="table">
+            <thead>
                 <tr>
-                    <td><code>@probe.Name</code></td>
-                    <td>@(probe.Healthy ? "通过" : "失败")</td>
-                    <td class="muted">@probe.Detail</td>
+                    <th>检查项</th>
+                    <th>结果</th>
+                    <th>说明</th>
                 </tr>
-            }
-        </tbody>
-    </table>
-
-    <p class="hint">
-        基础检查只覆盖本实例能控制的部分（数据库可写、媒体目录可写、任务执行器存活）。
-        外部模型、SMTP 与 WordPress 的连通性不使用此处，它们各自有“测试连接”。
-    </p>
+            </thead>
+            <tbody>
+                @foreach (var probe in _health.Probes)
+                {
+                    <tr>
+                        <td><code>@probe.Name</code></td>
+                        <td>
+                            <span class="badge @(probe.Healthy ? "badge-ok" : "badge-err")">
+                                @(probe.Healthy ? "通过" : "失败")
+                            </span>
+                        </td>
+                        <td class="muted">@(probe.Detail ?? "—")</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
 }
 
 <h2>设备配对</h2>
 
-@if (_code is null)
-{
-    <p>生成一个十分钟有效、仅可使用一次的配对码，在客户端输入即可完成配对。</p>
-}
-else
-{
-    <p class="notice ok">
-        配对码 <code class="code">@_code.Code</code>
-        <br />
-        有效期至 @_code.ExpiresAtUtc.ToString("u")（UTC）。此码只显示这一次，关闭页面后无法再次查看。
-    </p>
-}
-
-<button @onclick="IssueCodeAsync" disabled="@(_issuing)">生成配对码</button>
+<div class="card">
+    @if (_code is null)
+    {
+        <p>
+            配对码十分钟有效、只能使用一次。在客户端里输入它即可完成配对，
+            之后这台设备就用自己独立的令牌访问实例。
+        </p>
+        <div class="actions">
+            <button class="btn-primary" @onclick="IssueCodeAsync" disabled="@_issuing">
+                @(_issuing ? "正在签发…" : "生成配对码")
+            </button>
+        </div>
+    }
+    else
+    {
+        <p class="notice ok">
+            配对码
+            <br />
+            <code class="code">@_code.Code</code>
+            <br />
+            有效期至 @_code.ExpiresAtUtc.ToString("u")（UTC）。
+            <strong>此码只显示这一次</strong>，关闭页面后无法再次查看。
+        </p>
+        <div class="actions">
+            <button @onclick="IssueCodeAsync" disabled="@_issuing">再签一个</button>
+            <a class="btn" href="/devices">查看已配对设备</a>
+        </div>
+    }
+</div>
 
 @code {
     private HealthReport? _health;
     private IssuedPairingCode? _code;
     private bool _issuing;
+    private string? _error;
 
-    protected override async Task OnInitializedAsync() => await LoadAsync();
+    private ILogger Logger => LoggerFactory.CreateLogger("DailyMusings.Admin.Dashboard");
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Guarded as well: an unguarded first load left the page on "正在读取…" for ever, or took the circuit down
+        // when the database was momentarily unavailable.
+        _error = await AdminOperation.RunAsync(LoadAsync, Logger);
+    }
 
     private async Task LoadAsync()
     {
@@ -75,13 +113,27 @@ else
     private async Task IssueCodeAsync()
     {
         _issuing = true;
+        _error = null;
 
         try
         {
-            await using var scope = ScopeFactory.CreateAsyncScope();
-            _code = await scope.ServiceProvider
-                .GetRequiredService<IssuePairingCodeUseCase>()
-                .ExecuteAsync(CancellationToken.None);
+            // Every handler body goes through the guard. An exception escaping an @onclick handler terminates the
+            // circuit, and from then on every button on the page is dead — which an operator reports as
+            // "生成配对码 点不了", not as an error.
+            var failure = await AdminOperation.RunAsync(
+                async () =>
+                {
+                    await using var scope = ScopeFactory.CreateAsyncScope();
+                    _code = await scope.ServiceProvider
+                        .GetRequiredService<IssuePairingCodeUseCase>()
+                        .ExecuteAsync(CancellationToken.None);
+                },
+                Logger);
+
+            if (failure is not null)
+            {
+                _error = failure;
+            }
         }
         finally
         {
