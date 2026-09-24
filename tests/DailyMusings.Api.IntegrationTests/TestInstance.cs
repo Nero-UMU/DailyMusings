@@ -247,6 +247,21 @@ internal sealed class TestInstance : IAsyncDisposable
         return await response.Content.ReadFromJsonAsync<T>().ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// The instance's own content day, as <c>yyyy-MM-dd</c>.
+    /// <para>
+    /// Tests must not derive "today" from UTC. The content time zone is <c>Asia/Shanghai</c> by default, so between
+    /// 16:00 and 24:00 UTC the instance is already on the next day and a UTC-derived date is correctly refused with
+    /// <c>reflection.regeneration.date_not_current</c> — which made a test fail every night in that window. Asking
+    /// the instance is one request and is true at every hour.
+    /// </para>
+    /// </summary>
+    public async Task<string> ContentDateAsync()
+    {
+        var statistics = await GetJsonAsync<StatisticsResponse>("/api/system/statistics").ConfigureAwait(false);
+        return statistics!.Today;
+    }
+
     /// <summary>For endpoints that create something and take no body, e.g. issuing a pairing code.</summary>
     public async Task<T?> PostForJsonAsync<T>(string path)
     {

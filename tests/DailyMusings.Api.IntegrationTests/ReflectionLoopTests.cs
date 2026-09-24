@@ -228,7 +228,8 @@ public class ReflectionLoopTests
         instance.WriteSecret("openai-api-key", "test-api-key");
         await instance.SignInAsChangedAdministratorAsync();
 
-        var today = DateTimeOffset.UtcNow.ToString("yyyy-MM-dd");
+        // The instance's content day, not UTC's: see TestInstance.ContentDateAsync.
+        var today = await instance.ContentDateAsync();
 
         using var generated = await instance.Client.PostAsJsonAsync(
             $"/api/reflections/{today}/generate",

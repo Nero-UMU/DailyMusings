@@ -137,4 +137,35 @@ public class PairingCodeRepositoryTests
         var revoked = await devices.FindByTokenHashAsync("hash-new", CancellationToken.None);
         Assert.IsTrue(revoked!.IsRevoked);
     }
+
+    /// <summary>
+    /// Deleting a device that was created by pairing has to let go of the pairing code first.
+    /// <para>
+    /// This is a regression test for a defect found on the deployed instance and nowhere else: the delete endpoint
+    /// answered 500 with「FOREIGN KEY constraint failed」, because <c>pairing_code.redeemed_device_id</c> references
+    /// the device row and every paired device is therefore referenced by its own code. No unit test covered the
+    /// delete path against a database where that reference existed.
+    /// </para>
+    /// </summary>
+    [TestMethod]
+    public async Task A_device_created_by_pairing_can_be_deleted()
+    {
+        var (database, repository) = await ArrangeAsync();
+        await using var _ = database;
+
+        await repository.AddAsync(PairingCode.Issue(PairingCodeId.New(), "hash-abc", Now), CancellationToken.None);
+
+        var devices = new SqliteDeviceRepository(database.Accessor);
+        var device = Device.Register(DeviceId.New(), "Pixel 8", "token-hash-1", "android", Now);
+        Assert.IsTrue(await repository.TryRedeemAsync("hash-abc", device, Now, CancellationToken.None));
+
+        await devices.DeleteAsync(device.Id, CancellationToken.None);
+
+        Assert.AreEqual(0L, await database.CountAsync("device"), "The device row is gone.");
+
+        // The code survives as single-use history, but it no longer points at a device that does not exist.
+        var stored = await repository.FindByCodeHashAsync("hash-abc", CancellationToken.None);
+        Assert.IsNotNull(stored);
+        Assert.IsNull(stored!.RedeemedDeviceId);
+    }
 }

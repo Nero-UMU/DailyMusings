@@ -72,11 +72,32 @@ public sealed class SqliteDeviceRepository : IDeviceRepository
             ("$lastSeen", SqliteValues.InstantOrNull(device.LastSeenAtUtc)),
             ("$revokedAt", SqliteValues.InstantOrNull(device.RevokedAtUtc))).ConfigureAwait(false);
 
-    public async Task DeleteAsync(DeviceId id, CancellationToken cancellationToken) =>
+    /// <summary>
+    /// Removes the device row.
+    /// <para>
+    /// The pairing code that produced it stays (it is single-use history), but its <c>redeemed_device_id</c> is
+    /// cleared first: that column references this row, so deleting the device without letting go of the reference
+    /// fails with a foreign-key violation — which is exactly what happened the first time this ran against a real
+    /// database, because a device created by pairing is always referenced by its own code. Both statements are in
+    /// one transaction so a failure cannot leave a code pointing at a device that is gone.
+    /// </para>
+    /// </summary>
+    public async Task DeleteAsync(DeviceId id, CancellationToken cancellationToken)
+    {
+        await using var transaction = await _accessor.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+
+        await _accessor.ExecuteAsync(
+            "UPDATE pairing_code SET redeemed_device_id = NULL WHERE redeemed_device_id = $id;",
+            cancellationToken,
+            ("$id", id.ToString())).ConfigureAwait(false);
+
         await _accessor.ExecuteAsync(
             "DELETE FROM device WHERE id = $id;",
             cancellationToken,
             ("$id", id.ToString())).ConfigureAwait(false);
+
+        await _accessor.CommitAsync(cancellationToken).ConfigureAwait(false);
+    }
 
     private static Device Map(SqliteDataReader reader) =>
         Device.Rehydrate(

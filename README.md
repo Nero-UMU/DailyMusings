@@ -84,6 +84,8 @@
 
 - **导出的 Markdown 文件被手工改过之后，「覆盖」永远失败，而且报错说的是另一回事**（2026-09-24 部署实例上发现）：`MarkdownWritePolicy.Decide` 先判断「不是我们的文件」，再判断「被外部改过」——而一个被手工改过的导出文件**同时**满足这两条（记录的内容哈希不再匹配），于是永远走第一个分支：用户选择「覆盖」后任务以 `markdown.file.not_ours` 终止失败，可那个文件明明是实例几小时前自己写的；`RefuseExternallyModified` 这个分支因此从来没被执行过。两条都要修：判据顺序调换（先判「被改过」，再判「从未写过」），并且**用户在「检查远程」看到差异后明确选择的「覆盖」必须被执行**（§17.3 第 7 步），而「本实例从未写过」的同名文件在任何情况下仍然不动。回归断言在 `MarkdownExportTests`（四种输入组合）与 `PublishingTests`（真写文件：未确认时拒绝并报 `markdown.file.modified_externally`，确认后原地覆盖、不产生第二份文件）。修好后在部署实例上复验：覆盖成功、文件被重写回实例写的内容，未确认的再次导出报出正确的 `markdown.file.modified_externally`。
 - **Secret 文件权限让整条模型链路静默失效**（2026-09-24 部署实例上发现）：`deploy/secrets/*` 用 600 权限、属主是宿主机用户时，容器以 uid 1654 运行、读不到文件，于是每次模型调用都报 `transcription.secret_missing` / `embedding.secret_missing`——文件就在那里，名字也对，错误码却指向「没配密钥」。Docker 的 file secret 走 bind mount，容器内无法覆盖宿主机权限。**部署步骤必须 `chmod 644`**（目录本身保持 700），文档与示例目录都要写明这一点。
+- **「删除已撤销设备」在真实数据库上必然 500**（2026-09-24 第二轮部署后自检发现）：删设备行的语句是对的，`DELETE FROM device` 也确实作用于一个已经撤销的设备，可数据库回的是 `FOREIGN KEY constraint failed` —— 因为 `pairing_code.redeemed_device_id` 指向这台设备，而**每一台由配对产生的设备都被它自己的那条配对码引用着**。单元测试没抓到的原因是：那条路径从来没有在一个「引用确实存在」的库上跑过。修法是把两条语句放进同一个事务，先把配对码的引用置空再删设备（配对码作为一次性历史保留，只是不再指向一台不存在的设备），并补上回归测试 `A_device_created_by_pairing_can_be_deleted`。教训与前面几条一致：**部署实例上的自检不是复验，它本身就是一层测试**。
+- **有一个集成测试每晚 00:00–08:00（CST）必然失败**（2026-09-24 收尾时跨过午夜才暴露）：`A_day_with_no_input_has_no_draft` 用 `DateTimeOffset.UtcNow` 当「今天」，而内容时区默认是 `Asia/Shanghai`——UTC 16:00 之后实例已经进入第二天，服务端于是用 `reflection.regeneration.date_not_current` 正当地拒绝了这个请求，断言却还在等 `reflection.generation.no_inputs`。这不是产品缺陷而是测试假设错了：**「今天」是实例的今天，不是 UTC 的今天**。修法是让测试问实例（`TestInstance.ContentDateAsync()` 读 `/api/system/statistics` 的 `today`），这样在任何时刻都为真。
 - 客户端**没有「覆盖 / 保留两边」的界面**（2026-09-24 真机验收发现，属未完成而非缺陷）：草稿页只有「检查远程」，能看到差异、也能看到失败原因，却无法选择怎么处置。服务端 `POST /api/publications/{id}/resolve` 三种处置（`overwrite` / `keepBoth` / `pull` 恒被拒）都已实现且有测试，缺的是把前两个接到界面上。
 
 阶段五由验收脚本、真机验收与 Windows 客户端验收（当时的范围）发现并修掉的问题（判定依据写进了 [`tools/acceptance/README.md`](tools/acceptance/README.md)）：
@@ -138,7 +140,7 @@ dotnet test
 
 覆盖范围：§17.1 列出的领域规则；迁移与仓储的原子性（含配对码只能被兑换一次的并发用例、一个真实的外键顺序回归，以及文件存储的「先落盘后引用」）；用例层；客户端离线队列（含「本地副本只在服务端确认后才删除」的顺序断言与幂等键复用）；以及走真实 HTTP 的端到端流程——阶段一的完整流程，阶段二的上传 → 执行器认领 → 转写端点 → 结果落库，阶段三的采集 → 主题识别 → 语义检索 → 生成 → 来源映射 → 无来源陈述检查 → 确认，阶段四的导出排队 / 执行 / 文件差异，以及阶段五的取回录音（含 Range 与未配对者被拒）、导出 / 备份 / 裁剪 / 恢复校验 / 音频清理。外部服务一律使用可控桩端点。
 
-方向收缩轮之后的实际数字：**518 项通过**（Domain 231、Application 27、Infrastructure 150、Client 48、Api.Integration 62）。发布相关的测试现在断言的是磁盘上的文件本身：`draft` 字段随可见性变化、重复导出不会覆盖不是自己写的文件、外部改动被判为差异而不是可重试的失败。第二轮撤掉手机端草稿 / 主题 / 来源核验后，Client 从 74 项降到 48 项——删掉的是不再存在的能力，不是被跳过的测试。
+方向收缩轮之后的实际数字：**519 项通过**（Domain 231、Application 27、Infrastructure 151、Client 48、Api.Integration 62）。发布相关的测试现在断言的是磁盘上的文件本身：`draft` 字段随可见性变化、重复导出不会覆盖不是自己写的文件、外部改动被判为差异而不是可重试的失败。第二轮撤掉手机端草稿 / 主题 / 来源核验后，Client 从 74 项降到 48 项——删掉的是不再存在的能力，不是被跳过的测试。
 
 除 `dotnet test` 之外还有两套脚本，见 [`tools/deploy/`](tools/deploy/)：`deploy.ps1` 把工作树部署到远程主机（停容器 → 删旧镜像 → 构建 → 启新镜像 → 等健康检查），`verify-instance.ps1` 在部署好的实例上跑 25 项端到端自检，`configure-instance.ps1` 把实例配成可验收状态，`android-ui.ps1` 用 adb 驱动手机界面，`test-doubles.sh` 起模型桩与邮件接收端。
 
