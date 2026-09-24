@@ -31,33 +31,34 @@ public class SmtpUiPasswordTests
         var uiSecrets = new EncryptedUiSecretStore(paths);
         var secrets = new FileSecretStore(paths, uiSecrets);
 
-        var update = new UpdateSmtpSettingsUseCase(settings, uiSecrets);
+        var update = new UpdateSmtpSettingsUseCase(settings, uiSecrets, secrets);
 
         await update.ExecuteAsync(
             new SmtpSettingsUpdate(
                 Enabled: true,
                 Host: "smtp.example.com",
                 Port: 465,
-                Security: SmtpSecurity.ImplicitTls,
-                Username: "owner@example.com",
-                SecretName: "smtp-password",
                 FromAddress: "noreply@example.com",
-                FromName: "每日随想",
-                TimeoutSeconds: 30,
+                UseSsl: true,
+                UseStartTls: false,
                 Password: "typed-in-the-page",
                 ToAddress: "reader@example.com"),
             CancellationToken.None);
 
-        // The value went to the encrypted store, under the name the settings row points at.
-        Assert.AreEqual("typed-in-the-page", await uiSecrets.GetAsync("smtp-password", CancellationToken.None));
-        Assert.AreEqual(SecretSource.Ui, secrets.ResolveSource("smtp-password"));
-        Assert.AreEqual("typed-in-the-page", secrets.TryGet("smtp-password"));
+        // The value went to the encrypted store, under the one fixed name the whole product agrees on.
+        Assert.AreEqual(
+            "typed-in-the-page",
+            await uiSecrets.GetAsync(SmtpSettingKeys.PasswordSecretName, CancellationToken.None));
+        Assert.AreEqual(SecretSource.Ui, secrets.ResolveSource(SmtpSettingKeys.PasswordSecretName));
+        Assert.AreEqual("typed-in-the-page", secrets.TryGet(SmtpSettingKeys.PasswordSecretName));
 
         var view = await ReadAsync(database, settings, secrets);
 
         Assert.AreEqual(SecretSource.Ui, view.PasswordSource);
         Assert.IsTrue(view.HasPassword);
-        Assert.IsTrue(view.Ready, "Switched on with a resolvable password is what 'it will send' means.");
+        Assert.IsTrue(view.Enabled);
+        Assert.IsTrue(view.UseSsl, "The SSL checkbox reaches the reader.");
+        Assert.IsFalse(view.UseStartTls);
 
         // §12: the recipient is edited next to the server because it is the same errand, and it is stored under
         // the key the notifier already reads.
@@ -71,8 +72,17 @@ public class SmtpUiPasswordTests
             "No field of the view may carry the password (§10.4).");
     }
 
+    /// <summary>
+    /// 「清除已保存的密码」要连 Secret 文件里的那份一起挡住。
+    /// <para>
+    /// 这条替换掉了原来「清除后回落到挂载的 Secret 文件」那条断言：那条在旧模型下说得通（密码只是被指向），
+    /// 但新模型里「有密码就必须加密」，而部署里往往躺着一个从示例目录抄来的 <c>smtp-password</c>。若清除只删掉
+    /// 页面那一份、解析继续落到文件，操作者会看到「请清空密码」的提示却怎么都清不掉，本来能发信的实例从此发不出去。
+    /// 所以清除写下的是一条**显式的空记录**，它比文件优先；想重新用文件里的密码，就再填一次。
+    /// </para>
+    /// </summary>
     [TestMethod]
-    public async Task Clearing_the_password_falls_back_to_the_mounted_secret_file()
+    public async Task Clearing_the_password_also_overrides_the_mounted_secret_file()
     {
         await using var database = await TestDatabase.CreateAsync();
         var paths = PathsFor(database);
@@ -83,24 +93,41 @@ public class SmtpUiPasswordTests
         Directory.CreateDirectory(paths.SecretsPath);
         await File.WriteAllTextAsync(Path.Combine(paths.SecretsPath, "smtp-password"), "from-the-file");
 
-        var update = new UpdateSmtpSettingsUseCase(settings, uiSecrets);
+        var update = new UpdateSmtpSettingsUseCase(settings, uiSecrets, secrets);
 
         await update.ExecuteAsync(
-            new SmtpSettingsUpdate(true, "smtp.example.com", 587, SmtpSecurity.StartTls, "owner", "smtp-password", "a@example.com", "每日随想", 30, Password: "typed"),
+            new SmtpSettingsUpdate(
+                true,
+                "smtp.example.com",
+                587,
+                "owner@example.com",
+                UseSsl: false,
+                UseStartTls: true,
+                Password: "typed"),
             CancellationToken.None);
 
-        Assert.AreEqual(SecretSource.Ui, secrets.ResolveSource("smtp-password"));
+        Assert.AreEqual(SecretSource.Ui, secrets.ResolveSource(SmtpSettingKeys.PasswordSecretName));
 
-        await update.ExecuteAsync(new SmtpSettingsUpdate(null, null, null, null, null, null, null, null, null, ClearPassword: true), CancellationToken.None);
+        // Clearing it takes the file's password out of play too. The switch stays where it was, so the save that
+        // clears the password is not also a save that turns encryption off.
+        await update.ExecuteAsync(
+            new SmtpSettingsUpdate(null, null, null, null, null, null, ClearPassword: true),
+            CancellationToken.None);
 
-        Assert.IsNull(await uiSecrets.GetAsync("smtp-password", CancellationToken.None));
-        Assert.AreEqual(SecretSource.File, secrets.ResolveSource("smtp-password"));
-        Assert.AreEqual("from-the-file", secrets.TryGet("smtp-password"));
+        Assert.IsNull(secrets.TryGet(SmtpSettingKeys.PasswordSecretName), "清除之后文件里的密码不该再被取到");
+        Assert.AreEqual(SecretSource.None, secrets.ResolveSource(SmtpSettingKeys.PasswordSecretName));
 
         var view = await ReadAsync(database, settings, secrets);
 
-        Assert.AreEqual(SecretSource.File, view.PasswordSource);
-        Assert.IsTrue(view.HasPassword);
+        Assert.AreEqual(SecretSource.None, view.PasswordSource);
+        Assert.IsFalse(view.HasPassword);
+        Assert.IsTrue(view.UseStartTls, "Leaving the switches out of a save leaves them alone.");
+
+        // And the configuration is now保存得下去 in the clear, which is the whole point of being able to clear it:
+        // 没有密码的明文中继是合法的（本机中继），被挡住的是「有密码还不加密」。
+        await update.ExecuteAsync(
+            new SmtpSettingsUpdate(null, null, null, null, UseSsl: false, UseStartTls: false),
+            CancellationToken.None);
     }
 
     /// <summary>
@@ -113,19 +140,50 @@ public class SmtpUiPasswordTests
         await using var database = await TestDatabase.CreateAsync();
         var paths = PathsFor(database);
         var settings = new SqliteAppSettingStore(database.Accessor, new TestClock(DateTimeOffset.UtcNow));
-        var secrets = new FileSecretStore(paths, new EncryptedUiSecretStore(paths));
-
-        var update = new UpdateSmtpSettingsUseCase(settings, new EncryptedUiSecretStore(paths));
+        var uiSecrets = new EncryptedUiSecretStore(paths);
+        var secrets = new FileSecretStore(paths, uiSecrets);
+        var update = new UpdateSmtpSettingsUseCase(settings, uiSecrets, secrets);
 
         await update.ExecuteAsync(
-            new SmtpSettingsUpdate(true, "smtp.example.com", 587, SmtpSecurity.StartTls, null, "smtp-password", "a@example.com", "每日随想", 30),
+            new SmtpSettingsUpdate(
+                true,
+                "smtp.example.com",
+                587,
+                "a@example.com",
+                UseSsl: false,
+                UseStartTls: true),
             CancellationToken.None);
 
         var view = await ReadAsync(database, settings, secrets);
 
         Assert.AreEqual(SecretSource.None, view.PasswordSource);
         Assert.IsFalse(view.HasPassword);
-        Assert.IsFalse(view.Ready, "Enabled without a password is not ready, and the page has to be able to say so.");
+    }
+
+    /// <summary>
+    /// No password and no encryption is a legal configuration — a relay on localhost — and the view has to be able to
+    /// say "there is no password" without the page implying the setup is broken.
+    /// </summary>
+    [TestMethod]
+    public async Task A_password_less_configuration_without_encryption_is_saved_as_it_is()
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        var paths = PathsFor(database);
+        var settings = new SqliteAppSettingStore(database.Accessor, new TestClock(DateTimeOffset.UtcNow));
+        var uiSecrets = new EncryptedUiSecretStore(paths);
+        var secrets = new FileSecretStore(paths, uiSecrets);
+        var update = new UpdateSmtpSettingsUseCase(settings, uiSecrets, secrets);
+
+        await update.ExecuteAsync(
+            new SmtpSettingsUpdate(true, "127.0.0.1", 1025, "dailymusings@localhost", UseSsl: false, UseStartTls: false),
+            CancellationToken.None);
+
+        var view = await ReadAsync(database, settings, secrets);
+
+        Assert.IsTrue(view.Enabled);
+        Assert.IsFalse(view.UseSsl);
+        Assert.IsFalse(view.UseStartTls);
+        Assert.AreEqual(SecretSource.None, view.PasswordSource);
     }
 
     [TestMethod]

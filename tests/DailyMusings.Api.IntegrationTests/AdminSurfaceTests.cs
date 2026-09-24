@@ -291,12 +291,12 @@ public class AdminSurfaceTests
                 // reaching anybody's network — this is what makes the assertion below deterministic and offline.
                 Host: "127.0.0.1",
                 Port: 65000,
-                Security: "none",
-                Username: "owner@example.com",
-                SecretName: "smtp-password",
                 FromAddress: "noreply@example.com",
-                FromName: "每日随想",
-                TimeoutSeconds: 5,
+
+                // A password may not travel over an unencrypted connection, which is why the test mail below is
+                // configured for STARTTLS. This relay will not answer at all, so nothing is ever really negotiated.
+                UseSsl: false,
+                UseStartTls: true,
                 Password: Password,
                 ToAddress: "reader@example.com"));
 
@@ -313,6 +313,7 @@ public class AdminSurfaceTests
         Assert.AreEqual(SecretSourceNames.Ui, dto.PasswordSource);
         Assert.IsTrue(dto.HasPassword);
         Assert.AreEqual("reader@example.com", dto.ToAddress);
+        Assert.AreEqual("noreply@example.com", dto.FromAddress);
 
         // And the read path agrees: the form shows where the effective password would come from.
         var read = await instance.Client.GetFromJsonAsync<SmtpSettingsDto>("/api/system/smtp-settings");
@@ -339,7 +340,7 @@ public class AdminSurfaceTests
         // Clearing it hands the name back to whatever the deployment provides.
         using var cleared = await instance.Client.PatchAsJsonAsync(
             "/api/system/smtp-settings",
-            new UpdateSmtpSettingsRequest(null, null, null, null, null, null, null, null, null, ClearPassword: true));
+            new UpdateSmtpSettingsRequest(null, null, null, null, null, null, ClearPassword: true));
 
         cleared.EnsureSuccessStatusCode();
         Assert.AreEqual(SecretSourceNames.None, (await cleared.Content.ReadFromJsonAsync<SmtpSettingsDto>())!.PasswordSource);

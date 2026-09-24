@@ -45,9 +45,14 @@ public sealed class FileSecretStore : ISecretStore
 
         // The synchronous port is deliberate: every model call resolves a secret name through it, and the
         // admin-page store is a small file read plus a decrypt with nothing to await.
-        if (_uiSecrets is not null && _uiSecrets.TryGet(name, out var fromUi) && !string.IsNullOrEmpty(fromUi))
+        //
+        // A record in the admin-page store answers the question outright — including an empty one, which is what
+        // "清除已保存的密码" writes. Falling through to the file in that case would resurrect the credential the
+        // operator just removed, and with the SMTP rule that a password requires encryption, a stale file would
+        // silently stop an otherwise working relay from sending.
+        if (_uiSecrets is not null && _uiSecrets.TryGet(name, out var fromUi))
         {
-            return fromUi;
+            return string.IsNullOrEmpty(fromUi) ? null : fromUi;
         }
 
         var fromFile = TryReadFile(name);
@@ -70,9 +75,10 @@ public sealed class FileSecretStore : ISecretStore
     {
         ValidateName(name);
 
-        if (_uiSecrets is not null && _uiSecrets.TryGet(name, out var fromUi) && !string.IsNullOrEmpty(fromUi))
+        if (_uiSecrets is not null && _uiSecrets.TryGet(name, out var fromUi))
         {
-            return SecretSource.Ui;
+            // Same rule as TryGet: a record here is the answer, and an empty one means "there is no such secret".
+            return string.IsNullOrEmpty(fromUi) ? SecretSource.None : SecretSource.Ui;
         }
 
         if (TryReadFile(name) is not null)

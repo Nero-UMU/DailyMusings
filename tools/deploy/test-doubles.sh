@@ -66,5 +66,5 @@ done
 echo
 echo "配置用的地址："
 echo "  转写 / 生成 / Embedding Base URL : http://dm-stub:8077/v1"
-echo "  SMTP                              : dm-mailpit 端口 1025，安全方式 none"
+echo "  SMTP                              : dm-mailpit 端口 1025，SSL 与 STARTTLS 都不勾（本机中继）"
 echo "  Mailpit 界面                      : http://127.0.0.1:8025/"

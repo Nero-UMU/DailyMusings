@@ -3,42 +3,40 @@ using DailyMusings.Domain.Notifications;
 namespace DailyMusings.Application.Abstractions;
 
 /// <summary>
-/// How the connection to the relay is protected (docs/开发指导.md §12).
-/// <para>
-/// Named after what the wire does rather than after a checkbox, because the two labels every mail form uses mean the
-/// opposite of each other: "SSL: true" is <see cref="ImplicitTls"/> (a handshake from the very first byte, port 465),
-/// while "STARTTLS: true" is <see cref="StartTls"/> (greet in the clear, then upgrade, port 587). An operator copying
-/// a configuration from any other program needs both to be expressible, so both are.
-/// </para>
-/// </summary>
-public enum SmtpSecurity
-{
-    /// <summary>No encryption at all. Only ever right for a relay on localhost (port 25 or a test sink on 1025).</summary>
-    None = 0,
-
-    /// <summary>Explicit TLS: connect in the clear, EHLO, then <c>STARTTLS</c>. What port 587 means.</summary>
-    StartTls = 1,
-
-    /// <summary>Implicit TLS: the connection <em>is</em> a TLS handshake, greeting included. What port 465 means.</summary>
-    ImplicitTls = 2,
-}
-
-/// <summary>
 /// SMTP configuration (docs/开发指导.md §12). Generic on purpose: the guide explicitly does not want a
 /// per-provider integration, and every provider this product will meet speaks plain SMTP.
 /// <para>
-/// The password is referenced by <em>name</em> and resolved from the secret store at send time, so it never
-/// reaches the settings table, an export or a backup (§10.4).
+/// The fields are the seven an operator is asked for — host, port, the sender's mailbox, the password (resolved by
+/// name, never stored here), the two encryption switches and the recipient — plus two that never reach the form.
+/// The shape follows the mail forms of other self-hosted software on purpose: an operator copying their provider's
+/// settings has "SMTP address, port, sender mailbox, password, SSL, STARTTLS, recipient mailbox" in front of them
+/// and must be able to type exactly that in.
+/// </para>
+/// <para>
+/// <see cref="FromAddress"/> is also the SMTP username. That is what those other forms mean by "sender mailbox",
+/// and it is what removes the second field an operator had to keep in step with the first.
+/// </para>
+/// <para>
+/// The two switches are independent booleans rather than one "security" choice, because that is the pair the other
+/// software shows and the pair operators actually compare:
+/// <list type="bullet">
+/// <item><see cref="UseSsl"/> — <em>implicit</em> TLS: connect, handshake, and only then read the greeting. Port 465.</item>
+/// <item><see cref="UseStartTls"/> — <em>explicit</em> TLS: greet in the clear, then <c>STARTTLS</c> and start over. Port 587.</item>
+/// <item>Both false — no encryption at all, which is only right for a relay on localhost.</item>
+/// </list>
+/// The two cannot both be true: a form that let that through would only fail later, inside the handshake, in a way
+/// no operator can read. Saving such a pair is refused with <c>smtp.security.conflicting</c>.
 /// </para>
 /// </summary>
+/// <param name="FromName">The display name on the message. Internal: the form does not ask, the deployment may override.</param>
+/// <param name="Timeout">One deadline for the whole conversation, not per operation. Internal, same rule.</param>
 public sealed record SmtpSettings(
     bool Enabled,
     string Host,
     int Port,
-    SmtpSecurity Security,
-    string? Username,
-    string SecretName,
     string FromAddress,
+    bool UseSsl,
+    bool UseStartTls,
     string FromName,
     TimeSpan Timeout)
 {
@@ -47,10 +45,9 @@ public sealed record SmtpSettings(
         Enabled: false,
         Host: "127.0.0.1",
         Port: 1025,
-        Security: SmtpSecurity.None,
-        Username: null,
-        SecretName: "smtp-password",
         FromAddress: "dailymusings@localhost",
+        UseSsl: false,
+        UseStartTls: false,
         FromName: "每日随想",
         Timeout: TimeSpan.FromSeconds(30));
 }

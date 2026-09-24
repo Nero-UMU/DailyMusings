@@ -151,7 +151,10 @@ public sealed class EncryptedUiSecretStore : IUiSecretStore
             return false;
         }
 
-        if (payload.Length <= 1 + NonceBytes + TagBytes || payload[0] != FormatVersion)
+        // `<` rather than `<=`: a payload of exactly header+nonce+tag carries an empty plaintext, and an empty
+        // value is meaningful here (see the note at the end of this method) — the shorter-than-header case is the
+        // only one that is genuinely unreadable.
+        if (payload.Length < 1 + NonceBytes + TagBytes || payload[0] != FormatVersion)
         {
             return false;
         }
@@ -182,11 +185,10 @@ public sealed class EncryptedUiSecretStore : IUiSecretStore
         var text = Encoding.UTF8.GetString(plaintext);
         CryptographicOperations.ZeroMemory(plaintext);
 
-        if (text.Length == 0)
-        {
-            return false;
-        }
-
+        // An empty value is a value: "清除已保存的密码" writes one, and it has to be distinguishable from "this
+        // store has nothing to say about that name". Without the distinction the resolution falls through to the
+        // Docker secret file, and a credential the operator just removed comes straight back — which, with the
+        // SMTP rule that a password requires encryption, silently stops a working relay from sending.
         value = text;
         return true;
     }

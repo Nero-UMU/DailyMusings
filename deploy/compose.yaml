@@ -29,6 +29,24 @@ services:
       # Mirrors the port above so the healthcheck can fall back to it when there is no admin-page override.
       DM_INTERNAL_PORT: "${DAILYMUSINGS_INTERNAL_PORT:-18321}"
 
+      # SMTP for notification mail (§12). Optional: the admin page's 「通知管理」 writes the same settings, and what
+      # is saved there wins over these. Uncomment the block to configure a relay entirely from compose instead.
+      #
+      #   Smtp__Enabled: "true"
+      #   Smtp__Host: smtp.example.com
+      #   Smtp__Port: "587"
+      #   Smtp__FromAddress: noreply@example.com   # the sender's mailbox, which is also the SMTP username
+      #   Smtp__StartTls: "true"                   # 587: greet in the clear, then upgrade
+      #   Smtp__Ssl: "false"                       # 465: handshake before the greeting (never both at once)
+      #
+      # The two switches are independent booleans, because that is the pair every other mail form shows. The names
+      # this section had before they were split — Smtp__Security (none|starttls|ssl) and Smtp__UseStartTls — are
+      # still read and mapped onto them, so an existing deployment keeps sending after an upgrade.
+      #
+      # The password is never an environment variable: it is the smtp-password secret below, mounted as a file (or
+      # typed on the admin page). With no password at all, the sender simply does not authenticate — which is what a
+      # relay on localhost wants.
+
     ports:
       # §10.3 recommends HTTPS, a LAN or a VPN. If this port is exposed to the public internet over plain
       # HTTP, the login page states the interception risk and requires an explicit acknowledgement — and that

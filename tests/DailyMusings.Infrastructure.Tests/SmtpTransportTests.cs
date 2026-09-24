@@ -16,8 +16,13 @@ namespace DailyMusings.Infrastructure.Tests;
 /// These exist because the transport is written by hand: the framework's client could do 587 but not the implicit TLS
 /// that 465 needs, so "copy the settings out of my other program" had to keep working without it. Everything a
 /// hand-written client could get wrong is asserted here against a stub server — the order of the handshake and the
-/// credentials, the shape of a Chinese subject, the refusal to send a password in the clear, and which failures the
-/// job should retry (§14).
+/// credentials, which AUTH mechanism gets chosen, the shape of a Chinese subject, the refusal to send a password in
+/// the clear, and which failures the job should retry (§14).
+/// </para>
+/// <para>
+/// The two switches are asserted independently on purpose: <c>UseSsl</c> means the handshake happens before the
+/// greeting (465) and <c>UseStartTls</c> means the greeting comes first and is followed by an upgrade (587). They are
+/// the two checkboxes on the form, and a transport that conflated them would work against exactly one provider.
 /// </para>
 /// </summary>
 [TestClass]
@@ -32,13 +37,17 @@ public class SmtpTransportTests
         await using var server = StubSmtpServer.Plain();
         var message = new EmailMessage(ToAddress, "2026-09-17 的草稿已就绪", "今天有 3 条记录。\r\n草稿已生成。");
 
-        await new SmtpMailTransport(Settings(server, SmtpSecurity.None), password: null)
+        await new SmtpMailTransport(Settings(server), password: null)
             .SendAsync(message, CancellationToken.None);
 
         Assert.AreEqual(
             string.Join(" | ", "EHLO 127.0.0.1", $"MAIL FROM:<{FromAddress}>", $"RCPT TO:<{ToAddress}>", "DATA", "QUIT"),
             string.Join(" | ", server.Conversation),
             "The command sequence a mail server expects, in order.");
+
+        Assert.IsFalse(
+            server.Conversation.Any(line => line.StartsWith("AUTH", StringComparison.Ordinal)),
+            "No password is provisioned, so nothing may be offered: a relay on localhost authenticates nobody.");
 
         Assert.IsTrue(server.TerminatorReceived, "The body has to be closed with a line containing only a dot.");
 
@@ -54,16 +63,24 @@ public class SmtpTransportTests
 
         Assert.AreEqual(message.Body, DecodeBody(server.Message), "The body has to arrive as the text the composer wrote.");
         StringAssert.Contains(server.Message, "Content-Type: text/plain; charset=utf-8");
+        StringAssert.Contains(server.Message, "Content-Transfer-Encoding: base64");
+
+        var body = server.Message[(server.Message.IndexOf("\r\n\r\n", StringComparison.Ordinal) + 4)..];
+
+        Assert.IsTrue(
+            body.Split("\r\n", StringSplitOptions.RemoveEmptyEntries)
+                .All(line => line.Length <= 76 && line != "."),
+            "Base64 lines stay inside 76 characters, so no line can be a lone dot or be rewritten by a relay.");
     }
 
     [TestMethod]
     public async Task Implicit_tls_hands_over_the_greeting_inside_the_tunnel()
     {
         // The stub authenticates before it writes anything, so a conversation at all means the client handshook first
-        // — which is the whole difference between port 465 and port 587.
+        // — which is the whole difference between port 465 and port 587, and what the SSL checkbox turns on.
         await using var server = StubSmtpServer.ImplicitTls(["AUTH PLAIN LOGIN"]);
 
-        await Send(server, SmtpSecurity.ImplicitTls, "s3cret-from-implicit");
+        await Send(server, "s3cret-from-implicit", useSsl: true);
 
         StringAssert.StartsWith(server.Conversation[0], "EHLO");
         StringAssert.Contains(server.Message, "Subject:", "The message has to arrive inside the tunnel.");
@@ -77,7 +94,7 @@ public class SmtpTransportTests
     {
         await using var server = StubSmtpServer.Plain(["STARTTLS", "AUTH LOGIN PLAIN"]);
 
-        await Send(server, SmtpSecurity.StartTls, "s3cret-from-starttls");
+        await Send(server, "s3cret-from-starttls", useStartTls: true);
 
         var conversation = server.Conversation.ToList();
         var startTls = conversation.IndexOf("STARTTLS");
@@ -94,13 +111,48 @@ public class SmtpTransportTests
     }
 
     [TestMethod]
+    public async Task Auth_login_is_used_when_the_relay_speaks_nothing_else()
+    {
+        await using var server = StubSmtpServer.ImplicitTls(["AUTH LOGIN"]);
+
+        await Send(server, "login-only-password", useSsl: true);
+
+        var conversation = server.Conversation.ToList();
+        var login = conversation.IndexOf("AUTH LOGIN");
+
+        Assert.IsTrue(login >= 0, "A relay that only offers LOGIN still has to be usable.");
+        Assert.AreEqual(
+            Convert.ToBase64String(Encoding.UTF8.GetBytes(FromAddress)),
+            conversation[login + 1],
+            "The username is the sender's mailbox: there is no second field to keep in step with it.");
+        Assert.AreEqual(
+            Convert.ToBase64String(Encoding.UTF8.GetBytes("login-only-password")),
+            conversation[login + 2]);
+    }
+
+    [TestMethod]
+    public async Task A_relay_that_offers_no_authentication_this_client_speaks_is_a_permanent_failure()
+    {
+        await using var server = StubSmtpServer.ImplicitTls();
+
+        var refusal = await Assert.ThrowsExceptionAsync<PermanentExternalFailureException>(
+            () => Send(server, "s3cret", useSsl: true));
+
+        Assert.AreEqual("notification.auth_unsupported", refusal.Code);
+        StringAssert.Contains(refusal.Message, "offered", "The server's own list is the only diagnostic an operator gets.");
+        Assert.IsFalse(
+            server.Conversation.Any(line => line.StartsWith("MAIL FROM", StringComparison.Ordinal)),
+            "A relay that cannot authenticate us must not be handed a message either.");
+    }
+
+    [TestMethod]
     public async Task A_certificate_that_does_not_validate_stops_the_send()
     {
         await using var server = StubSmtpServer.ImplicitTls();
 
         var refusal = await Assert.ThrowsExceptionAsync<PermanentExternalFailureException>(
             () => new SmtpMailTransport(
-                    Settings(server, SmtpSecurity.ImplicitTls),
+                    Settings(server, useSsl: true),
                     password: null,
                     // What the platform's own validation would do with a certificate that is not trusted.
                     trustServer: (_, _, _, _) => false)
@@ -111,45 +163,12 @@ public class SmtpTransportTests
     }
 
     [TestMethod]
-    public async Task A_refused_password_is_permanent_and_an_unreachable_relay_is_transient()
-    {
-        await using var refusing = StubSmtpServer.ImplicitTls(["AUTH PLAIN"], authCode: 535);
-
-        var refusal = await Assert.ThrowsExceptionAsync<PermanentExternalFailureException>(
-            () => Send(refusing, SmtpSecurity.ImplicitTls, "wrong-password"));
-
-        Assert.AreEqual("notification.rejected", refusal.Code, "A refused password will be refused again (§14).");
-
-        // A port nothing is listening on: the failure an operator sees when the relay is down, which is worth retrying.
-        var closed = new TcpListener(IPAddress.Loopback, 0);
-        closed.Start();
-        var closedPort = ((IPEndPoint)closed.LocalEndpoint).Port;
-        closed.Stop();
-
-        var settings = SmtpSettings.Default with
-        {
-            Enabled = true,
-            Host = "127.0.0.1",
-            Port = closedPort,
-            Security = SmtpSecurity.None,
-            FromAddress = FromAddress,
-            Timeout = TimeSpan.FromSeconds(5),
-        };
-
-        var unreachable = await Assert.ThrowsExceptionAsync<TransientExternalFailureException>(
-            () => new SmtpMailTransport(settings, null)
-                .SendAsync(new EmailMessage(ToAddress, "subject", "body"), CancellationToken.None));
-
-        Assert.AreEqual("notification.smtp_failed", unreachable.Code);
-    }
-
-    [TestMethod]
     public async Task Credentials_are_never_sent_over_a_connection_that_is_not_encrypted()
     {
         await using var server = StubSmtpServer.Plain(["AUTH PLAIN LOGIN"]);
 
         var refusal = await Assert.ThrowsExceptionAsync<PermanentExternalFailureException>(
-            () => Send(server, SmtpSecurity.None, "s3cret-in-the-clear"));
+            () => Send(server, "s3cret-in-the-clear"));
 
         Assert.AreEqual("notification.insecure_credentials", refusal.Code);
         Assert.IsFalse(
@@ -166,7 +185,7 @@ public class SmtpTransportTests
         await using var server = StubSmtpServer.Plain();
 
         var refusal = await Assert.ThrowsExceptionAsync<PermanentExternalFailureException>(
-            () => Send(server, SmtpSecurity.StartTls, "s3cret"));
+            () => Send(server, "s3cret", useStartTls: true));
 
         Assert.AreEqual("notification.starttls_unsupported", refusal.Code);
         Assert.IsFalse(server.Conversation.Any(line => line.StartsWith("MAIL FROM", StringComparison.Ordinal)));
@@ -180,7 +199,7 @@ public class SmtpTransportTests
         var injected = new EmailMessage(ToAddress, "草稿已就绪\r\nBcc: attacker@example.test", "body");
 
         var refusal = await Assert.ThrowsExceptionAsync<PermanentExternalFailureException>(
-            () => new SmtpMailTransport(Settings(server, SmtpSecurity.None), null)
+            () => new SmtpMailTransport(Settings(server), null)
                 .SendAsync(injected, CancellationToken.None));
 
         Assert.AreEqual("notification.invalid_message", refusal.Code);
@@ -193,7 +212,7 @@ public class SmtpTransportTests
         await using var server = StubSmtpServer.Plain();
         var subject = string.Concat(Enumerable.Repeat("每日随想 · ", 12)).TrimEnd();
 
-        await new SmtpMailTransport(Settings(server, SmtpSecurity.None), null)
+        await new SmtpMailTransport(Settings(server), null)
             .SendAsync(new EmailMessage(ToAddress, subject, "body"), CancellationToken.None);
 
         var header = Header(server.Message, "Subject");
@@ -202,6 +221,58 @@ public class SmtpTransportTests
         Assert.IsTrue(words.Count > 1, $"A subject this long cannot be one encoded word: {header}");
         Assert.IsTrue(words.All(word => word.Length <= 75), $"Every encoded word must stay under 75 characters: {header}");
         Assert.AreEqual(subject, Decode(header), "Splitting must not corrupt a multi-byte character.");
+    }
+
+    [TestMethod]
+    public async Task A_four_xx_refusal_is_transient_and_a_five_xx_refusal_is_permanent()
+    {
+        await using var tryAgainLater = StubSmtpServer.Plain(mailFromCode: 451);
+
+        var transient = await Assert.ThrowsExceptionAsync<TransientExternalFailureException>(
+            () => new SmtpMailTransport(Settings(tryAgainLater), password: null)
+                .SendAsync(new EmailMessage(ToAddress, "subject", "body"), CancellationToken.None));
+
+        Assert.AreEqual("notification.smtp_failed", transient.Code, "4xx means 'try again', and the job should (§14).");
+
+        await using var never = StubSmtpServer.Plain(mailFromCode: 550);
+
+        var permanent = await Assert.ThrowsExceptionAsync<PermanentExternalFailureException>(
+            () => new SmtpMailTransport(Settings(never), password: null)
+                .SendAsync(new EmailMessage(ToAddress, "subject", "body"), CancellationToken.None));
+
+        Assert.AreEqual("notification.rejected", permanent.Code, "5xx will be refused again tomorrow too.");
+    }
+
+    [TestMethod]
+    public async Task A_refused_password_is_permanent_and_an_unreachable_relay_is_transient()
+    {
+        await using var refusing = StubSmtpServer.ImplicitTls(["AUTH PLAIN"], authCode: 535);
+
+        var refusal = await Assert.ThrowsExceptionAsync<PermanentExternalFailureException>(
+            () => Send(refusing, "wrong-password", useSsl: true));
+
+        Assert.AreEqual("notification.rejected", refusal.Code, "A refused password will be refused again (§14).");
+
+        // A port nothing is listening on: the failure an operator sees when the relay is down, which is worth retrying.
+        var closed = new TcpListener(IPAddress.Loopback, 0);
+        closed.Start();
+        var closedPort = ((IPEndPoint)closed.LocalEndpoint).Port;
+        closed.Stop();
+
+        var settings = SmtpSettings.Default with
+        {
+            Enabled = true,
+            Host = "127.0.0.1",
+            Port = closedPort,
+            FromAddress = FromAddress,
+            Timeout = TimeSpan.FromSeconds(5),
+        };
+
+        var unreachable = await Assert.ThrowsExceptionAsync<TransientExternalFailureException>(
+            () => new SmtpMailTransport(settings, null)
+                .SendAsync(new EmailMessage(ToAddress, "subject", "body"), CancellationToken.None));
+
+        Assert.AreEqual("notification.smtp_failed", unreachable.Code);
     }
 
     [TestMethod]
@@ -217,8 +288,8 @@ public class SmtpTransportTests
         Assert.AreEqual("每日随想", Decode(name));
     }
 
-    private static Task Send(StubSmtpServer server, SmtpSecurity security, string password) =>
-        new SmtpMailTransport(Settings(server, security, username: FromAddress), password, Trust(server))
+    private static Task Send(StubSmtpServer server, string password, bool useSsl = false, bool useStartTls = false) =>
+        new SmtpMailTransport(Settings(server, useSsl, useStartTls), password, Trust(server))
             .SendAsync(new EmailMessage(ToAddress, "subject", "body"), CancellationToken.None);
 
     /// <summary>
@@ -228,15 +299,15 @@ public class SmtpTransportTests
     private static RemoteCertificateValidationCallback Trust(StubSmtpServer server) =>
         (_, certificate, _, _) => server.PresentedItsOwnCertificate(certificate);
 
-    private static SmtpSettings Settings(StubSmtpServer server, SmtpSecurity security, string? username = null) =>
+    private static SmtpSettings Settings(StubSmtpServer server, bool useSsl = false, bool useStartTls = false) =>
         SmtpSettings.Default with
         {
             Enabled = true,
             Host = "127.0.0.1",
             Port = server.Port,
-            Security = security,
-            Username = username,
             FromAddress = FromAddress,
+            UseSsl = useSsl,
+            UseStartTls = useStartTls,
             FromName = "每日随想",
             Timeout = TimeSpan.FromSeconds(15),
         };

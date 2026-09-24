@@ -241,6 +241,13 @@ public sealed class ExternalServiceProbe : IExternalServiceProbe
     /// <summary>
     /// Connects to the SMTP server and reads its greeting. No message is sent: a test connection that mailed
     /// something would put a meaningless message in the user's inbox every time they pressed the button.
+    /// <para>
+    /// The two switches are not symmetric here, and pretending otherwise is what makes this probe lie: with SSL on
+    /// (465) the relay says nothing at all until the handshake is done, so reading a plaintext greeting would just
+    /// sit there until the timeout and report a working mailbox as unreachable. With STARTTLS on (587) the greeting
+    /// is in the clear by definition, so the probe reads exactly what it always read — and it still proves only that
+    /// the relay is there, which is why the page tells the operator to use 「发送测试邮件」 for the real question.
+    /// </para>
     /// </summary>
     private async Task<ProbeResult> ProbeSmtpAsync(CancellationToken cancellationToken)
     {
@@ -251,13 +258,9 @@ public sealed class ExternalServiceProbe : IExternalServiceProbe
             return ProbeResult.Failure("probe.smtp.disabled", "No SMTP server is configured.");
         }
 
-        // The password is checked for presence only. Whether the server accepts it belongs to a real send, and §12
-        // keeps that failure inside the notification job.
-        if (!string.IsNullOrWhiteSpace(settings.Username) && _secrets.TryGet(settings.SecretName) is null)
-        {
-            return ProbeResult.Failure("probe.smtp.secret_missing", $"The secret '{settings.SecretName}' is not provisioned.");
-        }
-
+        // A password is not required and not checked: a relay on localhost authenticates nobody, so a missing secret
+        // is not a misconfiguration here. Whether the relay accepts whatever password is stored belongs to a real
+        // send, and §12 keeps that failure inside the notification job.
         using var client = new TcpClient();
 
         try
@@ -269,10 +272,8 @@ public sealed class ExternalServiceProbe : IExternalServiceProbe
 
             Stream stream = client.GetStream();
 
-            if (settings.Security == SmtpSecurity.ImplicitTls)
+            if (settings.UseSsl)
             {
-                // Port 465 says nothing at all until the handshake is done, so a plaintext greeting read would just
-                // sit there until the timeout and report the relay as unreachable.
                 var secure = new SslStream(stream, leaveInnerStreamOpen: false, _trustServer);
 
                 await secure.AuthenticateAsClientAsync(

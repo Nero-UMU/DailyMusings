@@ -11,12 +11,19 @@ namespace DailyMusings.Infrastructure.Notifications;
 /// Reads the SMTP and notification configuration (docs/开发指导.md §12).
 /// <para>
 /// Generic SMTP only, exactly as the guide asks: no provider-specific integration, no OAuth flow, and the password
-/// referenced by name so it never reaches the settings table, an export or a backup (§10.4).
+/// resolved from the secret store by name so it never reaches the settings table, an export or a backup (§10.4).
+/// The two encryption switches are read as booleans; the single "security" spelling they replaced is still honoured
+/// for existing deployments — see <see cref="StoredSettings.Ssl"/>.
 /// </para>
 /// </summary>
 public sealed class ConfigurationSmtpSettingsProvider : ISmtpSettingsProvider
 {
     public const string SectionName = "Smtp";
+
+    /// <summary>The deployment configuration keys this section used to have, still read so an upgrade does not stop mail.</summary>
+    private const string LegacySecurityKey = "Security";
+
+    private const string LegacyUseStartTlsKey = "UseStartTls";
 
     private readonly IConfiguration _configuration;
     private readonly IAppSettingStore _settings;
@@ -36,22 +43,34 @@ public sealed class ConfigurationSmtpSettingsProvider : ISmtpSettingsProvider
         var section = _configuration.GetSection(SectionName);
         var defaults = SmtpSettings.Default;
 
+        // Read once: both readers need the old Smtp__Security token to map it onto their own boolean.
+        var legacySecurity = section.GetValue<string?>(LegacySecurityKey);
+
         return new SmtpSettings(
             Enabled: StoredSettings.Boolean(stored, SmtpSettingKeys.Enabled, section.GetValue("Enabled", defaults.Enabled)),
             Host: StoredSettings.String(stored, SmtpSettingKeys.Host, section.GetValue("Host", defaults.Host)) ?? defaults.Host,
             Port: StoredSettings.Integer(stored, SmtpSettingKeys.Port, section.GetValue("Port", defaults.Port)),
-            Security: StoredSettings.Security(
-                stored,
-                SmtpSettingKeys.Security,
-                SmtpSettingKeys.UseStartTls,
-                section.GetValue<string?>("Security"),
-                section.GetValue<bool?>("UseStartTls"),
-                defaults.Security),
-            Username: StoredSettings.Username(stored, SmtpSettingKeys.Username, section.GetValue<string?>("Username")),
-            SecretName: StoredSettings.String(stored, SmtpSettingKeys.SecretName, section.GetValue("SecretName", defaults.SecretName))
-                ?? defaults.SecretName,
+
+            // §12: the sender's mailbox is the SMTP username, which is why the old Smtp:Username key is not read at
+            // all any more. An instance that had one stored still sends, because the address was already stored too.
             FromAddress: StoredSettings.String(stored, SmtpSettingKeys.FromAddress, section.GetValue("FromAddress", defaults.FromAddress))
                 ?? defaults.FromAddress,
+
+            UseSsl: StoredSettings.Ssl(
+                stored,
+                SmtpSettingKeys.Ssl,
+                StoredSettings.ConfiguredBoolean(section.GetValue<string?>("Ssl")),
+                legacySecurity,
+                defaults.UseSsl),
+
+            UseStartTls: StoredSettings.StartTls(
+                stored,
+                SmtpSettingKeys.StartTls,
+                StoredSettings.ConfiguredBoolean(section.GetValue<string?>("StartTls")),
+                StoredSettings.ConfiguredBoolean(section.GetValue<string?>(LegacyUseStartTlsKey)),
+                legacySecurity,
+                defaults.UseStartTls),
+
             FromName: StoredSettings.String(stored, SmtpSettingKeys.FromName, section.GetValue("FromName", defaults.FromName))
                 ?? defaults.FromName,
             Timeout: TimeSpan.FromSeconds(StoredSettings.Integer(
@@ -160,13 +179,10 @@ public sealed class SmtpEmailSender : IEmailSender
         }
 
         // The secret is resolved here, at send time, and handed to the transport — it never reaches the settings
-        // table, an export or a backup (§10.4).
-        var password = string.IsNullOrWhiteSpace(settings.Username)
-            ? null
-            : _secrets.TryGet(settings.SecretName)
-                ?? throw new PermanentExternalFailureException(
-                    "notification.secret_missing",
-                    $"The secret '{settings.SecretName}' is not provisioned.");
+        // table, an export or a backup (§10.4). A password that is not provisioned is not an error any more: a relay
+        // on localhost authenticates nobody, and the transport simply does not offer credentials. The username is the
+        // sender's mailbox, so there is no second field to fall out of step with it.
+        var password = _secrets.TryGet(SmtpSettingKeys.PasswordSecretName);
 
         var transport = new SmtpMailTransport(settings, password);
 
@@ -178,6 +194,12 @@ public sealed class SmtpEmailSender : IEmailSender
             "Sent a notification through {Host}:{Port} using {Security}.",
             settings.Host,
             settings.Port,
-            SmtpSecurityNames.ToToken(settings.Security));
+            TransportName(settings));
     }
+
+    /// <summary>What the wire did, in one word, for a log line: never the password, never the message (§16).</summary>
+    private static string TransportName(SmtpSettings settings) =>
+        settings.UseSsl ? "ssl (implicit, 465)"
+        : settings.UseStartTls ? "starttls (explicit, 587)"
+        : "no encryption";
 }

@@ -4,11 +4,13 @@
 @inject IServiceScopeFactory ScopeFactory
 @inject ILoggerFactory LoggerFactory
 
-@* 通知管理分区：目前只支持邮件。SMTP 配置、收件地址、事件开关，以及「发送测试邮件」。
-   这一页要能回答两个问题：「我配好了吗」和「它到底会不会发」。 *@
+@* 通知管理分区：目前只支持邮件。SMTP 配置、收件邮箱、事件开关，以及「发送测试邮件」。
+   这一页要能回答两个问题：「我配好了吗」和「它到底会不会发」。
+   2026-09-24：邮件表单按 ani-rss 的形状重写——SMTP 地址、SMTP 端口、发件人邮箱（同时就是 SMTP 用户名）、
+   密码、SSL、STARTTLS、收件人邮箱，七项都由用户自己填；不再有「安全方式」下拉，也没有常用邮箱预置。 *@
 
 <PageHeader Title="通知管理"
-            Hint="邮件只携带元数据（日期、标题、状态），不含草稿正文（§12）。设备令牌可以读这里的偏好，但只有管理员能改——令牌若能改收件地址，就等于能把当天标题发到别人邮箱。">
+            Hint="邮件只携带元数据（日期、标题、状态），不含草稿正文（§12）。设备令牌可以读这里的偏好，但只有管理员能改——令牌若能改收件邮箱，就等于能把当天标题发到别人邮箱。">
     <Actions>
         <button class="btn" @onclick="ProbeSmtpAsync" disabled="@_busy">测试连接</button>
         <button class="btn-primary" @onclick="SendTestEmailAsync" disabled="@_busy">发送测试邮件</button>
@@ -16,8 +18,8 @@
 </PageHeader>
 
 <p class="notice warn">
-    <strong>没填收件地址，或者三个事件开关全关，就什么都不会发。</strong>
-    邮件功能由三件事共同决定：①「启用发信」打开；② 收件地址非空；③ 至少一个事件开关打开。
+    <strong>没填收件邮箱，或者三个事件开关全关，就什么都不会发。</strong>
+    邮件功能由三件事共同决定：①「启用发信」打开；② 收件邮箱非空；③ 至少一个事件开关打开。
     任何一条不满足，实例都不会发出任何邮件——也不会报错，因为「不发」本来就是一个合法配置。
 </p>
 
@@ -49,7 +51,7 @@
             <br />
         }
         <span class="hint">
-            收件地址：<code>@(_testedTo ?? "（没有收件地址）")</code>
+            这封信发到：<code>@(_testedTo ?? "（没有收件邮箱）")</code>
             @if (_test.Sent)
             {
                 <text>——去那个邮箱里找「[每日随想] 测试邮件」。</text>
@@ -87,25 +89,10 @@ else
             </span>
         </div>
 
-        @* The fields below are bound to the staged values, not to the row that was loaded: a preset fills the
-           staged values, and a form that displayed the stored row would look as if the click did nothing. *@
         <p class="hint">
-            常用邮箱：点一下就把主机、端口与安全方式填好，用户名与密码按下面的提示填。按钮按安全方式分成两组，
-            和别的软件对得上——别的软件写 STARTTLS 的选上面那组，写「SSL：是」的选下面那组。
+            下面七项就是别家软件「邮箱通知」里要填的东西，照着填即可：<strong>发件人邮箱同时就是 SMTP 用户名</strong>，
+            所以没有单独的用户名一格。填完先点「保存」，再用「发送测试邮件」真发一封确认。
         </p>
-
-        @foreach (var group in SmtpPresetGroups)
-        {
-            <div class="actions">
-                <span class="hint">@group.Title</span>
-                @foreach (var preset in group.Presets)
-                {
-                    <button type="button" class="btn btn-sm" @onclick="() => ApplySmtpPreset(preset)" disabled="@_busy">
-                        @preset.Label
-                    </button>
-                }
-            </div>
-        }
 
         <div class="form-grid">
             <label class="checkbox">
@@ -113,74 +100,71 @@ else
                 启用发信
             </label>
             <label>
-                收件地址（通知发给谁）
+                SMTP 地址
+                <input value="@_smtpHost" @onchange="e => _smtpHost = (string?)e.Value" placeholder="smtp.example.com" />
+            </label>
+            <label>
+                SMTP 端口
+                <input type="number" min="1" max="65535" value="@_smtpPort" @onchange="e => _smtpPort = (string?)e.Value"
+                       placeholder="465 或 587" />
+            </label>
+            <label>
+                发件人邮箱（同时是 SMTP 用户名）
+                <input value="@_smtpFromAddress" @onchange="e => _smtpFromAddress = (string?)e.Value"
+                       placeholder="noreply@example.com" />
+            </label>
+            <label>
+                收件人邮箱（通知发给谁）
                 <input value="@_toAddress" @onchange="e => _toAddress = (string?)e.Value" placeholder="owner@example.com" />
-            </label>
-            <label>
-                主机
-                <input value="@_smtpHost" @onchange="e => _smtpHost = (string?)e.Value" />
-            </label>
-            <label>
-                端口
-                <input type="number" value="@_smtpPort" @onchange="e => _smtpPort = (string?)e.Value" />
-            </label>
-            <label>
-                安全方式
-                <select value="@SmtpSecurityNames.ToToken(_smtpSecurity)" @onchange="e => SetSecurity((string?)e.Value)">
-                    @foreach (var (token, label) in SecurityChoices)
-                    {
-                        <option value="@token">@label</option>
-                    }
-                </select>
-            </label>
-            <label>
-                用户名（可留空）
-                <input value="@_smtpUsername" @onchange="e => _smtpUsername = (string?)e.Value" />
-            </label>
-            <label>
-                密码（留空 = 不改）
-                <input type="password" value="@_password" @onchange="e => _password = (string?)e.Value"
-                       autocomplete="new-password" placeholder="只提交，不回显" />
-            </label>
-            <label>
-                Secret 名（没有在这里填密码时用它）
-                <input value="@_smtpSecretName" @onchange="e => _smtpSecretName = (string?)e.Value" />
-            </label>
-            <label>
-                发件地址
-                <input value="@_smtpFromAddress" @onchange="e => _smtpFromAddress = (string?)e.Value" />
-            </label>
-            <label>
-                发件人名称
-                <input value="@_smtpFromName" @onchange="e => _smtpFromName = (string?)e.Value" />
-            </label>
-            <label>
-                超时（秒，5–300）
-                <input type="number" value="@_smtpTimeout" @onchange="e => _smtpTimeout = (string?)e.Value" />
             </label>
         </div>
 
-        <label class="checkbox">
-            <input type="checkbox" checked="@_clearPassword" @onchange="e => _clearPassword = e.Value is true" />
-            清除已保存的密码（清除后回到 Secret 文件 / 环境变量）
-        </label>
+        <div class="form-grid">
+            <label>
+                密码（留空 = 不改）
+                <input type="password" value="@_password" @onchange="e => _password = (string?)e.Value"
+                       autocomplete="new-password" placeholder="留空表示不改，保存后清空" />
+            </label>
+        </div>
+
+        @if (_smtp.HasPassword)
+        {
+            <label class="checkbox">
+                <input type="checkbox" checked="@_clearPassword" @onchange="e => _clearPassword = e.Value is true" />
+                清除已保存的密码（清除后回到 Secret 文件 / 环境变量）
+            </label>
+        }
+
+        <div class="stack">
+            <label class="checkbox">
+                <input type="checkbox" checked="@_useSsl" @onchange="e => _useSsl = e.Value is true" />
+                SSL
+            </label>
+            <p class="hint">
+                勾上 = 连上立刻 TLS 握手，问候语也在隧道里，端口通常是 <strong>465</strong>。
+                别的软件里写作「SSL：是，STARTTLS：否」。
+            </p>
+
+            <label class="checkbox">
+                <input type="checkbox" checked="@_useStartTls" @onchange="e => _useStartTls = e.Value is true" />
+                STARTTLS
+            </label>
+            <p class="hint">
+                勾上 = 先明文打招呼再升级加密，端口通常是 <strong>587</strong>。
+                别的软件里写作「SSL：否，STARTTLS：是」。
+            </p>
+        </div>
+
+        <p class="hint">
+            <strong>SSL 与 STARTTLS 只能选一个</strong>，两个都勾保存会被拒绝（世界上没有这种发信方式，硬发只会在握手里
+            失败）。<strong>配了密码就必须勾一个</strong>：明文连接会把密码暴露给路上每一个人，所以「有密码 + 两个都不勾」
+            也会被拒绝保存。两个都不勾只适合本机中继（没有密码时）。
+            端口与加密方式要对得上，否则会一直等到超时并报「did not answer in time」——十有八九就是这里不匹配。
+        </p>
 
         <p class="hint">
             <strong>密码输入框只提交、不回显</strong>：保存后页面只会显示「密钥来源」，值本身永远不会回到浏览器，
             也不会进日志、导出或备份（§10.4）。留空表示不改动已保存的值。
-        </p>
-
-        @if (_smtpPresetNote is not null)
-        {
-            <p class="notice info">@_smtpPresetNote</p>
-        }
-
-        <p class="hint">
-            三种安全方式与别的软件一一对应：<strong>STARTTLS</strong>（端口 587）先明文打招呼再升级加密，对应别的软件的
-            「STARTTLS：是」；<strong>SSL/TLS</strong>（端口 465）连上立刻握手，对应「SSL：是、STARTTLS：否」；
-            <strong>不加密</strong>只适合本机中继。端口与安全方式要对得上，否则会一直等到超时并报
-            「SMTP server could not be reached」——「测试连接」若只说 did not answer in time，十有八九就是这里不匹配。
-            配了用户名与密码时必须选加密方式，明文连接会被直接拒绝。
         </p>
 
         <div class="actions">
@@ -232,12 +216,12 @@ else
 
             <p class="notice @(_notifications.SmtpConfigured ? "ok" : "warn")">
                 SMTP：@(_notifications.SmtpConfigured ? "已启用" : "未启用，当前不会发出任何邮件")
-                · 收件地址：<code>@(string.IsNullOrWhiteSpace(_notifications.ToAddress) ? "（未填，什么都发不出去）" : _notifications.ToAddress)</code>
+                · 收件邮箱：<code>@(string.IsNullOrWhiteSpace(_notifications.ToAddress) ? "（未填，什么都发不出去）" : _notifications.ToAddress)</code>
             </p>
 
             <p class="hint">
-                收件地址在「邮件」卡片里改，两张卡片写的是同一份设置——这里只显示它，免得两处各改一半。
-                SMTP 服务器、发件人与超时也在「邮件」卡片；通知偏好与实例地址在这里。
+                收件邮箱在「邮件」卡片里改，两张卡片写的是同一份设置——这里只显示它，免得两处各改一半。
+                SMTP 地址、端口、发件人邮箱、密码与加密方式也在「邮件」卡片；通知偏好与实例地址在这里。
             </p>
         }
     </div>
@@ -250,12 +234,9 @@ else
     private bool _smtpEnabled;
     private string? _smtpHost;
     private string? _smtpPort;
-    private SmtpSecurity _smtpSecurity = SmtpSecurity.None;
-    private string? _smtpUsername;
-    private string? _smtpSecretName;
     private string? _smtpFromAddress;
-    private string? _smtpFromName;
-    private string? _smtpTimeout;
+    private bool _useSsl;
+    private bool _useStartTls;
     private string? _toAddress;
 
     /// <summary>Staged password. Never read back from the server — the form only ever writes it.</summary>
@@ -271,25 +252,9 @@ else
     private string? _testedTo;
     private ProbeResult? _probe;
 
-    /// <summary>What a preset filled, and the part of it only the operator can supply. Null until one is used.</summary>
-    private string? _smtpPresetNote;
-
     private string? _message;
     private string? _error;
     private bool _busy;
-
-    /// <summary>
-    /// The three modes in the order an operator meets them: the one most relays want first, then the "SSL" one every
-    /// other mail form shows, then the unencrypted case that only a relay on localhost should ever need.
-    /// </summary>
-    private static readonly (string Token, string Label)[] SecurityChoices =
-    [
-        (SmtpSecurityNames.StartTls, "STARTTLS（587）"),
-        (SmtpSecurityNames.Ssl, "SSL/TLS（465）"),
-        (SmtpSecurityNames.None, "不加密（本机中继）"),
-    ];
-
-    private static readonly SmtpPresetGroup[] SmtpPresetGroups = SmtpPresets.Grouped();
 
     private ILogger Logger => LoggerFactory.CreateLogger("DailyMusings.Admin.Notifications");
 
@@ -307,12 +272,9 @@ else
         _smtpEnabled = _smtp.Enabled;
         _smtpHost = _smtp.Host;
         _smtpPort = _smtp.Port.ToString(CultureInfo.InvariantCulture);
-        _smtpSecurity = _smtp.Security;
-        _smtpUsername = _smtp.Username;
-        _smtpSecretName = _smtp.SecretName;
         _smtpFromAddress = _smtp.FromAddress;
-        _smtpFromName = _smtp.FromName;
-        _smtpTimeout = _smtp.TimeoutSeconds.ToString(CultureInfo.InvariantCulture);
+        _useSsl = _smtp.UseSsl;
+        _useStartTls = _smtp.UseStartTls;
         _toAddress = _smtp.ToAddress;
 
         // The staged password is dropped on every read: what is on screen must never be a value the server sent.
@@ -334,38 +296,14 @@ else
         SecretSource.Ui => "后台填写",
         SecretSource.File => "Secret 文件",
         SecretSource.Environment => "环境变量",
-        _ => "未配置（发不出去）",
+        _ => "未配置（本机中继可以没有密码）",
     };
 
     private string PasswordSourceBadge() => _smtp?.PasswordSource switch
     {
         SecretSource.Ui or SecretSource.File or SecretSource.Environment => "badge-ok",
-        _ => "badge-warn",
+        _ => "badge-muted",
     };
-
-    /// <summary>The dropdown only offers values this knows, so an unreadable one leaves the current choice alone.</summary>
-    private void SetSecurity(string? token)
-    {
-        if (SmtpSecurityNames.TryParse(token, out var security))
-        {
-            _smtpSecurity = security;
-        }
-    }
-
-    /// <summary>
-    /// Fills the fields that are the same for every user of a provider. It deliberately does not tick
-    /// 「启用发信」: sending mail is a decision, and a preset is only a convenience.
-    /// </summary>
-    private void ApplySmtpPreset(SmtpPreset preset)
-    {
-        ArgumentNullException.ThrowIfNull(preset);
-
-        _smtpHost = preset.Host;
-        _smtpPort = preset.Port.ToString(CultureInfo.InvariantCulture);
-        _smtpSecurity = preset.Security;
-        _smtpPresetNote = $"已填入 {preset.Label}（{preset.Host}:{preset.Port}，{preset.SecurityLabel}）。{preset.Note}"
-            + " 别忘了勾选「启用发信」再点保存。";
-    }
 
     private async Task SaveSmtpAsync() => await RunAsync(async services =>
     {
@@ -376,12 +314,9 @@ else
                     _smtpEnabled,
                     _smtpHost,
                     int.TryParse(_smtpPort, NumberStyles.Integer, CultureInfo.InvariantCulture, out var port) ? port : null,
-                    _smtpSecurity,
-                    _smtpUsername,
-                    _smtpSecretName,
                     _smtpFromAddress,
-                    _smtpFromName,
-                    int.TryParse(_smtpTimeout, NumberStyles.Integer, CultureInfo.InvariantCulture, out var timeout) ? timeout : null,
+                    _useSsl,
+                    _useStartTls,
 
                     // Write-only, and only when something was typed: an empty box means "leave the stored one alone".
                     Password: string.IsNullOrEmpty(_password) ? null : _password,
@@ -389,10 +324,10 @@ else
                     ToAddress: _toAddress),
                 CancellationToken.None);
 
+        // Reads back, which also empties the password box: what was typed is now stored, and the form must not look
+        // as if it still held it.
         await LoadAsync();
 
-        // The preset note says "not saved yet"; once it is saved it would be stale advice.
-        _smtpPresetNote = null;
         _message = "已保存邮件配置。保存后下一次发信即按新值执行，不需要重启。";
     });
 

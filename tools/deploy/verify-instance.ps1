@@ -66,6 +66,23 @@ function Send-Api {
     return Invoke-RestMethod @params
 }
 
+# 发一个「预期会被拒绝」的请求，并把稳定的错误码取回来。
+# PowerShell 5.1 在非 2xx 时抛 WebException，错误体要从响应流里手动读。
+function Send-ApiExpectingError {
+    param([string]$Method, [string]$Path, $Body = $null)
+
+    try {
+        Send-Api $Method $Path $Body -WithSession | Out-Null
+        throw "本以为会被拒绝，结果它成功了：$Method $Path"
+    }
+    catch [System.Net.WebException] {
+        $response = $_.Exception.Response
+        if ($null -eq $response) { throw }
+        $reader = New-Object System.IO.StreamReader($response.GetResponseStream())
+        return ($reader.ReadToEnd() | ConvertFrom-Json).code
+    }
+}
+
 function New-Wav {
     param([string]$Path, [int]$Milliseconds = 800)
 
@@ -307,11 +324,45 @@ Check "发送测试邮件（真实投递到 SMTP）" {
     "sent=true"
 }
 
-Check "SMTP 视图带收件地址与密码来源" {
+Check "SMTP 视图就是 ani-rss 那七项（+启用开关）" {
     $smtp = Send-Api GET "/api/system/smtp-settings" -WithSession
-    if ($null -eq $smtp.PSObject.Properties["toAddress"]) { throw "缺少 toAddress" }
-    if ($null -eq $smtp.PSObject.Properties["passwordSource"]) { throw "缺少 passwordSource" }
-    "to={0} passwordSource={1} hasPassword={2}" -f $smtp.toAddress, $smtp.passwordSource, $smtp.hasPassword
+
+    foreach ($field in @("enabled", "host", "port", "fromAddress", "useSsl", "useStartTls", "toAddress",
+            "hasPassword", "passwordSource")) {
+        if ($null -eq $smtp.PSObject.Properties[$field]) { throw "缺少字段 $field" }
+    }
+
+    # 旧的「安全方式」下拉与「用户名 / Secret 名」字段应当已经不存在了。
+    foreach ($gone in @("security", "username", "secretName")) {
+        if ($null -ne $smtp.PSObject.Properties[$gone]) { throw "字段 $gone 应该已经删掉" }
+    }
+
+    "ssl={0} starttls={1} from={2} -> {3} password={4}" -f `
+        $smtp.useSsl, $smtp.useStartTls, $smtp.fromAddress, $smtp.toAddress, $smtp.passwordSource
+}
+
+Check "SSL 与 STARTTLS 同时勾上会被拒绝保存" {
+    $code = Send-ApiExpectingError PATCH "/api/system/smtp-settings" @{ useSsl = $true; useStartTls = $true }
+    if ($code -ne "smtp.security.conflicting") { throw "错误码是 $code，不是 smtp.security.conflicting" }
+    $code
+}
+
+Check "有密码却两个加密开关都不勾也会被拒绝" {
+    $code = Send-ApiExpectingError PATCH "/api/system/smtp-settings" @{
+        password = "selftest-password"; useSsl = $false; useStartTls = $false
+    }
+    if ($code -ne "smtp.security.credentials_in_clear") { throw "错误码是 $code，不是 smtp.security.credentials_in_clear" }
+    $code
+}
+
+Check "SmtpMailTransport 里没有留下预设/旧枚举的痕迹" {
+    # 这是源码层面的断言，放在这里是因为「删干净」是用户明确要求的，而部署产物里看不出来。
+    $root = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
+    $hits = @(Get-ChildItem -Path (Join-Path $root "src"), (Join-Path $root "tests") -Recurse -Include *.cs, *.razor -ErrorAction SilentlyContinue |
+        Where-Object { $_.FullName -notmatch '\\(bin|obj)\\' } |
+        Select-String -Pattern "SmtpPresets|SmtpSecurity" -SimpleMatch)
+    if ($hits.Count -gt 0) { throw "还有 $($hits.Count) 处引用：$($hits[0].Path)" }
+    "无残留"
 }
 
 Check "日志接口" {

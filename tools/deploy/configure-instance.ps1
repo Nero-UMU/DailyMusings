@@ -76,17 +76,19 @@ $models = Invoke-RestMethod -Uri "$BaseUrl/api/system/model-endpoints" -WebSessi
 $models.items | ForEach-Object { Write-Host ("  {0,-14} enabled={1} {2} {3}" -f $_.service, $_.enabled, $_.baseUrl, $_.model) }
 
 Write-Host "== 3. 邮件与通知 ==" -ForegroundColor Cyan
-# 密码走后台填写（加密存放在密钥环卷下，不进备份）；这里用邮件接收端，不需要密码。
+# 密码走后台填写（加密存放在密钥环卷下，不进备份）；这里用邮件接收端，不需要密码，也不需要加密：
+# 两个加密开关都关着正好是本机中继的用法（SSL=465 / STARTTLS=587 各自对应一个开关，不能同时勾）。
 Patch-Json "/api/system/smtp-settings" @{
-    enabled = $true; host = $SmtpHost; port = $SmtpPort; security = "none"; username = "";
-    fromAddress = $FromAddress; fromName = "每日随想"; timeoutSeconds = 30; toAddress = $MailTo
+    enabled = $true; host = $SmtpHost; port = $SmtpPort; useSsl = $false; useStartTls = $false;
+    fromAddress = $FromAddress; toAddress = $MailTo
 } | Out-Null
 Patch-Json "/api/notification-settings" @{
     toAddress = $MailTo; draftReady = $true; jobFailed = $true; automaticPublication = $true
 } | Out-Null
 $smtp = Invoke-RestMethod -Uri "$BaseUrl/api/system/smtp-settings" -WebSession $session -TimeoutSec 30
-Write-Host ("  smtp enabled={0} {1}:{2} {3} -> {4} password={5}" -f `
-    $smtp.enabled, $smtp.host, $smtp.port, $smtp.security, $smtp.toAddress, $smtp.passwordSource)
+Write-Host ("  smtp enabled={0} {1}:{2} ssl={3} starttls={4} from={5} -> {6} password={7}" -f `
+    $smtp.enabled, $smtp.host, $smtp.port, $smtp.useSsl, $smtp.useStartTls, $smtp.fromAddress, `
+    $smtp.toAddress, $smtp.passwordSource)
 
 $test = Post-Json "/api/system/smtp-settings/test" @{ toAddress = $MailTo }
 Write-Host ("  测试邮件 sent={0} code={1} {2}" -f $test.sent, $test.code, $test.detail)

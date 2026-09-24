@@ -66,43 +66,50 @@ public static class SecretSourceNames
     public const string None = "none";
 }
 
+/// <summary>
+/// The SMTP server and the mail form (docs/开发指导.md §12).
+/// <para>
+/// The fields are the seven the form asks an operator for — host, port, sender mailbox, password, SSL, STARTTLS,
+/// recipient mailbox — minus the password's value, which never travels this way. The sender's mailbox is also the
+/// SMTP username: there is no separate <c>username</c> field, because there is no separate username.
+/// </para>
+/// <para>
+/// <see cref="UseSsl"/> and <see cref="UseStartTls"/> are the two checkboxes every other mail form shows, kept
+/// independent so a configuration can be copied across by reading that form. A request that sets both is refused
+/// with <c>smtp.security.conflicting</c> rather than stored: there is no such transport, and the failure it would
+/// produce later happens inside a handshake.
+/// </para>
+/// </summary>
 public sealed record SmtpSettingsDto(
     bool Enabled,
     string Host,
     int Port,
 
-    /// <summary>
-    /// <c>none</c>, <c>starttls</c> (587) or <c>ssl</c> (465) — the three spellings
-    /// <c>SmtpSecurityNames</c> accepts, so a configuration copied from another program can be typed in as-is.
-    /// </summary>
-    string Security,
-    string? Username,
-
-    /// <summary>The password's <em>name</em>, never its value (§10.4).</summary>
-    string SecretName,
+    /// <summary>The sender's mailbox, and therefore the SMTP username.</summary>
     string FromAddress,
-    string FromName,
-    int TimeoutSeconds,
+
+    /// <summary>Implicit TLS: handshake first, then the greeting. Port 465.</summary>
+    bool UseSsl,
+
+    /// <summary>Explicit TLS: greet in the clear, then <c>STARTTLS</c>. Port 587.</summary>
+    bool UseStartTls,
 
     /// <summary>Where notification mail is sent. Kept beside the server settings so "mail" is one form, not two.</summary>
     string ToAddress,
 
-    /// <summary>One of <c>SecretSourceNames</c>.</summary>
-    string PasswordSource,
-
     /// <summary>Whether a password resolves at all. The value itself never leaves the instance.</summary>
-    bool HasPassword);
+    bool HasPassword,
+
+    /// <summary>One of <c>SecretSourceNames</c>.</summary>
+    string PasswordSource);
 
 public sealed record UpdateSmtpSettingsRequest(
     bool? Enabled,
     string? Host,
     int? Port,
-    string? Security,
-    string? Username,
-    string? SecretName,
     string? FromAddress,
-    string? FromName,
-    int? TimeoutSeconds,
+    bool? UseSsl,
+    bool? UseStartTls,
 
     /// <summary>Write-only. The value is encrypted at rest and never read back (§10.4).</summary>
     string? Password = null,

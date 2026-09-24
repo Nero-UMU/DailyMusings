@@ -142,51 +142,56 @@ public class ModelAndSmtpSettingsTests
     public async Task Smtp_settings_are_written_and_validated_the_same_way()
     {
         var store = new InMemoryAppSettingStore();
-        var update = new UpdateSmtpSettingsUseCase(store, new InMemoryUiSecretStore());
+        var update = new UpdateSmtpSettingsUseCase(store, new InMemoryUiSecretStore(), InMemorySecretStore.Empty());
 
         await update.ExecuteAsync(
             new SmtpSettingsUpdate(
                 Enabled: true,
                 Host: "smtp.example.com",
                 Port: 587,
-                Security: SmtpSecurity.StartTls,
-                Username: "owner@example.com",
-                SecretName: "smtp-password",
                 FromAddress: "dailymusings@example.com",
-                FromName: "每日随想",
-                TimeoutSeconds: 30),
+                UseSsl: false,
+                UseStartTls: true),
             CancellationToken.None);
 
         var written = store.Snapshot();
+
         Assert.AreEqual("smtp.example.com", written[SmtpSettingKeys.Host]);
         Assert.AreEqual("587", written[SmtpSettingKeys.Port]);
-        Assert.AreEqual("starttls", written[SmtpSettingKeys.Security]);
-        Assert.AreEqual("30", written[SmtpSettingKeys.TimeoutSeconds]);
+        Assert.AreEqual("dailymusings@example.com", written[SmtpSettingKeys.FromAddress]);
+        Assert.AreEqual("true", written[SmtpSettingKeys.StartTls]);
+        Assert.AreEqual("false", written[SmtpSettingKeys.Ssl], "The pair is written together, so the other half is explicit.");
+        Assert.AreEqual("true", written[SmtpSettingKeys.Enabled]);
 
-        // The boolean this setting used to be is kept in step, so an instance rolled back to the previous image still
-        // reads a setting that matches what the administrator chose.
-        Assert.AreEqual("true", written[SmtpSettingKeys.UseStartTls]);
-
-        // And 465 is expressible now, which is the reason the setting stopped being a boolean: this is the
+        // And 465 is expressible, which is the reason the setting stopped being one token: this is the
         // "SSL: true, STARTTLS: false" that every other mail form shows.
         await update.ExecuteAsync(
-            new SmtpSettingsUpdate(null, null, 465, SmtpSecurity.ImplicitTls, null, null, null, null, null),
+            new SmtpSettingsUpdate(null, null, 465, null, UseSsl: true, UseStartTls: false),
             CancellationToken.None);
 
-        Assert.AreEqual("ssl", store.Snapshot()[SmtpSettingKeys.Security]);
-        Assert.AreEqual("true", store.Snapshot()[SmtpSettingKeys.UseStartTls]);
+        Assert.AreEqual("true", store.Snapshot()[SmtpSettingKeys.Ssl]);
+        Assert.AreEqual("false", store.Snapshot()[SmtpSettingKeys.StartTls]);
 
-        // Clearing the username has to be possible: a relay that needs none must be able to lose the one it had.
-        await update.ExecuteAsync(new SmtpSettingsUpdate(null, null, null, null, string.Empty, null, null, null, null), CancellationToken.None);
-        Assert.AreEqual(string.Empty, store.Snapshot()[SmtpSettingKeys.Username]);
+        // A recipient is optional — an empty one clears it, which is a legal configuration that sends nothing.
+        await update.ExecuteAsync(
+            new SmtpSettingsUpdate(null, null, null, null, null, null, ToAddress: "reader@example.com"),
+            CancellationToken.None);
+
+        Assert.AreEqual("reader@example.com", store.Snapshot()[NotificationSettingKeys.ToAddress]);
+
+        await update.ExecuteAsync(
+            new SmtpSettingsUpdate(null, null, null, null, null, null, ToAddress: "   "),
+            CancellationToken.None);
+
+        Assert.AreEqual(string.Empty, store.Snapshot()[NotificationSettingKeys.ToAddress]);
 
         foreach (var (change, code) in new (SmtpSettingsUpdate, string)[]
                  {
-                     (new SmtpSettingsUpdate(null, "bad host", null, null, null, null, null, null, null), "smtp.host.invalid"),
-                     (new SmtpSettingsUpdate(null, null, 0, null, null, null, null, null, null), "smtp.port.out_of_range"),
-                     (new SmtpSettingsUpdate(null, null, null, null, null, "../secret", null, null, null), "smtp.secret_name.invalid"),
-                     (new SmtpSettingsUpdate(null, null, null, null, null, null, "not-an-address", null, null), "smtp.from_address.invalid"),
-                     (new SmtpSettingsUpdate(null, null, null, null, null, null, null, null, 1), "smtp.timeout.out_of_range"),
+                     (new SmtpSettingsUpdate(null, "bad host", null, null, null, null), "smtp.host.invalid"),
+                     (new SmtpSettingsUpdate(null, null, 0, null, null, null), "smtp.port.out_of_range"),
+                     (new SmtpSettingsUpdate(null, null, 70_000, null, null, null), "smtp.port.out_of_range"),
+                     (new SmtpSettingsUpdate(null, null, null, "not-an-address", null, null), "smtp.from_address.invalid"),
+                     (new SmtpSettingsUpdate(null, null, null, null, null, null, ToAddress: "not-an-address"), "smtp.to_address.invalid"),
                  })
         {
             var failure = await Assert.ThrowsExceptionAsync<UseCaseException>(() =>
@@ -194,5 +199,76 @@ public class ModelAndSmtpSettingsTests
 
             Assert.AreEqual(code, failure.Code);
         }
+    }
+
+    /// <summary>
+    /// Two saves the form can express but no transport can carry out, both refused here rather than at three in the
+    /// morning inside a TLS handshake: both encryption boxes ticked, and a password on a connection with neither box.
+    /// Neither refusal may leave half of itself in the settings table.
+    /// </summary>
+    [TestMethod]
+    public async Task Both_encryption_boxes_and_a_password_in_the_clear_are_refused_at_save_time()
+    {
+        var store = new InMemoryAppSettingStore();
+        var update = new UpdateSmtpSettingsUseCase(store, new InMemoryUiSecretStore(), InMemorySecretStore.Empty());
+
+        var conflicting = await Assert.ThrowsExceptionAsync<UseCaseException>(() =>
+            update.ExecuteAsync(
+                new SmtpSettingsUpdate(true, "smtp.example.com", 465, "a@example.com", UseSsl: true, UseStartTls: true),
+                CancellationToken.None));
+
+        Assert.AreEqual("smtp.security.conflicting", conflicting.Code);
+        Assert.AreEqual(0, store.Snapshot().Count, "A refused save writes nothing at all.");
+
+        var inTheClear = await Assert.ThrowsExceptionAsync<UseCaseException>(() =>
+            update.ExecuteAsync(
+                new SmtpSettingsUpdate(true, "smtp.example.com", 25, "a@example.com", UseSsl: false, UseStartTls: false, Password: "s3cret"),
+                CancellationToken.None));
+
+        Assert.AreEqual("smtp.security.credentials_in_clear", inTheClear.Code);
+        Assert.AreEqual(0, store.Snapshot().Count, "Nothing may be stored, and no password may be filed either.");
+
+        // No password and no encryption is the configuration a relay on localhost wants, and it saves.
+        await update.ExecuteAsync(
+            new SmtpSettingsUpdate(true, "127.0.0.1", 1025, "dailymusings@localhost", UseSsl: false, UseStartTls: false),
+            CancellationToken.None);
+
+        Assert.AreEqual("false", store.Snapshot()[SmtpSettingKeys.Ssl]);
+        Assert.AreEqual("false", store.Snapshot()[SmtpSettingKeys.StartTls]);
+    }
+
+    /// <summary>
+    /// An instance that already has a password cannot have its encryption switched off — the password would then be
+    /// offered on a connection anyone can read. Clearing the password in the same breath is the way out, because
+    /// afterwards there is nothing to leak.
+    /// </summary>
+    [TestMethod]
+    public async Task Turning_encryption_off_is_refused_while_a_password_exists_and_allowed_once_it_is_cleared()
+    {
+        var store = new InMemoryAppSettingStore();
+        var secrets = InMemorySecretStore.Empty().With("smtp-password", "already-provisioned");
+        var update = new UpdateSmtpSettingsUseCase(store, new InMemoryUiSecretStore(), secrets);
+
+        // A stored "yes, encrypted" pair, as the page would have written it.
+        await update.ExecuteAsync(
+            new SmtpSettingsUpdate(null, null, 465, null, UseSsl: true, UseStartTls: false),
+            CancellationToken.None);
+
+        var turnedOff = await Assert.ThrowsExceptionAsync<UseCaseException>(() =>
+            update.ExecuteAsync(
+                new SmtpSettingsUpdate(null, null, null, null, UseSsl: false, UseStartTls: false),
+                CancellationToken.None));
+
+        Assert.AreEqual("smtp.security.credentials_in_clear", turnedOff.Code);
+        Assert.AreEqual("true", store.Snapshot()[SmtpSettingKeys.Ssl], "The refused save left the switch as it was.");
+
+        // Clearing the stored password at the same time makes the unencrypted configuration legal: there is no
+        // credential left to expose.
+        await update.ExecuteAsync(
+            new SmtpSettingsUpdate(null, null, null, null, UseSsl: false, UseStartTls: false, ClearPassword: true),
+            CancellationToken.None);
+
+        Assert.AreEqual("false", store.Snapshot()[SmtpSettingKeys.Ssl]);
+        Assert.AreEqual("false", store.Snapshot()[SmtpSettingKeys.StartTls]);
     }
 }

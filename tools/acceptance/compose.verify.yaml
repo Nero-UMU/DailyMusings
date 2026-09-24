@@ -37,12 +37,13 @@ services:
       Smtp__Enabled: "true"
       Smtp__Host: 127.0.0.1
       Smtp__Port: "1025"
-      # Mailpit on localhost, so no encryption. The older Smtp__UseStartTls spelling still works and is covered by
-      # the settings-precedence tests.
-      Smtp__Security: none
+      # Mailpit on localhost, so neither encryption switch is on: no password is provisioned for it either, which is
+      # the configuration a local relay is meant to have. The old Smtp__Security / Smtp__UseStartTls spellings still
+      # work and are covered by the settings-precedence tests.
+      Smtp__Ssl: "false"
+      Smtp__StartTls: "false"
       Smtp__FromAddress: dailymusings@example.test
       Smtp__FromName: 每日随想
-      Smtp__SecretName: smtp-password
     volumes:
       - ./state:/state
       - ./keys:/keys

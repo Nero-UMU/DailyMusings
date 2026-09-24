@@ -397,15 +397,12 @@ public static class OperationsEndpointRouteBuilderExtensions
                         request.Enabled,
                         request.Host,
                         request.Port,
-
-                        // Parsed here so a typo comes back as 400 with a code, rather than being stored as text that
-                        // silently reads as "no encryption".
-                        request.Security is null ? null : SmtpSecurityNames.Parse(request.Security),
-                        request.Username,
-                        request.SecretName,
                         request.FromAddress,
-                        request.FromName,
-                        request.TimeoutSeconds,
+
+                        // Two booleans, not one parsed token: the form has two checkboxes now, and "SSL and STARTTLS
+                        // are both on" is a state the use case refuses with a code rather than something to parse.
+                        request.UseSsl,
+                        request.UseStartTls,
                         request.Password,
                         request.ClearPassword,
                         request.ToAddress),
@@ -454,15 +451,12 @@ public static class OperationsEndpointRouteBuilderExtensions
         settings.Enabled,
         settings.Host,
         settings.Port,
-        SmtpSecurityNames.ToToken(settings.Security),
-        settings.Username,
-        settings.SecretName,
         settings.FromAddress,
-        settings.FromName,
-        settings.TimeoutSeconds,
+        settings.UseSsl,
+        settings.UseStartTls,
         settings.ToAddress,
-        ToWireName(settings.PasswordSource),
-        settings.HasPassword);
+        settings.HasPassword,
+        ToWireName(settings.PasswordSource));
 
     /// <summary>
     /// The password's origin, in the API's own vocabulary. <c>SecretSource</c> is an application-level enum, and

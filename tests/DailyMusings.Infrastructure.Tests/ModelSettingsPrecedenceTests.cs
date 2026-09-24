@@ -1,4 +1,4 @@
-﻿using DailyMusings.Application.Abstractions;
+using DailyMusings.Application.Abstractions;
 using DailyMusings.Application.Configuration;
 using DailyMusings.Infrastructure.Generation;
 using DailyMusings.Infrastructure.Notifications;
@@ -104,80 +104,119 @@ public class ModelSettingsPrecedenceTests
     }
 
     [TestMethod]
-    public async Task Smtp_reads_the_same_way_and_a_cleared_username_stays_cleared()
+    public async Task Smtp_reads_the_same_way_and_a_stored_value_wins_over_the_deployment()
     {
         await using var database = await TestDatabase.CreateAsync();
         var store = Store(database);
 
         var provider = new ConfigurationSmtpSettingsProvider(
-            Configuration(("Smtp:Enabled", "false"), ("Smtp:Host", "compose-smtp"), ("Smtp:Username", "compose-user")),
+            Configuration(("Smtp:Enabled", "false"), ("Smtp:Host", "compose-smtp"), ("Smtp:Port", "2525")),
             store);
 
         var fromCompose = await provider.GetAsync(CancellationToken.None);
         Assert.AreEqual("compose-smtp", fromCompose.Host);
-        Assert.AreEqual("compose-user", fromCompose.Username);
+        Assert.AreEqual(2525, fromCompose.Port);
+        Assert.IsFalse(fromCompose.Enabled);
 
-        var update = new UpdateSmtpSettingsUseCase(store, new TestUiSecretStore());
+        var update = new UpdateSmtpSettingsUseCase(store, new TestUiSecretStore(), TestSecretStore.Empty());
         await update.ExecuteAsync(
-            new SmtpSettingsUpdate(true, "admin-smtp", 2525, null, string.Empty, null, null, null, null),
+            new SmtpSettingsUpdate(true, "admin-smtp", 465, "owner@example.com", UseSsl: true, UseStartTls: false),
             CancellationToken.None);
 
         var fromAdmin = await provider.GetAsync(CancellationToken.None);
         Assert.AreEqual("admin-smtp", fromAdmin.Host);
-        Assert.AreEqual(2525, fromAdmin.Port);
+        Assert.AreEqual(465, fromAdmin.Port);
         Assert.IsTrue(fromAdmin.Enabled);
-        Assert.IsNull(fromAdmin.Username, "An empty stored username means 'none', not 'fall back to the environment'.");
+        Assert.AreEqual("owner@example.com", fromAdmin.FromAddress, "The sender's mailbox is the SMTP username.");
+        Assert.IsTrue(fromAdmin.UseSsl);
+        Assert.IsFalse(fromAdmin.UseStartTls, "The pair is written together: choosing SSL leaves STARTTLS off.");
+
+        // And the very next read sees it: no restart, which is what an admin editor is for.
+        Assert.AreEqual("admin-smtp", (await provider.GetAsync(CancellationToken.None)).Host);
     }
 
     /// <summary>
-    /// The setting was a boolean before implicit TLS existed, and both the old and the new spelling have to keep
-    /// working: an instance that saved "use STARTTLS" must not stop sending, and a compose file that sets
-    /// <c>Smtp__UseStartTls</c> must not be silently ignored.
+    /// The two switches replaced one "security" token, which had itself replaced a boolean, and neither old spelling
+    /// may be silently ignored: an instance that saved "use STARTTLS" must not stop sending, and a compose file that
+    /// sets <c>Smtp__UseStartTls</c> or <c>Smtp__Security</c> must keep working. The new keys win where both are
+    /// present, because that is what the admin page writes.
     /// </summary>
     [TestMethod]
-    public async Task Smtp_security_reads_the_new_key_and_still_honours_the_old_boolean()
+    public async Task Smtp_reads_the_two_switches_and_still_honours_the_old_keys()
     {
         await using var database = await TestDatabase.CreateAsync();
         var store = Store(database);
-        var update = new UpdateSmtpSettingsUseCase(store, new TestUiSecretStore());
+        var update = new UpdateSmtpSettingsUseCase(store, new TestUiSecretStore(), TestSecretStore.Empty());
 
-        // A deployment configured only from compose, in the old spelling.
-        var legacyCompose = new ConfigurationSmtpSettingsProvider(
-            Configuration(("Smtp:UseStartTls", "true")),
+        // A deployment configured only from compose, in the oldest spelling.
+        var legacyCompose = new ConfigurationSmtpSettingsProvider(Configuration(("Smtp:UseStartTls", "true")), store);
+        var fromLegacyCompose = await legacyCompose.GetAsync(CancellationToken.None);
+
+        Assert.IsTrue(fromLegacyCompose.UseStartTls, "Smtp__UseStartTls=true still means STARTTLS.");
+        Assert.IsFalse(fromLegacyCompose.UseSsl);
+
+        // The token that came between them, which could also say "implicit TLS on 465".
+        var tokenCompose = new ConfigurationSmtpSettingsProvider(Configuration(("Smtp:Security", "ssl")), store);
+        var fromTokenCompose = await tokenCompose.GetAsync(CancellationToken.None);
+
+        Assert.IsTrue(fromTokenCompose.UseSsl, "Smtp__Security=ssl still means SSL.");
+        Assert.IsFalse(fromTokenCompose.UseStartTls);
+
+        var noneCompose = new ConfigurationSmtpSettingsProvider(Configuration(("Smtp:Security", "none")), store);
+        var fromNoneCompose = await noneCompose.GetAsync(CancellationToken.None);
+
+        Assert.IsFalse(fromNoneCompose.UseSsl);
+        Assert.IsFalse(fromNoneCompose.UseStartTls, "Smtp__Security=none still means neither.");
+
+        // The new spelling the form writes, and it is authoritative even when it says false.
+        var newCompose = new ConfigurationSmtpSettingsProvider(
+            Configuration(("Smtp:Ssl", "true"), ("Smtp:StartTls", "false"), ("Smtp:Security", "starttls"), ("Smtp:UseStartTls", "true")),
             store);
+        var fromNewCompose = await newCompose.GetAsync(CancellationToken.None);
 
-        Assert.AreEqual(SmtpSecurity.StartTls, (await legacyCompose.GetAsync(CancellationToken.None)).Security);
-
-        // The new spelling, which can also say "implicit TLS on 465".
-        var newCompose = new ConfigurationSmtpSettingsProvider(Configuration(("Smtp:Security", "ssl")), store);
-        Assert.AreEqual(SmtpSecurity.ImplicitTls, (await newCompose.GetAsync(CancellationToken.None)).Security);
+        Assert.IsTrue(fromNewCompose.UseSsl);
+        Assert.IsFalse(fromNewCompose.UseStartTls, "The new key wins over both old spellings.");
 
         // An unreadable value falls through to the next source instead of stopping the notification job.
         var typo = new ConfigurationSmtpSettingsProvider(
-            Configuration(("Smtp:Security", "yes-please"), ("Smtp:UseStartTls", "false")),
+            Configuration(("Smtp:Ssl", "not-a-boolean"), ("Smtp:Security", "yes-please"), ("Smtp:StartTls", "also-not")),
             store);
+        var fromTypo = await typo.GetAsync(CancellationToken.None);
 
-        Assert.AreEqual(SmtpSecurity.None, (await typo.GetAsync(CancellationToken.None)).Security);
+        Assert.IsFalse(fromTypo.UseSsl);
+        Assert.IsFalse(fromTypo.UseStartTls);
 
-        // The admin page wins over both, in whichever spelling it stored.
+        // The admin page wins over both, in whichever spelling the deployment still has.
         await update.ExecuteAsync(
-            new SmtpSettingsUpdate(null, null, 465, SmtpSecurity.ImplicitTls, null, null, null, null, null),
+            new SmtpSettingsUpdate(null, null, 465, null, UseSsl: true, UseStartTls: false),
             CancellationToken.None);
 
         var fromAdmin = await new ConfigurationSmtpSettingsProvider(
             Configuration(("Smtp:Security", "starttls")),
             store).GetAsync(CancellationToken.None);
 
-        Assert.AreEqual(SmtpSecurity.ImplicitTls, fromAdmin.Security);
+        Assert.IsTrue(fromAdmin.UseSsl, "The stored pair wins over the deployment's old token.");
+        Assert.IsFalse(fromAdmin.UseStartTls);
 
-        // And an instance that only ever had the old boolean stored keeps working.
+        // And an instance whose settings table only ever had one of the old keys keeps working.
         await using var legacyDatabase = await TestDatabase.CreateAsync();
         var legacyStore = Store(legacyDatabase);
-        await legacyStore.SetAsync(SmtpSettingKeys.UseStartTls, "true", CancellationToken.None);
+        await legacyStore.SetAsync("smtp.security", "starttls", CancellationToken.None);
 
         var fromLegacyStore = await new ConfigurationSmtpSettingsProvider(Configuration(), legacyStore)
             .GetAsync(CancellationToken.None);
 
-        Assert.AreEqual(SmtpSecurity.StartTls, fromLegacyStore.Security);
+        Assert.IsTrue(fromLegacyStore.UseStartTls, "A stored smtp.security=starttls still means STARTTLS.");
+        Assert.IsFalse(fromLegacyStore.UseSsl);
+
+        await using var booleanDatabase = await TestDatabase.CreateAsync();
+        var booleanStore = Store(booleanDatabase);
+        await booleanStore.SetAsync("smtp.useStartTls", "true", CancellationToken.None);
+
+        var fromBooleanStore = await new ConfigurationSmtpSettingsProvider(Configuration(), booleanStore)
+            .GetAsync(CancellationToken.None);
+
+        Assert.IsTrue(fromBooleanStore.UseStartTls, "The boolean that predates the token is still honoured.");
+        Assert.IsFalse(fromBooleanStore.UseSsl);
     }
 }

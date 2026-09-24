@@ -196,6 +196,35 @@ internal sealed class InMemoryUiSecretStore : IUiSecretStore
         Task.FromResult(_values.ContainsKey(name));
 }
 
+/// <summary>
+/// Stands in for the secret store that layers the page's encrypted values over the mounted files and the environment.
+/// <para>
+/// The lookup order itself is infrastructure's business and is tested there; what the settings use cases need is the
+/// one question they ask it — does a password exist at all — because that is what decides whether an unencrypted
+/// configuration is refused.
+/// </para>
+/// </summary>
+internal sealed class InMemorySecretStore : ISecretStore
+{
+    private readonly Dictionary<string, string> _values = new(StringComparer.Ordinal);
+
+    public static InMemorySecretStore Empty() => new();
+
+    public InMemorySecretStore With(string name, string value)
+    {
+        _values[name] = value;
+        return this;
+    }
+
+    public string? TryGet(string name) => _values.TryGetValue(name, out var value) ? value : null;
+
+    public bool Exists(string name) => _values.ContainsKey(name);
+
+    public IReadOnlyList<string> ListNames() => [.. _values.Keys];
+
+    public SecretSource ResolveSource(string name) => _values.ContainsKey(name) ? SecretSource.File : SecretSource.None;
+}
+
 /// <summary>Builds a use-case graph backed by the in-memory fakes above.</summary>
 internal sealed class TestHarness
 {

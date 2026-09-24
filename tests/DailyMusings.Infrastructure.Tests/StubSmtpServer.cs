@@ -29,11 +29,12 @@ internal sealed class StubSmtpServer : IAsyncDisposable
     private readonly Task _serve;
     private readonly List<string> _conversation = [];
 
-    private StubSmtpServer(SmtpSecurity security, string[] capabilities, int authCode)
+    private StubSmtpServer(bool implicitTls, string[] capabilities, int authCode, int mailFromCode)
     {
-        Security = security;
+        HandshakesFirst = implicitTls;
         Capabilities = capabilities;
         AuthCode = authCode;
+        MailFromCode = mailFromCode;
 
         _listener = new TcpListener(IPAddress.Loopback, 0);
         _listener.Start();
@@ -42,8 +43,7 @@ internal sealed class StubSmtpServer : IAsyncDisposable
 
         // A certificate is needed whenever this server will ever handshake, which is not the same question as how the
         // connection starts: the STARTTLS case begins in the clear and upgrades later.
-        if (security == SmtpSecurity.ImplicitTls ||
-            capabilities.Contains("STARTTLS", StringComparer.OrdinalIgnoreCase))
+        if (implicitTls || capabilities.Contains("STARTTLS", StringComparer.OrdinalIgnoreCase))
         {
             try
             {
@@ -66,15 +66,16 @@ internal sealed class StubSmtpServer : IAsyncDisposable
         _serve = Task.Run(ServeAsync);
     }
 
-    /// <summary>A relay that greets in the clear: what a sink on localhost, or a 587 relay, looks like.</summary>
-    public static StubSmtpServer Plain(string[]? capabilities = null, int authCode = 235) =>
-        new(SmtpSecurity.None, capabilities ?? [], authCode);
+    /// <summary>A relay that greets in the clear: what a sink on localhost — or a 587 relay, which greets in the clear and upgrades later — looks like.</summary>
+    public static StubSmtpServer Plain(string[]? capabilities = null, int authCode = 235, int mailFromCode = 250) =>
+        new(implicitTls: false, capabilities ?? [], authCode, mailFromCode);
 
-    /// <summary>A relay that requires the handshake first: port 465 as the providers run it.</summary>
-    public static StubSmtpServer ImplicitTls(string[]? capabilities = null, int authCode = 235) =>
-        new(SmtpSecurity.ImplicitTls, capabilities ?? [], authCode);
+    /// <summary>A relay that requires the handshake first: port 465 as the providers run it. This is the switch the checkbox turns on.</summary>
+    public static StubSmtpServer ImplicitTls(string[]? capabilities = null, int authCode = 235, int mailFromCode = 250) =>
+        new(implicitTls: true, capabilities ?? [], authCode, mailFromCode);
 
-    public SmtpSecurity Security { get; }
+    /// <summary>Whether this server hands over its greeting inside a tunnel (implicit TLS / port 465, the SSL checkbox).</summary>
+    public bool HandshakesFirst { get; }
 
     public int Port { get; }
 
@@ -114,6 +115,8 @@ internal sealed class StubSmtpServer : IAsyncDisposable
 
     private int AuthCode { get; }
 
+    private int MailFromCode { get; }
+
     public async ValueTask DisposeAsync()
     {
         await _shutdown.CancelAsync().ConfigureAwait(false);
@@ -140,7 +143,7 @@ internal sealed class StubSmtpServer : IAsyncDisposable
 
         try
         {
-            if (Security == SmtpSecurity.ImplicitTls)
+            if (HandshakesFirst)
             {
                 var secure = new SslStream(stream, leaveInnerStreamOpen: false);
                 await secure.AuthenticateAsServerAsync(Certificate!, false, SslProtocols.None, false).ConfigureAwait(false);
@@ -244,8 +247,15 @@ internal sealed class StubSmtpServer : IAsyncDisposable
                     continue;
                 }
 
-                if (command.StartsWith("MAIL FROM", StringComparison.Ordinal) ||
-                    command.StartsWith("RCPT TO", StringComparison.Ordinal))
+                if (command.StartsWith("MAIL FROM", StringComparison.Ordinal))
+                {
+                    // The configurable code is what lets a test pin the classification rule: 4xx is "try later", 5xx
+                    // is "never".
+                    await writer.WriteLineAsync(MailFromCode == 250 ? "250 OK" : $"{MailFromCode} stub refusal").ConfigureAwait(false);
+                    continue;
+                }
+
+                if (command.StartsWith("RCPT TO", StringComparison.Ordinal))
                 {
                     await writer.WriteLineAsync("250 OK").ConfigureAwait(false);
                     continue;

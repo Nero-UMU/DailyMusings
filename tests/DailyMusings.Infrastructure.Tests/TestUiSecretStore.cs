@@ -37,6 +37,37 @@ internal sealed class TestUiSecretStore : IUiSecretStore
         Task.FromResult(_values.ContainsKey(name));
 }
 
+/// <summary>
+/// A secret store holding exactly what a test put in it.
+/// <para>
+/// The lookup order between the encrypted page store, a mounted file and the environment is
+/// <see cref="FileSecretStore"/>'s own business (see SmtpUiPasswordTests). What the SMTP settings use case needs to
+/// know is narrower — whether a password exists at all, because that is what decides whether an unencrypted
+/// configuration is refused — so a dictionary is the honest stand-in.
+/// </para>
+/// </summary>
+internal sealed class TestSecretStore : ISecretStore
+{
+    private readonly Dictionary<string, string> _values = new(StringComparer.Ordinal);
+
+    public static TestSecretStore Empty() => new();
+
+    public static TestSecretStore With(string name, string value)
+    {
+        var store = new TestSecretStore();
+        store._values[name] = value;
+        return store;
+    }
+
+    public string? TryGet(string name) => _values.TryGetValue(name, out var value) ? value : null;
+
+    public bool Exists(string name) => _values.ContainsKey(name);
+
+    public IReadOnlyList<string> ListNames() => [.. _values.Keys];
+
+    public SecretSource ResolveSource(string name) => _values.ContainsKey(name) ? SecretSource.File : SecretSource.None;
+}
+
 /// <summary>Builds an encrypted store over a throwaway instance directory, for the tests that need the real one.</summary>
 internal static class TestUiSecretStoreFactory
 {
