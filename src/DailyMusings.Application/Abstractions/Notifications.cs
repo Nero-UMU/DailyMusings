@@ -48,8 +48,34 @@ public sealed record SmtpSettings(
         FromAddress: "dailymusings@localhost",
         UseSsl: false,
         UseStartTls: false,
-        FromName: "每日随想",
+        FromName: DefaultFromName,
         Timeout: TimeSpan.FromSeconds(30));
+
+    /// <summary>The display name that travels on the message when nothing overrides it.</summary>
+    public const string DefaultFromName = "每日随想";
+
+    /// <summary>
+    /// The display name to actually put on a message.
+    /// <para>
+    /// A name with no letter, digit or ideograph in it is refused in favour of the default. This is not theoretical:
+    /// this instance's own settings table held <c>smtp.fromName = "????"</c> — a Chinese name that an early
+    /// configuration script sent as an ANSI JSON body, where every character PowerShell could not encode became a
+    /// question mark. The header encoder is blameless (it RFC 2047-encodes whatever it is given), so the only
+    /// defence against a mangled name is not to put it in a header. A name of pure punctuation is not a name a
+    /// recipient can read anyway.
+    /// </para>
+    /// </summary>
+    public static string UsableFromName(string? candidate)
+    {
+        if (string.IsNullOrWhiteSpace(candidate))
+        {
+            return DefaultFromName;
+        }
+
+        var trimmed = candidate.Trim();
+
+        return trimmed.Any(character => char.IsLetterOrDigit(character)) ? trimmed : DefaultFromName;
+    }
 }
 
 public interface ISmtpSettingsProvider

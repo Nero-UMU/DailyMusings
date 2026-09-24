@@ -79,7 +79,9 @@ public static class SmtpSettingKeys
     public const string FromAddress = "smtp.fromAddress";
 
     /// <summary>Internal: not on the form, may be set from the deployment configuration.</summary>
-    public const string FromName = "smtp.fromName";
+    // The old form's fields. They are gone from the settings this product writes, and `0008_smtp_settings_cleanup`
+    // deletes whatever an older version left behind — a stored name that nothing can edit any more is how
+    // `From: ???? <…>` reached a real mailbox.
 
     /// <summary>Internal: not on the form, may be set from the deployment configuration.</summary>
     public const string TimeoutSeconds = "smtp.timeoutSeconds";

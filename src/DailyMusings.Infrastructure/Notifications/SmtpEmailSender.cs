@@ -71,8 +71,11 @@ public sealed class ConfigurationSmtpSettingsProvider : ISmtpSettingsProvider
                 legacySecurity,
                 defaults.UseStartTls),
 
-            FromName: StoredSettings.String(stored, SmtpSettingKeys.FromName, section.GetValue("FromName", defaults.FromName))
-                ?? defaults.FromName,
+            // The display name is deliberately NOT read from the settings table. The form no longer asks for one
+            // (the field set is the seven the operator sees), so nothing can write it any more — and a value left
+            // there from an earlier version is exactly what produced `From: ???? <…>` on a real message. The
+            // deployment may still override it, and anything unreadable falls back to the default.
+            FromName: SmtpSettings.UsableFromName(section.GetValue<string?>("FromName")),
             Timeout: TimeSpan.FromSeconds(StoredSettings.Integer(
                 stored,
                 SmtpSettingKeys.TimeoutSeconds,

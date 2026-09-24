@@ -61,6 +61,13 @@ public class SmtpTransportTests
         Assert.AreEqual("每日随想", Decode(from[..angle].Trim()));
         Assert.AreEqual(FromAddress, from[(angle + 1)..].Trim('<', '>'));
 
+        // 断言的是**原始**报头，不只是解出来的值：一个非 ASCII 显示名如果在线上裸奔（或者带着 ANSI 往返留下的
+        // 问号），声明「解码后是这个名字」的断言照样通过，而收件人看到的是乱码 —— 真实邮件里出现过
+        // `From: ???? <…>`，就是这么来的。
+        Assert.IsTrue(
+            from[..angle].Trim().StartsWith("=?utf-8?", StringComparison.OrdinalIgnoreCase),
+            $"非 ASCII 的显示名必须按 RFC 2047 编码成编码字，实际是：{from[..angle].Trim()}");
+
         Assert.AreEqual(message.Body, DecodeBody(server.Message), "The body has to arrive as the text the composer wrote.");
         StringAssert.Contains(server.Message, "Content-Type: text/plain; charset=utf-8");
         StringAssert.Contains(server.Message, "Content-Transfer-Encoding: base64");

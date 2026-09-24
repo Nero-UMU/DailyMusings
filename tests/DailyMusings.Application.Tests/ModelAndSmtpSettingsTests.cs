@@ -202,6 +202,29 @@ public class ModelAndSmtpSettingsTests
     }
 
     /// <summary>
+    /// 发件人显示名必须是一个收件人读得懂的名字，否则回落到默认值。
+    /// <para>
+    /// 这条来自真实事故：实例的设置表里躺着 <c>smtp.fromName = "????"</c>（早期配置脚本把中文按 ANSI 发出去，
+    /// 编不出来的字符全变成问号），于是收件人看到的是 <c>From: ???? &lt;…&gt;</c>。报头编码器本身没问题
+    /// ——主题里的中文编码得好好的——所以唯一能防住这类脏值的地方，就是别把它放进报头。
+    /// </para>
+    /// </summary>
+    [TestMethod]
+    public void The_sender_display_name_falls_back_when_it_carries_nothing_readable()
+    {
+        Assert.AreEqual("每日随想", SmtpSettings.UsableFromName("每日随想"), "正常的中文名字原样保留。");
+        Assert.AreEqual("Daily Musings", SmtpSettings.UsableFromName("  Daily Musings  "), "前后空白去掉。");
+        Assert.AreEqual("Musing 01", SmtpSettings.UsableFromName("Musing 01"));
+
+        // 真正要挡住的那种值：全是问号、全是标点、或者干脆是空的。
+        Assert.AreEqual(SmtpSettings.DefaultFromName, SmtpSettings.UsableFromName("????"));
+        Assert.AreEqual(SmtpSettings.DefaultFromName, SmtpSettings.UsableFromName("??? ???"));
+        Assert.AreEqual(SmtpSettings.DefaultFromName, SmtpSettings.UsableFromName("..."));
+        Assert.AreEqual(SmtpSettings.DefaultFromName, SmtpSettings.UsableFromName("   "));
+        Assert.AreEqual(SmtpSettings.DefaultFromName, SmtpSettings.UsableFromName(null));
+    }
+
+    /// <summary>
     /// Two saves the form can express but no transport can carry out, both refused here rather than at three in the
     /// morning inside a TLS handshake: both encryption boxes ticked, and a password on a connection with neither box.
     /// Neither refusal may leave half of itself in the settings table.
