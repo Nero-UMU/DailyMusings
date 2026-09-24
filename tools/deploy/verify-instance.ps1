@@ -268,15 +268,24 @@ if ($reflection -and $reflection.workingVersion -and @($reflection.workingVersio
     }
 
     if ($spare) {
-        Check "把文章迁移到别的主题" {
-            Send-Api PATCH "/api/reflections/$today/topics" @{
-                primaryTopicId = $spare; secondaryTopicIds = @()
-            } -WithSession | Out-Null
-            "已迁移"
+        Check "把在用这个主题的文章全部迁移走" {
+            # 这个主题可能被不止一天的文章用着（脚本反复跑就会这样），所以按 usage 列出的每一天逐篇迁移 ——
+            # 「迁移相关内容才允许删除」这条规则本来就是这个意思，只迁今天的会留下别的文章继续引用它。
+            $usage = Send-Api GET "/api/topics/$usedTopic/usage" -WithSession
+            $dates = @($usage.articles | ForEach-Object { $_.contentDate } | Sort-Object -Unique)
+            if ($dates.Count -eq 0) { throw "usage 说没有文章在用，没什么可迁移的" }
+
+            foreach ($date in $dates) {
+                Send-Api PATCH "/api/reflections/$date/topics" @{
+                    primaryTopicId = $spare; secondaryTopicIds = @()
+                } -WithSession | Out-Null
+            }
+
+            "迁移了 {0} 篇（{1}）" -f $dates.Count, ($dates -join ', ')
         } | Out-Null
 
         Check "迁移之后原主题可以删除" {
-            # 只删原主题：迁移目标此刻正被那篇文章使用，删它当然应该失败 —— 那正是上一条检查验的事。
+            # 只删原主题：迁移目标此刻正被那些文章使用，删它当然应该失败 —— 那正是上一条检查验的事。
             Send-Api DELETE "/api/topics/$usedTopic" -WithSession | Out-Null
             "已删除"
         } | Out-Null
