@@ -61,11 +61,13 @@ public class RuntimeAndInstanceSettingsTests
             backupEnabled: false,
             backupLocalTime: new TimeOnly(2, 15),
             audioCleanupLocalTime: new TimeOnly(5, 45),
+            contentCleanupLocalTime: new TimeOnly(6, 5),
             backupKeepCount: 9,
             retrievalMaxMaterials: 8,
             retrievalCandidateScanLimit: 2_000,
             retrievalMinimumRelevance: 0.31,
-            retrievalMinimumLexicalScore: 0.12);
+            retrievalMinimumLexicalScore: 0.12,
+            inlineTranscriptionTimeoutSeconds: 30);
 
         var readBack = InstanceSettings.FromValues(settings.ToValues());
 

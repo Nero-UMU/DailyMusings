@@ -49,6 +49,7 @@ public static class ServerServiceCollectionExtensions
         services.AddScoped<RedeemPairingCodeUseCase>();
         services.AddScoped<ListDevicesUseCase>();
         services.AddScoped<RevokeDeviceUseCase>();
+        services.AddScoped<DeleteDeviceUseCase>();
         services.AddScoped<RotateDeviceTokenUseCase>();
         services.AddScoped<AuthenticateDeviceUseCase>();
         services.AddScoped<SystemHealthUseCase>();

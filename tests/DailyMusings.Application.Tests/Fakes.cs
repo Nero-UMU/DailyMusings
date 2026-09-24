@@ -55,6 +55,12 @@ internal sealed class InMemoryDeviceRepository : IDeviceRepository
         return Task.CompletedTask;
     }
 
+    public Task DeleteAsync(DeviceId id, CancellationToken cancellationToken)
+    {
+        _devices.Remove(id);
+        return Task.CompletedTask;
+    }
+
     public Task UpdateAsync(Device device, CancellationToken cancellationToken)
     {
         _devices[device.Id] = device;
@@ -158,6 +164,36 @@ internal sealed class TestSecretGenerator : ISecretGenerator
     /// <summary>Same normalization contract as the real generator: casing and the separator are ignored.</summary>
     public string HashPairingCode(string code) =>
         "code-hash:" + code.Replace("-", string.Empty, StringComparison.Ordinal).ToUpperInvariant();
+}
+
+/// <summary>
+/// Stands in for the encrypted store the admin page writes credentials into. Kept in memory because the
+/// encryption itself is the infrastructure layer's business and is tested there; what these tests care about is
+/// which name a value was filed under and whether it could be read back.
+/// </summary>
+internal sealed class InMemoryUiSecretStore : IUiSecretStore
+{
+    private readonly Dictionary<string, string> _values = new(StringComparer.Ordinal);
+
+    public IReadOnlyDictionary<string, string> Snapshot() => _values;
+
+    public Task<string?> GetAsync(string name, CancellationToken cancellationToken) =>
+        Task.FromResult(_values.TryGetValue(name, out var value) ? value : null);
+
+    public Task SetAsync(string name, string value, CancellationToken cancellationToken)
+    {
+        _values[name] = value;
+        return Task.CompletedTask;
+    }
+
+    public Task DeleteAsync(string name, CancellationToken cancellationToken)
+    {
+        _values.Remove(name);
+        return Task.CompletedTask;
+    }
+
+    public Task<bool> ExistsAsync(string name, CancellationToken cancellationToken) =>
+        Task.FromResult(_values.ContainsKey(name));
 }
 
 /// <summary>Builds a use-case graph backed by the in-memory fakes above.</summary>

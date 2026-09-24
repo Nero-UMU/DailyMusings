@@ -39,6 +39,37 @@ public sealed class RevokeDeviceUseCase
     }
 }
 
+/// <summary>
+/// Deletes an already-revoked device's record.
+/// <para>
+/// Deliberately requires the device to be revoked first. Deleting a live device would be a silent way to cut a
+/// phone off without the revoke path's explicit intent, and the two are different promises: revoking says "this
+/// credential no longer works, now", deleting says "this never happened". The refusal carries a stable code so the
+/// admin page can tell the operator to revoke first rather than showing a generic failure.
+/// </para>
+/// </summary>
+public sealed class DeleteDeviceUseCase
+{
+    private readonly IDeviceRepository _devices;
+
+    public DeleteDeviceUseCase(IDeviceRepository devices) => _devices = devices;
+
+    public async Task ExecuteAsync(DeviceId deviceId, CancellationToken cancellationToken)
+    {
+        var device = await _devices.FindByIdAsync(deviceId, cancellationToken).ConfigureAwait(false)
+            ?? throw new UseCaseException("device.unknown", $"No device with id {deviceId}.");
+
+        if (!device.IsRevoked)
+        {
+            throw new UseCaseException(
+                "device.not_revoked",
+                "这台设备还在授权中，请先撤回授权，再删除它的记录。");
+        }
+
+        await _devices.DeleteAsync(deviceId, cancellationToken).ConfigureAwait(false);
+    }
+}
+
 /// <summary>Issues a new token for one device, invalidating the old one (§10.2).</summary>
 public sealed class RotateDeviceTokenUseCase
 {

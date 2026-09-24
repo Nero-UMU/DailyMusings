@@ -84,6 +84,47 @@ public sealed class SqliteInputEntryRepository : IInputEntryRepository
     }
 
     /// <summary>
+    /// One page of the archive view, newest first. Served by the same ordered index the recent list uses, so a
+    /// deep page is not a table scan.
+    /// </summary>
+    public Task<IReadOnlyList<InputEntry>> ListPageAsync(
+        int offset,
+        int limit,
+        bool includeDeleted,
+        CancellationToken cancellationToken)
+    {
+        if (limit < 1)
+        {
+            throw new ArgumentOutOfRangeException(nameof(limit), limit, "The limit must be positive.");
+        }
+
+        if (offset < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(offset), offset, "The offset cannot be negative.");
+        }
+
+        return LoadAsync(
+            $"""
+             SELECT {Columns} FROM input_entry
+              {(includeDeleted ? string.Empty : "WHERE deleted_at_utc IS NULL")}
+              ORDER BY created_at_utc DESC, id DESC
+              LIMIT $limit OFFSET $offset;
+             """,
+            cancellationToken,
+            ("$limit", limit),
+            ("$offset", offset));
+    }
+
+    public async Task<int> CountAsync(bool includeDeleted, CancellationToken cancellationToken) =>
+        await _accessor.QuerySingleAsync(
+            $"""
+             SELECT COUNT(*) FROM input_entry
+              {(includeDeleted ? string.Empty : "WHERE deleted_at_utc IS NULL")};
+             """,
+            reader => reader.GetInt32(0),
+            cancellationToken).ConfigureAwait(false);
+
+    /// <summary>
     /// Everything a reflection on <paramref name="upToInclusive"/> could cite (docs/开发指导.md §8.3).
     /// <para>
     /// The day boundary is in the SQL, not in the caller. §8.3's "only material from the article's day or

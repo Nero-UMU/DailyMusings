@@ -27,7 +27,11 @@ public sealed record InstanceSettings
     public const string BackupEnabledKey = "maintenance.backupEnabled";
     public const string BackupLocalTimeKey = "maintenance.backupLocalTime";
     public const string AudioCleanupLocalTimeKey = "maintenance.audioCleanupLocalTime";
+    public const string ContentCleanupLocalTimeKey = "maintenance.contentCleanupLocalTime";
     public const string BackupKeepCountKey = "backup.keepCount";
+
+    // §8.2: how long an upload may wait for its transcript before the queue takes over.
+    public const string InlineTranscriptionTimeoutKey = "transcription.inlineTimeoutSeconds";
 
     // §8.3: retrieval tuning when the embedding endpoint is off or unavailable.
     public const string RetrievalMaxMaterialsKey = "retrieval.maxMaterials";
@@ -48,6 +52,23 @@ public sealed record InstanceSettings
 
     /// <summary>04:00 local, after the backup.</summary>
     public static readonly TimeOnly DefaultAudioCleanupLocalTime = new(4, 0);
+
+    /// <summary>04:30 local, after the audio sweep: the content sweep is the more destructive of the two, so it
+    /// runs once the cheaper one has already done its work.</summary>
+    public static readonly TimeOnly DefaultContentCleanupLocalTime = new(4, 30);
+
+    /// <summary>
+    /// How long an upload waits for its transcript before answering without one. §8.2's promise is that the
+    /// text comes back with the upload, and a phone standing in a kitchen should not have to poll for it — but
+    /// the reply must never be held hostage by a slow or broken model, so the wait is bounded and the queue
+    /// picks the work up either way.
+    /// </summary>
+    public const int DefaultInlineTranscriptionTimeoutSeconds = 90;
+
+    /// <summary>Zero switches the inline attempt off entirely and returns to the pure queue behaviour.</summary>
+    public const int MinimumInlineTranscriptionTimeoutSeconds = 0;
+
+    public const int MaximumInlineTranscriptionTimeoutSeconds = 600;
 
     /// <summary>Seven archives, per §15.2.</summary>
     public const int DefaultBackupKeepCount = 7;
@@ -71,11 +92,13 @@ public sealed record InstanceSettings
         DefaultBackupEnabled,
         DefaultBackupLocalTime,
         DefaultAudioCleanupLocalTime,
+        DefaultContentCleanupLocalTime,
         DefaultBackupKeepCount,
         RetrievalSettings.Default.MaxMaterials,
         RetrievalSettings.Default.CandidateScanLimit,
         RetrievalSettings.Default.MinimumRelevance,
-        RetrievalSettings.Default.MinimumLexicalScore);
+        RetrievalSettings.Default.MinimumLexicalScore,
+        DefaultInlineTranscriptionTimeoutSeconds);
 
     public InstanceSettings(
         int schedulerIntervalSeconds,
@@ -84,11 +107,13 @@ public sealed record InstanceSettings
         bool backupEnabled,
         TimeOnly backupLocalTime,
         TimeOnly audioCleanupLocalTime,
+        TimeOnly contentCleanupLocalTime,
         int backupKeepCount,
         int retrievalMaxMaterials,
         int retrievalCandidateScanLimit,
         double retrievalMinimumRelevance,
-        double retrievalMinimumLexicalScore)
+        double retrievalMinimumLexicalScore,
+        int inlineTranscriptionTimeoutSeconds)
     {
         SchedulerIntervalSeconds = schedulerIntervalSeconds;
         SchedulerBackfillWindowDays = schedulerBackfillWindowDays;
@@ -96,11 +121,13 @@ public sealed record InstanceSettings
         BackupEnabled = backupEnabled;
         BackupLocalTime = backupLocalTime;
         AudioCleanupLocalTime = audioCleanupLocalTime;
+        ContentCleanupLocalTime = contentCleanupLocalTime;
         BackupKeepCount = backupKeepCount;
         RetrievalMaxMaterials = retrievalMaxMaterials;
         RetrievalCandidateScanLimit = retrievalCandidateScanLimit;
         RetrievalMinimumRelevance = retrievalMinimumRelevance;
         RetrievalMinimumLexicalScore = retrievalMinimumLexicalScore;
+        InlineTranscriptionTimeoutSeconds = inlineTranscriptionTimeoutSeconds;
     }
 
     /// <summary>Local time in the content time zone, not the server's own zone.</summary>
@@ -118,6 +145,9 @@ public sealed record InstanceSettings
 
     public TimeOnly AudioCleanupLocalTime { get; init; }
 
+    /// <summary>Local time in the content time zone, after <see cref="AudioCleanupLocalTime"/>.</summary>
+    public TimeOnly ContentCleanupLocalTime { get; init; }
+
     public int BackupKeepCount { get; init; }
 
     public int RetrievalMaxMaterials { get; init; }
@@ -127,6 +157,12 @@ public sealed record InstanceSettings
     public double RetrievalMinimumRelevance { get; init; }
 
     public double RetrievalMinimumLexicalScore { get; init; }
+
+    /// <summary>Seconds an upload may wait for its transcript. Zero means "do not wait at all" (§8.2).</summary>
+    public int InlineTranscriptionTimeoutSeconds { get; init; }
+
+    /// <summary>The bounded wait, in the shape the upload path needs it.</summary>
+    public TimeSpan InlineTranscriptionTimeout => TimeSpan.FromSeconds(InlineTranscriptionTimeoutSeconds);
 
     /// <summary>The retrieval half, in the shape the retrieval code already speaks.</summary>
     public RetrievalSettings ToRetrievalSettings() => new(
@@ -149,11 +185,13 @@ public sealed record InstanceSettings
             ReadBool(values, BackupEnabledKey, defaults.BackupEnabled),
             ReadTime(values, BackupLocalTimeKey, defaults.BackupLocalTime),
             ReadTime(values, AudioCleanupLocalTimeKey, defaults.AudioCleanupLocalTime),
+            ReadTime(values, ContentCleanupLocalTimeKey, defaults.ContentCleanupLocalTime),
             ReadInt(values, BackupKeepCountKey, defaults.BackupKeepCount),
             ReadInt(values, RetrievalMaxMaterialsKey, defaults.RetrievalMaxMaterials),
             ReadInt(values, RetrievalCandidateScanLimitKey, defaults.RetrievalCandidateScanLimit),
             ReadDouble(values, RetrievalMinimumRelevanceKey, defaults.RetrievalMinimumRelevance),
-            ReadDouble(values, RetrievalMinimumLexicalScoreKey, defaults.RetrievalMinimumLexicalScore));
+            ReadDouble(values, RetrievalMinimumLexicalScoreKey, defaults.RetrievalMinimumLexicalScore),
+            ReadInt(values, InlineTranscriptionTimeoutKey, defaults.InlineTranscriptionTimeoutSeconds));
     }
 
     public IReadOnlyDictionary<string, string> ToValues() =>
@@ -165,11 +203,13 @@ public sealed record InstanceSettings
             [BackupEnabledKey] = BackupEnabled ? "true" : "false",
             [BackupLocalTimeKey] = ContentSettings.FormatTime(BackupLocalTime),
             [AudioCleanupLocalTimeKey] = ContentSettings.FormatTime(AudioCleanupLocalTime),
+            [ContentCleanupLocalTimeKey] = ContentSettings.FormatTime(ContentCleanupLocalTime),
             [BackupKeepCountKey] = BackupKeepCount.ToString(CultureInfo.InvariantCulture),
             [RetrievalMaxMaterialsKey] = RetrievalMaxMaterials.ToString(CultureInfo.InvariantCulture),
             [RetrievalCandidateScanLimitKey] = RetrievalCandidateScanLimit.ToString(CultureInfo.InvariantCulture),
             [RetrievalMinimumRelevanceKey] = RetrievalMinimumRelevance.ToString("0.####", CultureInfo.InvariantCulture),
             [RetrievalMinimumLexicalScoreKey] = RetrievalMinimumLexicalScore.ToString("0.####", CultureInfo.InvariantCulture),
+            [InlineTranscriptionTimeoutKey] = InlineTranscriptionTimeoutSeconds.ToString(CultureInfo.InvariantCulture),
         };
 
     private static string? Read(IReadOnlyDictionary<string, string> values, string key) =>
@@ -212,7 +252,13 @@ public sealed record InstanceSettingsUpdate(
     int? RetrievalMaxMaterials,
     int? RetrievalCandidateScanLimit,
     double? RetrievalMinimumRelevance,
-    double? RetrievalMinimumLexicalScore);
+    double? RetrievalMinimumLexicalScore,
+
+    /// <summary>Local time of the content retention sweep. Absent means "leave it".</summary>
+    TimeOnly? ContentCleanupLocalTime = null,
+
+    /// <summary>Seconds an upload may wait for its transcript; zero turns the wait off (§8.2).</summary>
+    int? InlineTranscriptionTimeoutSeconds = null);
 
 /// <summary>
 /// Changes the operational settings (docs/开发指导.md §4.1).
@@ -249,11 +295,13 @@ public sealed class UpdateInstanceSettingsUseCase
             update.BackupEnabled ?? current.BackupEnabled,
             update.BackupLocalTime ?? current.BackupLocalTime,
             update.AudioCleanupLocalTime ?? current.AudioCleanupLocalTime,
+            update.ContentCleanupLocalTime ?? current.ContentCleanupLocalTime,
             update.BackupKeepCount ?? current.BackupKeepCount,
             update.RetrievalMaxMaterials ?? current.RetrievalMaxMaterials,
             update.RetrievalCandidateScanLimit ?? current.RetrievalCandidateScanLimit,
             update.RetrievalMinimumRelevance ?? current.RetrievalMinimumRelevance,
-            update.RetrievalMinimumLexicalScore ?? current.RetrievalMinimumLexicalScore);
+            update.RetrievalMinimumLexicalScore ?? current.RetrievalMinimumLexicalScore,
+            update.InlineTranscriptionTimeoutSeconds ?? current.InlineTranscriptionTimeoutSeconds);
 
         Validate(next);
 
@@ -308,6 +356,15 @@ public sealed class UpdateInstanceSettingsUseCase
 
         Require(IsRatio(settings.RetrievalMinimumRelevance), "instance.retrieval_relevance.invalid", "相关性下限需要介于 0 与 1 之间。");
         Require(IsRatio(settings.RetrievalMinimumLexicalScore), "instance.retrieval_lexical.invalid", "词面匹配下限需要介于 0 与 1 之间。");
+
+        // Zero is a legal value meaning "do not wait at all" — §8.2's inline transcription is a convenience, and
+        // an operator with a slow model endpoint is entitled to turn it off rather than shorten it.
+        Require(
+            settings.InlineTranscriptionTimeoutSeconds is >= InstanceSettings.MinimumInlineTranscriptionTimeoutSeconds
+                and <= InstanceSettings.MaximumInlineTranscriptionTimeoutSeconds,
+            "instance.inline_transcription_timeout.invalid",
+            $"上传后等待转写的秒数需要介于 {InstanceSettings.MinimumInlineTranscriptionTimeoutSeconds} 与 "
+            + $"{InstanceSettings.MaximumInlineTranscriptionTimeoutSeconds} 之间，0 表示不等待。");
     }
 
     private static bool IsRatio(double value) => double.IsFinite(value) && value is >= 0 and <= 1;

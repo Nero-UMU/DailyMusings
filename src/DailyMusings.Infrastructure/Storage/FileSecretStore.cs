@@ -3,12 +3,18 @@ using DailyMusings.Application.Abstractions;
 namespace DailyMusings.Infrastructure.Storage;
 
 /// <summary>
-/// Resolves secrets from a mounted directory — Docker secrets by default — falling back to environment
-/// variables for local development (docs/开发指导.md §10.4).
+/// Resolves secrets from three places, in this order: the encrypted store the admin page writes, a mounted
+/// directory — Docker secrets by default — and finally environment variables for local development
+/// (docs/开发指导.md §10.4, and the admin-page credential added later).
 /// <para>
-/// Only the <em>name</em> of a secret ever appears in configuration, logs or an export. This class never
-/// logs a value, and returns <c>null</c> rather than throwing when a secret is missing, so a misconfigured
-/// model key degrades one feature instead of preventing startup.
+/// Only the <em>name</em> of a secret ever appears in configuration, logs or an export. This class never logs a
+/// value, and returns <c>null</c> rather than throwing when a secret is missing, so a misconfigured model key
+/// degrades one feature instead of preventing startup.
+/// </para>
+/// <para>
+/// The admin-page store comes first because it is the most specific answer: an operator who typed a password
+/// into the page means it, and an instance whose secrets directory is empty behaves exactly as it did before
+/// this store existed.
 /// </para>
 /// </summary>
 public sealed class FileSecretStore : ISecretStore
@@ -16,12 +22,33 @@ public sealed class FileSecretStore : ISecretStore
     private const string EnvironmentPrefix = "DAILYMUSINGS_SECRET_";
 
     private readonly InstancePaths _paths;
+    private readonly EncryptedUiSecretStore? _uiSecrets;
 
-    public FileSecretStore(InstancePaths paths) => _paths = paths;
+    public FileSecretStore(InstancePaths paths)
+        : this(paths, uiSecrets: null)
+    {
+    }
+
+    /// <param name="uiSecrets">
+    /// Optional so that a test (or a deployment without DataProtection) can keep using this store on its own:
+    /// with nothing there, resolution is exactly the two-step file/environment lookup it always was.
+    /// </param>
+    public FileSecretStore(InstancePaths paths, EncryptedUiSecretStore? uiSecrets)
+    {
+        _paths = paths;
+        _uiSecrets = uiSecrets;
+    }
 
     public string? TryGet(string name)
     {
         ValidateName(name);
+
+        // The synchronous port is deliberate: every model call resolves a secret name through it, and the
+        // admin-page store is a small file read plus a decrypt with nothing to await.
+        if (_uiSecrets is not null && _uiSecrets.TryGet(name, out var fromUi) && !string.IsNullOrEmpty(fromUi))
+        {
+            return fromUi;
+        }
 
         var fromFile = TryReadFile(name);
         if (fromFile is not null)
@@ -34,6 +61,29 @@ public sealed class FileSecretStore : ISecretStore
     }
 
     public bool Exists(string name) => TryGet(name) is not null;
+
+    /// <summary>
+    /// Where the value would come from, asked without returning it. The admin page needs this to tell "you have
+    /// not set a password" apart from "your password is in a file I can read" (§12).
+    /// </summary>
+    public SecretSource ResolveSource(string name)
+    {
+        ValidateName(name);
+
+        if (_uiSecrets is not null && _uiSecrets.TryGet(name, out var fromUi) && !string.IsNullOrEmpty(fromUi))
+        {
+            return SecretSource.Ui;
+        }
+
+        if (TryReadFile(name) is not null)
+        {
+            return SecretSource.File;
+        }
+
+        var fromEnvironment = Environment.GetEnvironmentVariable(EnvironmentPrefix + ToEnvironmentName(name));
+
+        return string.IsNullOrEmpty(fromEnvironment) ? SecretSource.None : SecretSource.Environment;
+    }
 
     public IReadOnlyList<string> ListNames()
     {

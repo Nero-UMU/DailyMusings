@@ -6,28 +6,38 @@
     xmlns:pages="clr-namespace:DailyMusings.Client.Pages"
     Title="每日随想">
 
-    <!-- §9.3: 今日 / 日历 / 主题 / 草稿 / 设置 — capture, look back, keep the vocabulary usable, review, config. -->
+    <!--
+        The phone does three things (2026-09-24 scope): capture a thought and read what was recognised back,
+        look through the recordings and notes kept on this device, and configure the connection. Drafts, topics,
+        source review and publishing are the admin pages' business now.
+    -->
     <TabBar>
         <ShellContent
-            Title="今日"
-            ContentTemplate="{DataTemplate pages:TodayPage}"
-            Route="today" />
-        <ShellContent
-            Title="草稿"
-            ContentTemplate="{DataTemplate pages:DraftPage}"
-            Route="draft" />
+            Title="今日随想"
+            Route="today"
+            ContentTemplate="{DataTemplate pages:CapturePage}">
+            <ShellContent.Icon>
+                <FontImageSource Glyph="🎙" Size="22" />
+            </ShellContent.Icon>
+        </ShellContent>
+
         <ShellContent
             Title="日历"
-            ContentTemplate="{DataTemplate pages:CalendarPage}"
-            Route="calendar" />
-        <ShellContent
-            Title="主题"
-            ContentTemplate="{DataTemplate pages:TopicsPage}"
-            Route="topics" />
+            Route="calendar"
+            ContentTemplate="{DataTemplate pages:CalendarPage}">
+            <ShellContent.Icon>
+                <FontImageSource Glyph="📅" Size="22" />
+            </ShellContent.Icon>
+        </ShellContent>
+
         <ShellContent
             Title="设置"
-            ContentTemplate="{DataTemplate pages:SettingsPage}"
-            Route="settings" />
+            Route="settings"
+            ContentTemplate="{DataTemplate pages:SettingsPage}">
+            <ShellContent.Icon>
+                <FontImageSource Glyph="🔧" Size="22" />
+            </ShellContent.Icon>
+        </ShellContent>
     </TabBar>
 
 </Shell>

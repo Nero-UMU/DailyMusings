@@ -1,11 +1,28 @@
 using DailyMusings.Domain.Common;
 using DailyMusings.Domain.Inputs;
+using DailyMusings.Domain.Publishing;
 using DailyMusings.Domain.Reflections;
 using DailyMusings.Domain.Reflections.Sources;
 using DailyMusings.Domain.Time;
 using DailyMusings.Domain.Topics;
 
 namespace DailyMusings.Application.Abstractions;
+
+/// <summary>
+/// One article that is filed under a topic, in the shape the "these have to be moved first" list needs.
+/// <para>
+/// Carries the title because the list is useless without it — an operator has to recognize which article to
+/// re-file — and the publication status because a topic in use by something already exported is a different
+/// decision from one in use by a draft.
+/// </para>
+/// </summary>
+public sealed record TopicArticleUsage(
+    ReflectionId ReflectionId,
+    ContentDate ContentDate,
+    ReflectionVersionId VersionId,
+    string Title,
+    ReflectionStatus Status,
+    PublicationStatus? PublicationStatus);
 
 /// <summary>Persistence for the topic vocabulary (docs/开发指导.md §6.2, decision A.9).</summary>
 public interface ITopicRepository
@@ -24,6 +41,18 @@ public interface ITopicRepository
     /// </summary>
     Task<Topic?> FindByNameAsync(string name, CancellationToken cancellationToken);
 
+    /// <summary>
+    /// The same lookup, but a name that was merged away resolves to the topic it was merged into (decision A.9)
+    /// rather than reporting "no such topic".
+    /// <para>
+    /// This is what resolving a model's topic names uses. A tombstone must not attract new material, but the
+    /// merge also said something the user meant: these two labels are one theme. Falling through to "invent a
+    /// new topic with the retired name" would undo that quietly and hand the user two labels they had already
+    /// decided were the same.
+    /// </para>
+    /// </summary>
+    Task<Topic?> FindActiveByNameFollowingMergesAsync(string name, CancellationToken cancellationToken);
+
     Task AddAsync(Topic topic, CancellationToken cancellationToken);
 
     Task UpdateAsync(Topic topic, CancellationToken cancellationToken);
@@ -38,6 +67,56 @@ public interface ITopicRepository
     /// </summary>
     /// <returns>How many inputs were re-filed.</returns>
     Task<int> RemapInputsAsync(TopicId from, TopicId to, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// How many articles are <em>currently</em> about the topic, which is the deletion guard's query (§6.2).
+    /// <para>
+    /// "Currently" is the whole point: it counts the days whose working or confirmed version carries the topic,
+    /// not every version that ever did. A day that has been regenerated since — or that has been re-filed away
+    /// from the topic — is not a reason to keep a label the user no longer wants. Counting every version would
+    /// also make a topic referenced only by the permanently retained first version undeletable forever, which is
+    /// the opposite of what the guard is for.
+    /// </para>
+    /// <para>
+    /// The article-usage questions live here rather than on <see cref="IReflectionRepository"/> because every
+    /// one of them exists for the topic's sake — the version side only ever asks them about a topic it is
+    /// deleting or listing. Reads and writes of a <em>version's own</em> topics are the opposite case and stay
+    /// with the version, in the repository that loads it.
+    /// </para>
+    /// </summary>
+    Task<int> CountArticleUsagesAsync(TopicId id, CancellationToken cancellationToken);
+
+    /// <summary>Which articles currently use the topic, oldest day first, for the admin page's migration list.</summary>
+    Task<IReadOnlyList<TopicArticleUsage>> ListArticleUsagesAsync(TopicId id, CancellationToken cancellationToken);
+
+    /// <summary>How many inputs are filed under the topic (primary or secondary).</summary>
+    Task<int> CountInputUsagesAsync(TopicId id, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Detaches a topic from every input, clearing the primary assignment and the secondary rows.
+    /// <para>
+    /// The input entries themselves are never touched: §6.2's "删除主题不得删除原始输入" means a deletion may
+    /// lose the label but must not lose the material. Unfiling is the honest consequence — the alternative,
+    /// silently moving everything to some other topic, would invent a decision the user did not make.
+    /// </para>
+    /// </summary>
+    Task ClearInputAssignmentsAsync(TopicId id, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Removes every article's link to the topic, including the versions a day has since moved on from.
+    /// <para>
+    /// §6.2's 删除主题不得删除原始输入 is about the material, and this is its counterpart on the article side: the
+    /// <em>label</em> goes, the text and the source map stay exactly as they are. The historical versions are not
+    /// rewritten — they simply no longer carry a topic that no longer exists.
+    /// </para>
+    /// </summary>
+    Task ClearVersionTopicLinksAsync(TopicId id, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Removes the topic row. Callers must have established that no article uses it and detached every input;
+    /// this method only deletes.
+    /// </summary>
+    Task DeleteAsync(TopicId id, CancellationToken cancellationToken);
 }
 
 /// <summary>
@@ -56,6 +135,12 @@ public interface IReflectionRepository
     Task<Reflection?> FindByIdAsync(ReflectionId id, CancellationToken cancellationToken);
 
     Task<IReadOnlyList<Reflection>> ListByDateRangeAsync(
+        ContentDate fromInclusive,
+        ContentDate toInclusive,
+        CancellationToken cancellationToken);
+
+    /// <summary>How many days in the range have a draft, so a pager can say how many pages there are.</summary>
+    Task<int> CountByDateRangeAsync(
         ContentDate fromInclusive,
         ContentDate toInclusive,
         CancellationToken cancellationToken);
@@ -118,6 +203,27 @@ public interface IReflectionRepository
         ReflectionVersionId versionId,
         IReadOnlyList<UnsourcedClaim> claims,
         DateTimeOffset checkedAtUtc,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Replaces the topics a version is about, primary first (§6.2 as revised).
+    /// <para>
+    /// Addressed by version rather than by day because the topics describe the article, not the calendar: a
+    /// regeneration produces a new version with its own judgement, and the previous version keeps the one it
+    /// was written under. Callers pass an empty list to clear a version's topics.
+    /// </para>
+    /// </summary>
+    Task SetVersionTopicsAsync(
+        ReflectionVersionId versionId,
+        IReadOnlyList<TopicId> topicIds,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// The topics of several versions at once, keyed by version and ordered primary first. Batched because a
+    /// draft read loads three versions and one query per version would be a per-row query in disguise.
+    /// </summary>
+    Task<IReadOnlyDictionary<ReflectionVersionId, IReadOnlyList<TopicId>>> ListVersionTopicsAsync(
+        IReadOnlyList<ReflectionVersionId> versionIds,
         CancellationToken cancellationToken);
 }
 

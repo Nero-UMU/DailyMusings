@@ -59,4 +59,50 @@ public interface ISecretStore
 
     /// <summary>Names of the secrets currently provisioned. Safe to show: names are not secrets.</summary>
     IReadOnlyList<string> ListNames();
+
+    /// <summary>
+    /// Where a resolved value came from. Reported so the admin page can say "this password was typed here" as
+    /// opposed to "this one comes from a mounted file", and so a missing password is distinguishable from an
+    /// empty one — which is the difference between "configure it" and "it is configured".
+    /// </summary>
+    SecretSource ResolveSource(string name);
+}
+
+/// <summary>Where <see cref="ISecretStore.TryGet"/> found (or failed to find) a value.</summary>
+public enum SecretSource
+{
+    None = 0,
+
+    /// <summary>Written from the admin page and stored encrypted outside the backup set.</summary>
+    Ui = 1,
+
+    /// <summary>A file under the secrets directory (§10.4).</summary>
+    File = 2,
+
+    /// <summary>An environment variable.</summary>
+    Environment = 3,
+}
+
+/// <summary>
+/// Credentials an operator can type into the admin page, encrypted at rest.
+/// <para>
+/// This is the deliberate relaxation of §10.4's "secrets come from Docker Secrets": an SMTP password that can
+/// only be provisioned by editing compose and recreating the container is a password most users will not set.
+/// The guarantees that made the file-only rule worth having are kept where they matter — the value is never
+/// returned to a client, never written to a log, and never included in an export or a backup, because the store
+/// lives outside the instance root (the same place, and for the same reason, as the DataProtection key ring).
+/// </para>
+/// </summary>
+public interface IUiSecretStore
+{
+    /// <summary>The stored value, or <c>null</c> when the name was never set here.</summary>
+    Task<string?> GetAsync(string name, CancellationToken cancellationToken);
+
+    /// <summary>Stores or replaces a value.</summary>
+    Task SetAsync(string name, string value, CancellationToken cancellationToken);
+
+    /// <summary>Removes a value. Idempotent: deleting what is not there is not an error.</summary>
+    Task DeleteAsync(string name, CancellationToken cancellationToken);
+
+    Task<bool> ExistsAsync(string name, CancellationToken cancellationToken);
 }

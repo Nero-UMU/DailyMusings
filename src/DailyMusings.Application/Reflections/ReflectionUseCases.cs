@@ -21,6 +21,9 @@ public sealed record SourceReferenceView(
 /// <summary>A sentence the second-stage check could not trace to any input (§8.4).</summary>
 public sealed record UnsourcedClaimView(int BlockIndex, int CharStart, int CharEnd, string Reason);
 
+/// <summary>A topic an article is about, resolved to a display name for the reader.</summary>
+public sealed record TopicRefView(TopicId Id, string Name, bool IsPrimary);
+
 public sealed record ReflectionVersionView(
     ReflectionVersionId Id,
     string Title,
@@ -35,9 +38,18 @@ public sealed record ReflectionVersionView(
     string? PromptVersion,
     DateTimeOffset? SourcesCheckedAtUtc,
     IReadOnlyList<SourceReferenceView> Sources,
-    IReadOnlyList<UnsourcedClaimView> UnsourcedClaims)
+    IReadOnlyList<UnsourcedClaimView> UnsourcedClaims,
+    IReadOnlyList<TopicRefView> Topics)
 {
-    public static ReflectionVersionView From(ReflectionVersion version)
+    /// <param name="topicNames">
+    /// Display names by id. Supplied by the caller because a version stores the judgement (which topics) and
+    /// nothing else — the name belongs to the topic row, which a topic may be renamed without touching any
+    /// article. A missing entry falls back to the id rather than to an empty label: a reader who sees a raw id
+    /// learns that something is off, whereas an empty string looks like "no topic".
+    /// </param>
+    public static ReflectionVersionView From(
+        ReflectionVersion version,
+        IReadOnlyDictionary<TopicId, string>? topicNames = null)
     {
         ArgumentNullException.ThrowIfNull(version);
 
@@ -72,6 +84,15 @@ public sealed record ReflectionVersionView(
 
             version.UnsourcedClaims
                 .Select(claim => new UnsourcedClaimView(claim.BlockIndex, claim.CharStart, claim.CharEnd, claim.Reason))
+                .ToArray(),
+
+            // The first id is the primary topic — the domain keeps that order rather than a separate flag, so
+            // there is no way for a stored list to disagree with itself about which theme led the day.
+            version.TopicIds
+                .Select((topicId, index) => new TopicRefView(
+                    topicId,
+                    topicNames is not null && topicNames.TryGetValue(topicId, out var name) ? name : topicId.ToString(),
+                    IsPrimary: index == 0))
                 .ToArray());
     }
 }
@@ -110,11 +131,16 @@ public sealed class GetReflectionUseCase
 {
     private readonly IReflectionRepository _reflections;
     private readonly HistoryRetrievalUseCase _retrieval;
+    private readonly ITopicRepository _topics;
 
-    public GetReflectionUseCase(IReflectionRepository reflections, HistoryRetrievalUseCase retrieval)
+    public GetReflectionUseCase(
+        IReflectionRepository reflections,
+        HistoryRetrievalUseCase retrieval,
+        ITopicRepository topics)
     {
         _reflections = reflections;
         _retrieval = retrieval;
+        _topics = topics;
     }
 
     public async Task<ReflectionView?> ExecuteAsync(ContentDate contentDate, CancellationToken cancellationToken)
@@ -133,6 +159,7 @@ public sealed class GetReflectionUseCase
         ArgumentNullException.ThrowIfNull(reflection);
 
         var semantic = await _retrieval.GetSemanticSearchStateAsync(cancellationToken).ConfigureAwait(false);
+        var topicNames = await TopicNamesAsync(cancellationToken).ConfigureAwait(false);
 
         return new ReflectionView(
             reflection.Id,
@@ -146,14 +173,27 @@ public sealed class GetReflectionUseCase
             reflection.ConfirmedVersionId,
             reflection.CreatedAtUtc,
             reflection.UpdatedAtUtc,
-            await LoadAsync(reflection.InitialVersionId, cancellationToken).ConfigureAwait(false),
-            await LoadAsync(reflection.PreviousVersionId, cancellationToken).ConfigureAwait(false),
-            await LoadAsync(reflection.WorkingVersionId, cancellationToken).ConfigureAwait(false),
+            await LoadAsync(reflection.InitialVersionId, topicNames, cancellationToken).ConfigureAwait(false),
+            await LoadAsync(reflection.PreviousVersionId, topicNames, cancellationToken).ConfigureAwait(false),
+            await LoadAsync(reflection.WorkingVersionId, topicNames, cancellationToken).ConfigureAwait(false),
             semantic);
+    }
+
+    /// <summary>
+    /// The vocabulary, as a lookup for the version views. Merged topics are included because an <em>old</em>
+    /// version may still name one — a merge re-points inputs, and deliberately leaves a historical article's
+    /// own judgement alone, so the name has to resolve even though it can no longer be assigned.
+    /// </summary>
+    private async Task<IReadOnlyDictionary<TopicId, string>> TopicNamesAsync(CancellationToken cancellationToken)
+    {
+        var topics = await _topics.ListAsync(includeMerged: true, cancellationToken).ConfigureAwait(false);
+
+        return topics.ToDictionary(topic => topic.Id, topic => topic.Name);
     }
 
     private async Task<ReflectionVersionView?> LoadAsync(
         ReflectionVersionId? versionId,
+        IReadOnlyDictionary<TopicId, string> topicNames,
         CancellationToken cancellationToken)
     {
         if (versionId is not { } id)
@@ -162,9 +202,12 @@ public sealed class GetReflectionUseCase
         }
 
         var version = await _reflections.FindVersionAsync(id, cancellationToken).ConfigureAwait(false);
-        return version is null ? null : ReflectionVersionView.From(version);
+        return version is null ? null : ReflectionVersionView.From(version, topicNames);
     }
 }
+
+/// <summary>One page of drafts plus the total a pager needs.</summary>
+public sealed record ReflectionPage(IReadOnlyList<ReflectionView> Items, int Total);
 
 /// <summary>Lists drafts over a date range, for the calendar page (§9.3).</summary>
 public sealed class ListReflectionsUseCase
@@ -186,7 +229,41 @@ public sealed class ListReflectionsUseCase
             .ListByDateRangeAsync(fromInclusive, toInclusive, cancellationToken)
             .ConfigureAwait(false);
 
-        return reflections
+        return ToViews(reflections);
+    }
+
+    /// <summary>
+    /// One page of the same range, for the admin content list. The counts come from the repository rather than
+    /// from the page, so a pager cannot mistake "this page is not full" for "this is the last page" — the
+    /// difference matters on a filtered range.
+    /// </summary>
+    public async Task<ReflectionPage> ExecutePageAsync(
+        ContentDate fromInclusive,
+        ContentDate toInclusive,
+        int page,
+        int pageSize,
+        CancellationToken cancellationToken)
+    {
+        var total = await _reflections
+            .CountByDateRangeAsync(fromInclusive, toInclusive, cancellationToken)
+            .ConfigureAwait(false);
+
+        // Paged in memory after the range query. The range is already bounded by the API (at most a year) and
+        // the calendar needs the same rows, so a second, subtly different SQL projection would buy nothing.
+        var reflections = await _reflections
+            .ListByDateRangeAsync(fromInclusive, toInclusive, cancellationToken)
+            .ConfigureAwait(false);
+
+        var items = reflections
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToArray();
+
+        return new ReflectionPage(ToViews(items), total);
+    }
+
+    private static IReadOnlyList<ReflectionView> ToViews(IEnumerable<Reflection> reflections) =>
+        reflections
             .OrderByDescending(reflection => reflection.ContentDate)
             .Select(reflection => new ReflectionView(
                 reflection.Id,
@@ -205,7 +282,6 @@ public sealed class ListReflectionsUseCase
                 null,
                 SemanticSearchState.Disabled))
             .ToArray();
-    }
 }
 
 /// <summary>

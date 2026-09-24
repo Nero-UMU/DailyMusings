@@ -50,6 +50,35 @@ public interface ITranscriptionSettingsProvider
 }
 
 /// <summary>
+/// Runs one transcription to completion: claim the entry, call the model, write the text back, recognise topics
+/// and queue the embedding (docs/开发指导.md §8.2 step 5).
+/// <para>
+/// Extracted from the durable job handler so the upload path can do the work <em>inline</em> and hand the
+/// transcript straight back to the phone, while the queue keeps doing exactly the same thing later when the
+/// inline attempt did not happen or did not finish. One implementation, two callers: a second copy of this
+/// sequence for the synchronous path would drift from the retried path, and the two would disagree about what
+/// "transcribed" means — which is precisely what the client shows the user.
+/// </para>
+/// <para>
+/// Implementations keep the job semantics intact: they throw the classified failures below, and they leave the
+/// entry in a state a retry can pick up.
+/// </para>
+/// </summary>
+public interface ITranscriptionRunner
+{
+    /// <summary>
+    /// Transcribes one entry and returns the refreshed entry, or <c>null</c> when there was nothing to do
+    /// (unknown, deleted, not a voice entry, or already transcribed).
+    /// </summary>
+    /// <param name="jobPayloadJson">The durable job's payload, when this is running as a job. Unused today;
+    /// kept so the signature does not have to change when it is.</param>
+    Task<Domain.Inputs.InputEntry?> RunAsync(
+        Domain.Common.InputEntryId inputId,
+        string? jobPayloadJson,
+        CancellationToken cancellationToken);
+}
+
+/// <summary>
 /// A failure that is worth retrying later (network, rate limit, 5xx) as opposed to one that is not (bad
 /// credentials, unsupported audio). §14 retries transient errors with backoff and stops for permanent ones.
 /// </summary>

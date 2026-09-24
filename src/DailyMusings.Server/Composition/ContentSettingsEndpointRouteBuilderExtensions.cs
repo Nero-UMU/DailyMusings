@@ -72,7 +72,8 @@ public static class ContentSettingsEndpointRouteBuilderExtensions
                         request.GenerationLocalTime is null ? null : generation,
                         request.PublishLocalTime is null ? null : publish,
                         request.PublishWindowMinutes,
-                        request.AudioRetentionDays),
+                        request.AudioRetentionDays,
+                        request.ContentRetentionDays),
                     cancellationToken)
                 .ConfigureAwait(false);
 
@@ -103,5 +104,6 @@ public static class ContentSettingsEndpointRouteBuilderExtensions
         ContentSettings.FormatTime(settings.GenerationLocalTime),
         ContentSettings.FormatTime(settings.PublishLocalTime),
         settings.PublishWindowMinutes,
-        settings.AudioRetentionDays);
+        settings.AudioRetentionDays,
+        settings.ContentRetentionDays);
 }

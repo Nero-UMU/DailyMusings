@@ -48,6 +48,9 @@ public sealed class OpenAiCompatibleGenerationClient : IReflectionGenerationClie
         3. 每条"引用"必须逐字摘自你写出的正文，且必须标注它来自哪几条素材。
         4. 正文用空行分段，不要使用 Markdown 标题或列表。
         5. 只输出一个 JSON 对象，不要输出解释文字或代码块。
+        6. 主题方面：优先从"已有主题"里挑 1–3 个最贴切的，并原样回抄它们的写法；同义概念不要另造新名。
+           只有当已有主题确实都不合适时，才在 newTopics 里提出简短的候选名（每个不超过 12 字）。
+           无论如何都不能一个主题都不给：要么给 topics，要么给 newTopics。
         """;
 
     private const string SchemaHint = """
@@ -57,6 +60,8 @@ public sealed class OpenAiCompatibleGenerationClient : IReflectionGenerationClie
           "body": "正文，用空行分段",
           "tags": ["标签"],
           "categories": ["分类建议"],
+          "topics": ["从「已有主题」里原样挑选的主题名，1-3 个"],
+          "newTopics": ["已有主题都不合适时提出的新主题名，每个不超过 12 字；没有就留空数组"],
           "citations": [
             {
               "quote": "正文中的一句话，必须与正文逐字一致",
@@ -126,7 +131,12 @@ public sealed class OpenAiCompatibleGenerationClient : IReflectionGenerationClie
             payload.Body.Trim(),
             Clean(payload.Tags),
             Clean(payload.Categories),
-            BuildCitations(payload.Citations, labels));
+            BuildCitations(payload.Citations, labels),
+
+            // Missing, mistyped or non-string fields read as "no topics", exactly like tags and categories: a
+            // model that forgets the field must not turn a perfectly good draft into a permanent failure.
+            Clean(payload.Topics),
+            Clean(payload.NewTopics));
     }
 
     /// <summary>
@@ -363,6 +373,21 @@ public sealed class OpenAiCompatibleGenerationClient : IReflectionGenerationClie
         AppendWritingSettings(builder, request.Settings);
 
         builder.AppendLine();
+
+        // §6.2 as revised: the model picks the day's topics, and it can only pick from a vocabulary it was
+        // shown. An instance with no topics yet gets an explicit "there are none", which reads better than an
+        // empty list and is what makes the "propose one instead" rule unambiguous.
+        if (request.KnownTopics.Count > 0)
+        {
+            builder.AppendLine("已有主题（优先从这里挑选，回抄写法）：");
+            builder.AppendLine(string.Join("、", request.KnownTopics));
+        }
+        else
+        {
+            builder.AppendLine("已有主题：暂无（请用 newTopics 提出 1-3 个简短主题名）。");
+        }
+
+        builder.AppendLine();
         builder.Append("只输出这样一个 JSON 对象：");
         builder.AppendLine();
         builder.Append(SchemaHint);
@@ -497,7 +522,9 @@ public sealed class OpenAiCompatibleGenerationClient : IReflectionGenerationClie
         [property: JsonPropertyName("body")] string? Body,
         [property: JsonPropertyName("tags")] IReadOnlyList<string>? Tags,
         [property: JsonPropertyName("categories")] IReadOnlyList<string>? Categories,
-        [property: JsonPropertyName("citations")] IReadOnlyList<CitationPayload>? Citations);
+        [property: JsonPropertyName("citations")] IReadOnlyList<CitationPayload>? Citations,
+        [property: JsonPropertyName("topics")] IReadOnlyList<string>? Topics,
+        [property: JsonPropertyName("newTopics")] IReadOnlyList<string>? NewTopics);
 
     private sealed record CitationPayload(
         [property: JsonPropertyName("quote")] string? Quote,

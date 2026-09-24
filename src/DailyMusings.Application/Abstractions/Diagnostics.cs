@@ -98,3 +98,28 @@ public interface IExternalServiceProbe
 {
     Task<ProbeResult> ProbeAsync(ExternalService service, CancellationToken cancellationToken);
 }
+
+/// <summary>
+/// One line kept by the in-memory log buffer. Deliberately a plain record with no exception object: the operator
+/// asked to see what the instance has been saying, not to download the user's content (§16).
+/// </summary>
+public sealed record LogLine(DateTimeOffset TimestampUtc, string Level, string Category, string Message);
+
+/// <summary>
+/// Reads back the most recent log lines this process wrote (docs/开发指导.md §16).
+/// <para>
+/// A bounded in-memory ring rather than a log file: the product's default logging is stdout by design, the
+/// container's own log handling is the operator's business, and writing a second copy of every line to the
+/// instance volume would put diagnostics into the backup set. What this adds is a page in the admin UI that
+/// answers "what has it been doing" without asking the operator to find the container logs — while keeping the
+/// §16 promise that nothing but what was already logged is ever available.
+/// </para>
+/// </summary>
+public interface IRecentLogReader
+{
+    /// <summary>The newest lines, oldest first. Returns fewer when the buffer holds fewer.</summary>
+    IReadOnlyList<LogLine> Read(int lines);
+
+    /// <summary>The level the buffer is configured to keep, so the page can say what it is looking at.</summary>
+    string MinimumLevel { get; }
+}

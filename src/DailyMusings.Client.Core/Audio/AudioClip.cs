@@ -1,72 +1,52 @@
 namespace DailyMusings.Client.Core.Audio;
 
 /// <summary>
-/// Audio a screen has fetched from the instance and wants to play (docs/开发指导.md §15.2 step 6, decision A.1).
+/// Plays a recording from the device's own archive (docs/开发指导.md §3.2, §15.2 step 6).
 /// <para>
-/// Bytes rather than a stream: what the instance serves is one short note, and holding it whole means the caller can
-/// retry a failed write to disk without re-asking the server. Playback itself stays platform-specific — the one other
-/// piece of the capture path that cannot be written once for both clients.
+/// Extended beyond "play this file" for the phone's 今日随想 / 日历 pages, which show a progress slider the user can
+/// drag. The old interface could only start and stop, so the two screens could not show where they were in a note or
+/// let the user jump; position, duration and seeking are capabilities of the platform player
+/// (<c>MediaPlayer.CurrentPosition</c> / <c>Duration</c> / <c>SeekTo</c>) that the controller had no way to reach.
+/// Nothing here is platform-specific, so it still lives in the shared project and is implemented once per platform.
 /// </para>
-/// </summary>
-public sealed record AudioClip(byte[] Bytes, string ContentType)
-{
-    /// <summary>A file extension for a cache file, derived from the content type the server reported.</summary>
-    public string FileExtension => ContentType switch
-    {
-        "audio/mp4" or "audio/m4a" or "audio/x-m4a" => ".m4a",
-        "audio/aac" => ".aac",
-        "audio/mpeg" or "audio/mp3" => ".mp3",
-        "audio/wav" or "audio/x-wav" or "audio/wave" => ".wav",
-        "audio/webm" => ".webm",
-        "audio/ogg" or "audio/opus" => ".ogg",
-        "audio/3gpp" => ".3gp",
-        "audio/amr" => ".amr",
-        _ => ".bin",
-    };
-}
-
-/// <summary>
-/// Plays a local audio file. Implemented per platform: neither MAUI nor .NET has a player that both clients share.
 /// </summary>
 public interface IAudioPlayer
 {
+    /// <summary>True while a file is playing. Paused is not playing.</summary>
+    bool IsPlaying { get; }
+
+    /// <summary>How far into the current file playback is. <see cref="TimeSpan.Zero"/> when nothing is loaded.</summary>
+    TimeSpan Position { get; }
+
+    /// <summary>How long the current file is, as the platform player measured it. Zero when nothing is loaded.</summary>
+    TimeSpan Duration { get; }
+
+    /// <summary>
+    /// Raised when a file plays to its end. The screens use it to put the play button back, since nothing else tells
+    /// them playback finished on its own.
+    /// </summary>
+    event EventHandler? PlaybackCompleted;
+
+    /// <summary>
+    /// Loads the file without playing it, so a screen can show its length and let the user drag to a position before
+    /// deciding to listen. Without this the total duration would read 0:00 until the user pressed play — which is the
+    /// wrong way round for a progress slider.
+    /// </summary>
+    Task LoadAsync(string filePath, CancellationToken cancellationToken);
+
     /// <summary>
     /// Plays the file, replacing whatever is playing. Returns when playback has *started*, not when it ends — the
-    /// screen stays usable while a note plays.
+    /// screen stays usable while a note plays. A file that is already loaded and paused continues from where it was;
+    /// one that has played to its end starts again.
     /// </summary>
     Task PlayAsync(string filePath, CancellationToken cancellationToken);
 
-    /// <summary>Stops playback. Idempotent: stopping nothing is not an error.</summary>
+    /// <summary>Pauses playback, keeping the position so the next <see cref="PlayAsync"/> can continue from there.</summary>
+    Task PauseAsync(CancellationToken cancellationToken);
+
+    /// <summary>Moves playback to <paramref name="position"/>, clamped to the file's length.</summary>
+    Task SeekAsync(TimeSpan position, CancellationToken cancellationToken);
+
+    /// <summary>Stops playback and releases the file. Idempotent: stopping nothing is not an error.</summary>
     Task StopAsync(CancellationToken cancellationToken);
-}
-
-/// <summary>
-/// Writes fetched audio into the app's cache so the platform player has a file to open.
-/// </summary>
-public sealed class AudioClipCache
-{
-    private readonly string _directory;
-
-    public AudioClipCache(string directory) => _directory = directory;
-
-    /// <summary>
-    /// Saves the clip under <paramref name="name"/> and returns its path. Written to a temporary name and moved into
-    /// place, so a half-written file can never be handed to a player.
-    /// </summary>
-    public async Task<string> SaveAsync(string name, AudioClip clip, CancellationToken cancellationToken)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(name);
-        ArgumentNullException.ThrowIfNull(clip);
-
-        Directory.CreateDirectory(_directory);
-
-        var safeName = string.Concat(name.Where(character => char.IsLetterOrDigit(character) || character is '-' or '_'));
-        var path = Path.Combine(_directory, safeName + clip.FileExtension);
-        var partial = path + ".partial";
-
-        await File.WriteAllBytesAsync(partial, clip.Bytes, cancellationToken).ConfigureAwait(false);
-        File.Move(partial, path, overwrite: true);
-
-        return path;
-    }
 }

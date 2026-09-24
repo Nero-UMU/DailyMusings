@@ -201,10 +201,12 @@ public sealed class RunMaintenanceJobUseCase
         _clock = clock;
     }
 
-    /// <param name="jobType">Backup or AudioCleanup; anything else is refused, because the queue is not a shell.</param>
+    /// <param name="jobType">
+    /// Backup, AudioCleanup or ContentCleanup; anything else is refused, because the queue is not a shell.
+    /// </param>
     public async Task<ProcessingJob> ExecuteAsync(JobType jobType, CancellationToken cancellationToken)
     {
-        if (jobType is not (JobType.Backup or JobType.AudioCleanup))
+        if (jobType is not (JobType.Backup or JobType.AudioCleanup or JobType.ContentCleanup))
         {
             throw new UseCaseException(
                 "maintenance.unsupported_job",

@@ -78,6 +78,11 @@ public static class EndpointRouteBuilderExtensions
         endpoints.MapDelete("/api/devices/{id}", RevokeDeviceAsync)
             .RequireAuthorization(ServerAuthenticationPolicies.AdminOnly);
 
+        // A second, narrower delete: this one removes the record, and only for a device that is already revoked
+        // (see DeleteDeviceUseCase for why the two are separate routes rather than one clever one).
+        endpoints.MapDelete("/api/devices/{id}/record", DeleteDeviceAsync)
+            .RequireAuthorization(ServerAuthenticationPolicies.AdminOnly);
+
         endpoints.MapPost("/api/devices/{id}/rotate", RotateDeviceTokenAsync)
             .RequireAuthorization(ServerAuthenticationPolicies.AdminOnly);
     }
@@ -304,6 +309,47 @@ public static class EndpointRouteBuilderExtensions
                 .ConfigureAwait(false);
 
             return Results.NoContent();
+        }
+        catch (DomainException exception)
+        {
+            return MapDomainFailure(exception);
+        }
+    }
+
+    /// <summary>
+    /// Deletes a revoked device's record. Separate from revoking on purpose: revoking is the security action and
+    /// applies to a live device, deleting is housekeeping and refuses anything still authorized.
+    /// </summary>
+    private static async Task<IResult> DeleteDeviceAsync(
+        string id,
+        DeleteDeviceUseCase deleteDevice,
+        CancellationToken cancellationToken)
+    {
+        if (!Guid.TryParse(id, out var parsed))
+        {
+            return Results.Json(
+                new ApiError(ApiErrorCodes.NotFound, "No device with that identifier."),
+                statusCode: StatusCodes.Status404NotFound);
+        }
+
+        try
+        {
+            await deleteDevice
+                .ExecuteAsync(new DeviceId(parsed), cancellationToken)
+                .ConfigureAwait(false);
+
+            return Results.NoContent();
+        }
+        catch (UseCaseException exception)
+        {
+            var status = exception.Code switch
+            {
+                "device.unknown" => StatusCodes.Status404NotFound,
+                "device.not_revoked" => StatusCodes.Status409Conflict,
+                _ => StatusCodes.Status400BadRequest,
+            };
+
+            return Results.Json(new ApiError(exception.Code, exception.Message), statusCode: status);
         }
         catch (DomainException exception)
         {

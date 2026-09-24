@@ -1,4 +1,4 @@
-using DailyMusings.Application.Abstractions;
+﻿using DailyMusings.Application.Abstractions;
 using DailyMusings.Application.Configuration;
 using DailyMusings.Infrastructure.Generation;
 using DailyMusings.Infrastructure.Notifications;
@@ -74,7 +74,7 @@ public class ModelSettingsPrecedenceTests
         var store = Store(database);
 
         // Exactly what the admin page writes, through the use case that validates it.
-        await new UpdateModelEndpointUseCase(store).ExecuteAsync(
+        await new UpdateModelEndpointUseCase(store, new TestUiSecretStore()).ExecuteAsync(
             ModelService.Generation,
             new ModelEndpointUpdate(true, "https://from-admin.example/v1", "admin-model", "admin-secret", 90, null),
             CancellationToken.None);
@@ -95,7 +95,7 @@ public class ModelSettingsPrecedenceTests
         Assert.AreEqual(TimeSpan.FromSeconds(90), settings.Timeout);
 
         // And the very next read sees it: no restart, which is what an admin editor is for.
-        await new UpdateModelEndpointUseCase(store).ExecuteAsync(
+        await new UpdateModelEndpointUseCase(store, new TestUiSecretStore()).ExecuteAsync(
             ModelService.Generation,
             new ModelEndpointUpdate(null, null, "changed-again", null, null, null),
             CancellationToken.None);
@@ -117,7 +117,7 @@ public class ModelSettingsPrecedenceTests
         Assert.AreEqual("compose-smtp", fromCompose.Host);
         Assert.AreEqual("compose-user", fromCompose.Username);
 
-        var update = new UpdateSmtpSettingsUseCase(store);
+        var update = new UpdateSmtpSettingsUseCase(store, new TestUiSecretStore());
         await update.ExecuteAsync(
             new SmtpSettingsUpdate(true, "admin-smtp", 2525, null, string.Empty, null, null, null, null),
             CancellationToken.None);
@@ -139,7 +139,7 @@ public class ModelSettingsPrecedenceTests
     {
         await using var database = await TestDatabase.CreateAsync();
         var store = Store(database);
-        var update = new UpdateSmtpSettingsUseCase(store);
+        var update = new UpdateSmtpSettingsUseCase(store, new TestUiSecretStore());
 
         // A deployment configured only from compose, in the old spelling.
         var legacyCompose = new ConfigurationSmtpSettingsProvider(

@@ -472,7 +472,9 @@ public class ReflectionGenerationTests
                 // A sentence that is not in the body: the offsets cannot be derived, so it is dropped rather than
                 // pointed at the wrong place (decision A.6).
                 new GeneratedCitation("这句话根本不在正文里。", [InputEntryId.New()], 0.9, "编造的引用"),
-            ]);
+            ],
+            [],
+            []);
 
         var request = await context.RequestGeneration.ExecuteAsync(
             context.Today, manual: true, ignoreTranscriptionFailures: false, allowOverwriteOfManualEdits: false, CancellationToken.None);

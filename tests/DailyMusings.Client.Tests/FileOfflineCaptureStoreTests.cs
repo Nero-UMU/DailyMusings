@@ -6,9 +6,9 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 namespace DailyMusings.Client.Tests;
 
 /// <summary>
-/// The device-side queue (docs/开发指导.md §9.2). What matters here is durability: a capture the user was told is
-/// saved must still be there after the process dies, and its audio must never be lost while it is still the only
-/// copy.
+/// The device's own archive (docs/开发指导.md §9.2). What matters here is durability: a capture the user was told is
+/// saved must still be there after the process dies, and its audio must never be lost — not while it is waiting to
+/// be uploaded, and not after the server has confirmed it either.
 /// </summary>
 [TestClass]
 public class FileOfflineCaptureStoreTests
@@ -80,7 +80,7 @@ public class FileOfflineCaptureStoreTests
     }
 
     [TestMethod]
-    public async Task The_queue_reads_oldest_first_so_thoughts_arrive_in_order()
+    public async Task The_archive_lists_newest_first_so_the_calendar_starts_where_the_user_left_off()
     {
         var root = NewRoot();
 
@@ -92,7 +92,7 @@ public class FileOfflineCaptureStoreTests
 
             var queue = await store.ListAsync(CancellationToken.None);
 
-            CollectionAssert.AreEqual(new[] { "early", "late" }, queue.Select(c => c.Id).ToArray());
+            CollectionAssert.AreEqual(new[] { "late", "early" }, queue.Select(c => c.Id).ToArray());
         }
         finally
         {
@@ -176,14 +176,55 @@ public class FileOfflineCaptureStoreTests
     }
 
     [TestMethod]
-    public async Task A_capture_that_has_not_been_confirmed_reports_that_it_holds_the_only_copy()
+    public async Task Only_a_capture_the_server_has_confirmed_stops_waiting_to_be_uploaded()
     {
         var queued = Capture("c1", DateTimeOffset.UnixEpoch);
         var uploaded = queued with { State = CaptureUploadState.Uploaded };
+        var failed = queued with { State = CaptureUploadState.Failed, FailureCode = "client.timeout" };
 
-        Assert.IsTrue(queued.HoldsOnlyCopy);
-        Assert.IsFalse(uploaded.HoldsOnlyCopy);
+        Assert.IsTrue(queued.NeedsUpload);
+        Assert.IsFalse(uploaded.NeedsUpload, "A confirmed capture is no longer outstanding — but it is still here.");
+        Assert.IsTrue(failed.NeedsUpload, "A failure is retryable, so the row is still outstanding.");
 
         await Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// The store has to keep reading the records written before the phone kept transcripts in them. Those files have
+    /// no <c>transcript</c> or <c>transcriptionAtUtc</c> field at all, and an upgrade that could not read them would
+    /// silently lose every thought the user ever recorded.
+    /// </summary>
+    [TestMethod]
+    public async Task A_record_written_before_the_new_fields_existed_is_still_readable()
+    {
+        var root = NewRoot();
+
+        try
+        {
+            var store = new FileOfflineCaptureStore(root);
+
+            var legacy = """
+                {"id":"legacy","idempotencyKey":"key-legacy","kind":0,"localAudioPath":null,"text":"旧记录。",
+                "createdAtUtc":"2026-02-28T10:00:00+00:00","createdOffsetMinutes":480,"durationSeconds":null,
+                "state":1,"attemptCount":0,"failureCode":null,"failureSummary":null,"serverInputId":"server-9",
+                "uploadedAtUtc":"2026-02-28T11:00:00+00:00","holdsOnlyCopy":false}
+                """;
+
+            await File.WriteAllTextAsync(Path.Combine(store.RecordDirectory, "legacy.json"), legacy, Encoding.UTF8);
+
+            var capture = await store.FindAsync("legacy", CancellationToken.None);
+
+            Assert.IsNotNull(capture);
+            Assert.AreEqual("旧记录。", capture.Text);
+            Assert.IsNull(capture.Transcript, "A record with no transcript reads as null rather than failing.");
+            Assert.IsNull(capture.TranscriptionAtUtc);
+            Assert.AreEqual(CaptureUploadState.Uploaded, capture.State);
+            Assert.IsFalse(capture.NeedsUpload);
+            Assert.AreEqual("旧记录。", capture.DisplayText);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
     }
 }

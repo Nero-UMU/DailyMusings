@@ -144,6 +144,8 @@ public abstract class InputIngestionUseCaseBase
 public sealed class IngestVoiceInputUseCase : InputIngestionUseCaseBase
 {
     private readonly IAudioStore _audio;
+    private readonly ITranscriptionRunner _transcription;
+    private readonly IInstanceSettingsProvider _instanceSettings;
 
     public IngestVoiceInputUseCase(
         IInputEntryRepository inputs,
@@ -152,23 +154,35 @@ public sealed class IngestVoiceInputUseCase : InputIngestionUseCaseBase
         IContentCalendarProvider calendars,
         IReflectionRepository reflections,
         IAudioStore audio,
+        ITranscriptionRunner transcription,
+        IInstanceSettingsProvider instanceSettings,
         IClock clock)
         : base(inputs, jobs, unitOfWork, calendars, reflections, clock)
     {
         _audio = audio;
+        _transcription = transcription;
+        _instanceSettings = instanceSettings;
     }
 
+    /// <param name="transcribeNow">
+    /// Attempt the transcription inline and return the text with the upload. §8.2 wants the client to get its
+    /// transcript without polling; the queue still owns the work, so this is best-effort by construction.
+    /// </param>
     public async Task<IngestResult> ExecuteAsync(
         Stream audio,
         string? contentType,
         TimeSpan? duration,
         CaptureContext context,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool transcribeNow = false)
     {
         ArgumentNullException.ThrowIfNull(audio);
 
         if (await FindReplayAsync(context.ClientIdempotencyKey, cancellationToken).ConfigureAwait(false) is { } existing)
         {
+            // A replayed upload is answered with what was already stored, transcript and all. Running the
+            // transcription again would be work for nothing, and could rewrite a transcript the user already
+            // corrected — §9.2 makes a retry a *confirmation*, not a second capture.
             return new IngestResult(existing, WasAlreadyStored: true, null);
         }
 
@@ -195,7 +209,154 @@ public sealed class IngestVoiceInputUseCase : InputIngestionUseCaseBase
         // Steps 2–3: record the entry and queue the transcription together.
         var job = await PersistAsync(entry, enqueueTranscription: true, cancellationToken).ConfigureAwait(false);
 
-        return new IngestResult(entry, WasAlreadyStored: false, job);
+        var result = new IngestResult(entry, WasAlreadyStored: false, job);
+
+        if (!transcribeNow)
+        {
+            return result;
+        }
+
+        // Step 4, brought forward: try the transcription now so the answer can carry the text. Everything about
+        // this is best-effort and it happens strictly after the transaction committed, so a slow, broken or
+        // unconfigured model cannot turn a successful upload into a failed one (§20: 不因模型暂时失败而丢失输入).
+        return await TryTranscribeInlineAsync(result, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<IngestResult> TryTranscribeInlineAsync(
+        IngestResult result,
+        CancellationToken cancellationToken)
+    {
+        var settings = await _instanceSettings.GetAsync(cancellationToken).ConfigureAwait(false);
+
+        if (settings.InlineTranscriptionTimeoutSeconds <= 0)
+        {
+            // Switched off: pure queue behaviour, which is what an operator with a slow endpoint asked for.
+            return result;
+        }
+
+        var window = settings.InlineTranscriptionTimeout;
+
+        // Keep the queue off this job while the inline attempt owns it. Without this the executor can claim the
+        // very same transcription two seconds in and call the model a second time for one recording — and the
+        // two writers would race over the entry's status.
+        var deferred = await DeferJobAsync(result.TranscriptionJob, Clock.UtcNow + window, cancellationToken)
+            .ConfigureAwait(false);
+
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(window);
+
+        try
+        {
+            var refreshed = await _transcription
+                .RunAsync(result.Entry.Id, jobPayloadJson: null, timeout.Token)
+                .ConfigureAwait(false);
+
+            if (refreshed is not null && result.TranscriptionJob is { } completed)
+            {
+                // Finished here, so the queue entry is finished here too: leaving it pending would have the
+                // executor pick up work that is already done.
+                await CompleteJobAsync(completed, cancellationToken).ConfigureAwait(false);
+            }
+
+            return refreshed is null ? result : result with { Entry = refreshed };
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        {
+            // The job is already queued and the audio is already stored, so the only correct thing to do here is
+            // to say nothing: the upload succeeded, and the transcript arrives by the normal path moments later.
+            // A cancellation caused by *our own* timeout lands here too — that is the expected outcome of a slow
+            // model, not a failure of the capture.
+            _ = exception;
+
+            if (deferred)
+            {
+                // Nothing usable came out of the attempt, so hand the work straight back to the queue rather
+                // than making the user wait out a deferral that no longer protects anything. The retry, the
+                // backoff and the terminal-failure mail stay the executor's business, exactly as before.
+                await MakeDueAsync(result.TranscriptionJob!, cancellationToken).ConfigureAwait(false);
+            }
+
+            return result;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // The caller went away mid-wait. The capture is already durable, so nothing is lost — but the queue
+            // must be released now rather than at the end of a deferral nobody is waiting behind any more. The
+            // bookkeeping write deliberately does not use the cancelled token.
+            if (deferred)
+            {
+                await MakeDueAsync(result.TranscriptionJob!, CancellationToken.None).ConfigureAwait(false);
+            }
+
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Pushes the job's due time out for the duration of an inline attempt. Returns false when the job was
+    /// already claimed by the executor, in which case the inline path is the redundant one and says nothing.
+    /// </summary>
+    private async Task<bool> DeferJobAsync(
+        ProcessingJob? job,
+        DateTimeOffset until,
+        CancellationToken cancellationToken)
+    {
+        if (job is null)
+        {
+            return false;
+        }
+
+        // Re-read: the executor may have claimed it between the commit and now, and writing a stale copy back
+        // would revert a running job to pending — which is how the same work ends up running twice.
+        var current = await Jobs.FindByIdAsync(job.Id, cancellationToken).ConfigureAwait(false);
+
+        if (current is null || current.Status != JobStatus.Pending)
+        {
+            return false;
+        }
+
+        current.Defer(until);
+        await Jobs.UpdateAsync(current, cancellationToken).ConfigureAwait(false);
+
+        return true;
+    }
+
+    /// <summary>
+    /// Marks the job finished after the inline attempt did the work, the same way the executor would: claim it
+    /// first, then succeed it. Claiming is not decoration — a job cannot move from pending to succeeded without
+    /// having been started, and the exclusive claim is also what stops this from overwriting the executor's own
+    /// record if it got there first.
+    /// </summary>
+    private async Task CompleteJobAsync(ProcessingJob job, CancellationToken cancellationToken)
+    {
+        if (!await Jobs.TryClaimAsync(job.Id, Clock.UtcNow, cancellationToken).ConfigureAwait(false))
+        {
+            return;
+        }
+
+        var current = await Jobs.FindByIdAsync(job.Id, cancellationToken).ConfigureAwait(false);
+
+        if (current is null)
+        {
+            return;
+        }
+
+        current.Succeed(Clock.UtcNow);
+        await Jobs.UpdateAsync(current, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Makes the job due again, unless the executor has taken it over in the meantime.</summary>
+    private async Task MakeDueAsync(ProcessingJob job, CancellationToken cancellationToken)
+    {
+        var current = await Jobs.FindByIdAsync(job.Id, cancellationToken).ConfigureAwait(false);
+
+        if (current is null || current.Status != JobStatus.Pending)
+        {
+            return;
+        }
+
+        current.Defer(Clock.UtcNow);
+        await Jobs.UpdateAsync(current, cancellationToken).ConfigureAwait(false);
     }
 }
 

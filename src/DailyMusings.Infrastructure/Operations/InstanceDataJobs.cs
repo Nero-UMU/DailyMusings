@@ -165,6 +165,56 @@ public sealed class AudioCleanupJobHandler : IJobHandler
 }
 
 /// <summary>
+/// Runs the retention sweep for captured content (the window added with this feature).
+/// <para>
+/// The same shape as the audio sweep, and separate from it on purpose: the two windows answer different
+/// questions ("how long do I keep the recording so I can check the transcript" versus "how long do I keep what
+/// I said"), and an operator who wants a short content window usually still wants the audio for a while.
+/// </para>
+/// </summary>
+public sealed class ContentCleanupJobHandler : IJobHandler
+{
+    private readonly RunContentCleanupUseCase _cleanup;
+    private readonly ILogger<ContentCleanupJobHandler> _logger;
+
+    public ContentCleanupJobHandler(RunContentCleanupUseCase cleanup, ILogger<ContentCleanupJobHandler> logger)
+    {
+        _cleanup = cleanup;
+        _logger = logger;
+    }
+
+    public JobType JobType => JobType.ContentCleanup;
+
+    public async Task<JobOutcome> ExecuteAsync(ProcessingJob job, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(job);
+
+        var result = await _cleanup.ExecuteAsync(cancellationToken).ConfigureAwait(false);
+
+        if (result.CleanedEntries == 0 && result.FailedDeletions == 0)
+        {
+            // Includes the ordinary case of the window being off ("keep forever"): a sweep that has nothing to
+            // do is a success, and the queue must not accumulate failures for it.
+            return JobOutcome.Skipped;
+        }
+
+        // Counts only — never a transcript, a file name or a topic (§16).
+        _logger.LogInformation(
+            "Content retention cleared {CleanedCount} entr(ies) ({ReleasedBytes} bytes) across {DayCount} day(s).",
+            result.CleanedEntries,
+            result.ReleasedBytes,
+            result.CandidateDays);
+
+        if (result.FailedDeletions > 0)
+        {
+            _logger.LogWarning("{FailedCount} recording(s) could not be deleted; the entries were kept.", result.FailedDeletions);
+        }
+
+        return JobOutcome.Completed;
+    }
+}
+
+/// <summary>
 /// Takes a complete backup (docs/开发指导.md §15.2).
 /// <para>
 /// The daily schedule and the one-click admin action both arrive here, which is why the job carries no parameters:

@@ -3,101 +3,107 @@
     x:Class="DailyMusings.Client.Pages.SettingsPage"
     xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
     xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
-    Title="设置">
+    Shell.NavBarIsVisible="False">
 
     <ScrollView>
-        <VerticalStackLayout Padding="16" Spacing="14">
+        <VerticalStackLayout
+            Padding="20,24,20,36"
+            Spacing="18"
+            HorizontalOptions="Center"
+            MaximumWidthRequest="560">
+
+            <Label Text="设置" Style="{StaticResource TitleLabel}" />
 
             <!-- §10.3: 设置页持续显示不安全连接状态. -->
-            <Border
-                x:Name="InsecureBanner"
-                IsVisible="False"
-                Stroke="#B42318"
-                StrokeThickness="1"
-                BackgroundColor="#FFEBE9"
-                Padding="12">
-                <Border.StrokeShape>
-                    <RoundRectangle CornerRadius="8" />
-                </Border.StrokeShape>
+            <Border x:Name="InsecureBanner" Style="{StaticResource WarnBanner}" IsVisible="False">
                 <Label
-                    TextColor="#7A271A"
-                    FontSize="13"
-                    Text="当前使用未加密的 HTTP 连接。密码、设备令牌、录音与文章都可能被截获。请改用 HTTPS、局域网或 VPN。确认过风险提示并不等于连接变安全了。" />
+                    TextColor="{StaticResource Danger}"
+                    FontSize="12"
+                    Text="当前使用未加密的 HTTP 连接。密码、设备令牌、录音与文章都可能被同一网络中的他人截获。请改用 HTTPS、局域网或 VPN。确认过风险提示并不等于连接变安全了。" />
             </Border>
 
-            <Label Text="服务器" FontAttributes="Bold" />
+            <Label Text="服务器" Style="{StaticResource SectionLabel}" />
 
-            <Entry
-                x:Name="ServerUrlEntry"
-                Placeholder="https://example.com 或 http://192.168.1.10:18321"
-                Keyboard="Url" />
+            <Border Style="{StaticResource Card}">
+                <VerticalStackLayout Spacing="12">
+                    <Entry
+                        x:Name="ServerUrlEntry"
+                        Placeholder="http://192.168.1.10:18321"
+                        Keyboard="Url" />
+                    <Label
+                        Style="{StaticResource CaptionLabel}"
+                        Text="填写实例的地址，例如 http://192.168.1.10:18321。推荐使用 HTTPS；明文 HTTP 需要你主动确认风险后才会保存。" />
+                    <Grid ColumnDefinitions="*,*" ColumnSpacing="10">
+                        <Button Text="保存地址" Clicked="OnSaveServerClicked" />
+                        <Button
+                            Grid.Column="1"
+                            Text="测试连接"
+                            Style="{StaticResource GhostButton}"
+                            Clicked="OnTestConnectionClicked" />
+                    </Grid>
+                    <Label x:Name="ServerStatus" Style="{StaticResource CaptionLabel}" />
+                </VerticalStackLayout>
+            </Border>
 
-            <Label
-                Text="也可以填写局域网地址或 VPN 内的地址。推荐使用 HTTPS。"
-                FontSize="12"
-                TextColor="#656D76" />
+            <Label Text="设备配对" Style="{StaticResource SectionLabel}" />
 
-            <HorizontalStackLayout Spacing="8">
-                <Button Text="保存地址" Clicked="OnSaveServerClicked" />
-                <Button Text="测试连接" Clicked="OnTestConnectionClicked" />
-            </HorizontalStackLayout>
+            <Border Style="{StaticResource Card}">
+                <VerticalStackLayout Spacing="12">
+                    <Label x:Name="PairingState" Style="{StaticResource BodyLabel}" />
+                    <Entry
+                        x:Name="PairingCodeEntry"
+                        Placeholder="在管理页生成配对码后填到这里"
+                        MaxLength="32" />
+                    <Grid ColumnDefinitions="*,*" ColumnSpacing="10">
+                        <Button Text="配对" Clicked="OnPairClicked" />
+                        <Button
+                            Grid.Column="1"
+                            Text="解除配对"
+                            Style="{StaticResource GhostButton}"
+                            Clicked="OnUnpairClicked" />
+                    </Grid>
+                    <Label x:Name="PairingStatus" Style="{StaticResource CaptionLabel}" />
+                </VerticalStackLayout>
+            </Border>
 
-            <Label x:Name="ServerStatus" FontSize="13" TextColor="#656D76" />
+            <Label Text="本机记录" Style="{StaticResource SectionLabel}" />
 
-            <BoxView HeightRequest="1" Color="#E1E4E8" />
-
-            <Label Text="设备配对" FontAttributes="Bold" />
-
-            <Label
-                x:Name="PairingState"
-                FontSize="13"
-                TextColor="#656D76" />
-
-            <Entry
-                x:Name="PairingCodeEntry"
-                Placeholder="在管理页生成配对码后填到这里"
-                MaxLength="32" />
-
-            <HorizontalStackLayout Spacing="8">
-                <Button Text="配对" Clicked="OnPairClicked" />
-                <Button Text="解除配对" Clicked="OnUnpairClicked" />
-            </HorizontalStackLayout>
-
-            <Label x:Name="PairingStatus" FontSize="13" TextColor="#656D76" />
-
-            <BoxView HeightRequest="1" Color="#E1E4E8" />
-
-            <Label Text="本机信息" FontAttributes="Bold" />
-            <Label x:Name="DeviceInfoLabel" FontSize="12" TextColor="#656D76" />
-
-            <BoxView HeightRequest="1" Color="#E1E4E8" />
-
-            <!-- §9.3's 通知偏好. Read-only, and it says why: an administrator changes where notifications go. -->
-            <Label Text="通知偏好" FontAttributes="Bold" />
-            <Label
-                x:Name="NotificationStatus"
-                FontSize="12"
-                TextColor="#656D76" />
-            <Button
-                Text="刷新通知偏好"
-                Padding="12,4"
-                FontSize="13"
-                HorizontalOptions="Start"
-                Clicked="OnRefreshNotificationsClicked" />
-
-            <BoxView HeightRequest="1" Color="#E1E4E8" />
+            <Border Style="{StaticResource Card}">
+                <VerticalStackLayout Spacing="12">
+                    <Label
+                        Style="{StaticResource CaptionLabel}"
+                        Text="录音与识别文字都保存在本机，上传成功后也不会被删掉。只有你在这里删除时才会消失。" />
+                    <Label x:Name="LocalUsage" Style="{StaticResource BodyLabel}" />
+                    <Button
+                        x:Name="ClearLocalButton"
+                        Text="清空本机记录"
+                        Style="{StaticResource DangerButton}"
+                        Clicked="OnClearLocalClicked" />
+                    <Label x:Name="LocalStatus" Style="{StaticResource CaptionLabel}" />
+                </VerticalStackLayout>
+            </Border>
 
             <!-- §8.1: the client may see the model names and whether they are on, and nothing more. -->
-            <Label Text="实例上的模型" FontAttributes="Bold" />
-            <Label
-                x:Name="ModelStatus"
-                FontSize="12"
-                TextColor="#656D76" />
+            <VerticalStackLayout x:Name="ModelSection" Spacing="8" IsVisible="False">
+                <Label Text="实例上的模型" Style="{StaticResource SectionLabel}" />
+                <Border Style="{StaticResource Card}">
+                    <VerticalStackLayout Spacing="8">
+                        <Label x:Name="ModelStatus" Style="{StaticResource CaptionLabel}" />
+                        <Button
+                            Text="刷新"
+                            Style="{StaticResource GhostButton}"
+                            HorizontalOptions="Start"
+                            Clicked="OnRefreshModelsClicked" />
+                    </VerticalStackLayout>
+                </Border>
+            </VerticalStackLayout>
+
+            <Label Text="本机信息" Style="{StaticResource SectionLabel}" />
+            <Label x:Name="DeviceInfoLabel" Style="{StaticResource CaptionLabel}" />
 
             <Label
-                Text="客户端只保存服务器地址和设备令牌，不保存模型密钥或发布凭据。"
-                FontSize="12"
-                TextColor="#656D76" />
+                Style="{StaticResource CaptionLabel}"
+                Text="客户端只保存服务器地址和设备令牌，不保存模型密钥或发布凭据。草稿、主题与发布都在服务端的管理页里。" />
 
         </VerticalStackLayout>
     </ScrollView>

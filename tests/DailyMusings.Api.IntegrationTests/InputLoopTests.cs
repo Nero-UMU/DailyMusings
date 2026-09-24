@@ -42,7 +42,11 @@ public class InputLoopTests
         var ingested = await upload.Content.ReadFromJsonAsync<IngestResponse>();
         Assert.IsNotNull(ingested);
         Assert.IsFalse(ingested.AlreadyStored);
-        Assert.AreEqual(TranscriptionStatusNames.Pending, ingested.Input.TranscriptionStatus);
+
+        // §8.2 brought forward: the upload itself carries the transcript, so the phone does not have to poll for
+        // something the server had to compute anyway.
+        Assert.AreEqual(TranscriptionStatusNames.Succeeded, ingested.Input.TranscriptionStatus);
+        Assert.AreEqual(stub.State.ResponseText, ingested.Input.Transcript);
 
         var transcribed = await WaitForTranscriptionAsync(instance, device, ingested.Input.Id);
 
@@ -50,7 +54,8 @@ public class InputLoopTests
         Assert.AreEqual(stub.State.ResponseText, transcribed.Transcript);
         Assert.AreEqual(JobStatusNames.Succeeded, transcribed.TranscriptionJobStatus);
 
-        // The audio really arrived at the endpoint, with the configured model and the secret.
+        // The audio really arrived at the endpoint, with the configured model and the secret — exactly once:
+        // the queued job finds the work already done and does not call the model a second time.
         Assert.AreEqual(1, stub.State.RequestCount);
         Assert.AreEqual("test-whisper", stub.State.LastModel);
         Assert.AreEqual("Bearer test-api-key", stub.State.LastAuthorization);
@@ -64,6 +69,87 @@ public class InputLoopTests
             1,
             CountMediaFiles(instance),
             "The uploaded blob must be on the media volume. Found: " + DescribeMediaFiles(instance));
+    }
+
+    /// <summary>
+    /// §8.2/§20: the inline transcription is a convenience, and a capture must never be lost — or turned into a
+    /// failed upload — because the model was unavailable. With the endpoint down the upload still succeeds, the
+    /// audio is stored, and the work is left behind as a queued job that the executor will retry.
+    /// </summary>
+    [TestMethod]
+    public async Task A_model_that_is_unavailable_still_lets_the_capture_land_with_a_queued_job()
+    {
+        await using var stub = await StubTranscriptionEndpoint.StartAsync();
+        stub.State.FailWithStatusCode = HttpStatusCode.ServiceUnavailable;
+
+        await using var instance = await TestInstance.StartAsync(TranscriptionEnabled(stub.BaseUrl));
+        instance.WriteSecret("openai-api-key", "test-api-key");
+        await instance.SignInAsChangedAdministratorAsync();
+
+        var (_, device) = await instance.PairDeviceAsync();
+
+        using var upload = await UploadVoiceAsync(device, "model-unavailable");
+        upload.EnsureSuccessStatusCode();
+
+        var ingested = await upload.Content.ReadFromJsonAsync<IngestResponse>();
+        Assert.IsNotNull(ingested);
+        Assert.IsFalse(ingested.AlreadyStored, "The capture must have been stored despite the model being down.");
+        Assert.IsTrue(ingested.Input.HasAudio, "The recording must survive a model that is not answering.");
+
+        // A queued job is left behind rather than the upload failing: that job is what makes "the endpoint
+        // recovers and the transcript appears on its own" possible (§14's retry semantics).
+        var queued = await WaitForAsync(
+            device,
+            ingested.Input.Id,
+            view => view.TranscriptionJobStatus is JobStatusNames.Pending or JobStatusNames.Running
+                && view.TranscriptionJobAttempts >= 1);
+
+        Assert.IsFalse(
+            queued.TranscriptionJobStatus == JobStatusNames.Failed,
+            "A 5xx is temporary trouble, not a terminal failure.");
+
+        Assert.AreEqual(1, CountMediaFiles(instance), "The blob must be on disk. Found: " + DescribeMediaFiles(instance));
+    }
+
+    /// <summary>
+    /// §8.2/§20: the wait for an inline transcript is bounded, and running out of it must not cost the capture.
+    /// The upload answers without a transcript, the audio stays, and the queue produces the text a moment later
+    /// — which is the difference between "a slow model" and "a lost recording".
+    /// </summary>
+    [TestMethod]
+    public async Task An_inline_wait_that_runs_out_leaves_the_capture_to_the_queue()
+    {
+        await using var stub = await StubTranscriptionEndpoint.StartAsync();
+
+        // Slower than the inline window by a wide margin, but well inside the transcription timeout.
+        stub.State.ResponseDelay = TimeSpan.FromSeconds(3);
+
+        var settings = TranscriptionEnabled(stub.BaseUrl);
+        settings["Transcription:TimeoutSeconds"] = "30";
+        settings["Transcription:InlineTimeoutSeconds"] = "1";
+
+        await using var instance = await TestInstance.StartAsync(settings);
+        instance.WriteSecret("openai-api-key", "test-api-key");
+        await instance.SignInAsChangedAdministratorAsync();
+        var (_, device) = await instance.PairDeviceAsync();
+
+        using var upload = await UploadVoiceAsync(device, "inline-timeout");
+        upload.EnsureSuccessStatusCode();
+
+        var ingested = await upload.Content.ReadFromJsonAsync<IngestResponse>();
+
+        Assert.IsNotNull(ingested);
+        Assert.IsTrue(ingested.Input.HasAudio, "Running out of the inline window must not lose the recording.");
+
+        // The work is still queued, and the transcript arrives on its own.
+        var recovered = await WaitForAsync(
+            device,
+            ingested.Input.Id,
+            view => view.TranscriptionStatus == TranscriptionStatusNames.Succeeded,
+            timeout: TimeSpan.FromSeconds(90));
+
+        Assert.AreEqual(stub.State.ResponseText, recovered.Transcript);
+        Assert.AreEqual(JobStatusNames.Succeeded, recovered.TranscriptionJobStatus);
     }
 
     [TestMethod]
@@ -150,10 +236,13 @@ public class InputLoopTests
         upload.EnsureSuccessStatusCode();
         var ingested = await upload.Content.ReadFromJsonAsync<IngestResponse>();
 
+        // The entry is already failed by the inline attempt (there is nothing to call), so the wait has to be on
+        // the *job*: what this test is about is that the queue reaches the same conclusion and records it.
         var settled = await WaitForAsync(
             device,
             ingested!.Input.Id,
-            view => view.TranscriptionStatus == TranscriptionStatusNames.Failed);
+            view => view.TranscriptionStatus == TranscriptionStatusNames.Failed
+                && view.TranscriptionJobStatus == JobStatusNames.Failed);
 
         Assert.AreEqual("transcription.disabled", settled.FailureCode);
         Assert.AreEqual(JobStatusNames.Failed, settled.TranscriptionJobStatus);
@@ -264,7 +353,9 @@ public class InputLoopTests
         await instance.SignInAsChangedAdministratorAsync();
         var (_, device) = await instance.PairDeviceAsync();
 
-        using var upload = await UploadVoiceAsync(device, "never-answers");
+        // The queue does this one, not the upload: the test is about the *job's* own deadline and about the retry
+        // that follows it, and an inline attempt running at the same time would race the assertion below.
+        using var upload = await UploadVoiceAsync(device, "never-answers", transcribeNow: false);
         upload.EnsureSuccessStatusCode();
         var ingested = await upload.Content.ReadFromJsonAsync<IngestResponse>();
 
@@ -519,7 +610,8 @@ public class InputLoopTests
         HttpClient client,
         string idempotencyKey,
         string createdAtUtc = "2026-03-01T15:50:00.0000000+00:00",
-        int createdOffsetMinutes = 480)
+        int createdOffsetMinutes = 480,
+        bool transcribeNow = true)
     {
         var audio = new ByteArrayContent(FakeAudio);
         audio.Headers.ContentType = new MediaTypeHeaderValue("audio/mp4");
@@ -531,6 +623,7 @@ public class InputLoopTests
             { new StringContent(createdOffsetMinutes.ToString(System.Globalization.CultureInfo.InvariantCulture)), VoiceUploadFields.CreatedOffsetMinutes },
             { new StringContent("3520"), VoiceUploadFields.DurationMilliseconds },
             { new StringContent(idempotencyKey), VoiceUploadFields.IdempotencyKey },
+            { new StringContent(transcribeNow ? "true" : "false"), VoiceUploadFields.TranscribeNow },
         };
 
         return await client.PostAsync("/api/inputs/voice", form);

@@ -122,8 +122,10 @@ public sealed class FileOfflineCaptureStore : IOfflineCaptureStore
                 captures.Add(await ReadRecordAsync(path, cancellationToken).ConfigureAwait(false));
             }
 
-            // Oldest first: the user's thoughts should reach the server in the order they were had.
-            return captures.OrderBy(capture => capture.CreatedAtUtc).ToArray();
+            // Newest first: this list is what the calendar shows, and the thoughts a person is most likely to want
+            // back are the ones just behind them. The upload loop re-sorts by time itself rather than relying on
+            // this order, so the two callers want different orders from the same read.
+            return captures.OrderByDescending(capture => capture.CreatedAtUtc).ToArray();
         }
         finally
         {

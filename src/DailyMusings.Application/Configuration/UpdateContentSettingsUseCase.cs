@@ -41,7 +41,8 @@ public sealed class UpdateContentSettingsUseCase
             update.GenerationLocalTime ?? current.GenerationLocalTime,
             update.PublishLocalTime ?? current.PublishLocalTime,
             update.PublishWindowMinutes ?? current.PublishWindowMinutes,
-            update.AudioRetentionDays ?? current.AudioRetentionDays);
+            update.AudioRetentionDays ?? current.AudioRetentionDays,
+            update.ContentRetentionDays ?? current.ContentRetentionDays);
 
         Validate(next);
 
@@ -79,6 +80,16 @@ public sealed class UpdateContentSettingsUseCase
                 "content.retention.invalid",
                 "Audio retention must be a number of days, or -1 to keep recordings forever.");
         }
+
+        // Same shape and same reasoning as the audio window above. Kept as a separate setting rather than reusing
+        // it, because "keep the recording for a month so I can check the transcript" and "delete what I said"
+        // are different promises and people want different answers to them.
+        if (settings.ContentRetentionDays < -1)
+        {
+            throw new UseCaseException(
+                "content.retention.invalid",
+                "Content retention must be a number of days, or -1 to keep captured content forever.");
+        }
     }
 }
 
@@ -88,4 +99,5 @@ public sealed record ContentSettingsUpdate(
     TimeOnly? GenerationLocalTime,
     TimeOnly? PublishLocalTime,
     int? PublishWindowMinutes,
-    int? AudioRetentionDays);
+    int? AudioRetentionDays,
+    int? ContentRetentionDays = null);

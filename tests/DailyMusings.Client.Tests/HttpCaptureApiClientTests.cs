@@ -1,5 +1,4 @@
 using System.Net;
-using System.Text;
 using DailyMusings.Client.Core;
 using DailyMusings.Client.Core.Http;
 using DailyMusings.Contracts;
@@ -22,27 +21,12 @@ public class HttpCaptureApiClientTests
         "transcriptionJobStatus":"pending","transcriptionJobAttempts":0}}
         """;
 
-    /// <summary>One entry as the server returns it, for the calls that answer with an entry rather than an envelope.</summary>
-    private const string InputBody = """
-        {"id":"server-1","sourceType":"voice","contentDate":"2026-03-01","createdAtUtc":"2026-03-01T15:50:00Z",
-        "createdOffsetMinutes":480,"originalTranscript":"原来的转写。","revisedTranscript":null,
-        "transcript":"原来的转写。","transcriptionStatus":"succeeded","failureCode":null,"hasAudio":true,
-        "audioContentType":"audio/mp4","audioDurationSeconds":12.5,"isDeleted":false,
-        "transcriptionJobStatus":"succeeded","transcriptionJobAttempts":1,"primaryTopicId":null,"secondaryTopicIds":[]}
-        """;
-
     private static string TempAudio(string content = "audio-bytes")
     {
         var path = Path.Combine(Path.GetTempPath(), $"dm-audio-{Guid.CreateVersion7():N}.m4a");
         File.WriteAllText(path, content);
         return path;
     }
-
-    /// <summary>Reads the single request body the stub recorded back into the contract type it came from.</summary>
-    private static T Read<T>(StubHttpHandler handler) =>
-        System.Text.Json.JsonSerializer.Deserialize<T>(
-            handler.Bodies.Single(),
-            new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true })!;
 
     private static HttpCaptureApiClient Client(
         StubHttpHandler handler,
@@ -254,63 +238,10 @@ public class HttpCaptureApiClientTests
     }
 
     /// <summary>
-    /// The read the Today screen makes while it appears. Sounding the same as an empty day when the server is gone
-    /// was the first half of the bug a real device found; the other half was that the exception reached an
-    /// <c>async void</c> handler and killed the process.
+    /// The read that completes a transcript the upload answered as pending. Sounding the same as an empty list when
+    /// the server is gone was the first half of the bug a real device found; the other half was that the exception
+    /// reached an <c>async void</c> handler and killed the process.
     /// </summary>
-    /// <summary>§4.1 修订转写: the correction travels, and the server keeps the original (§6.1).</summary>
-    [TestMethod]
-    public async Task Revising_a_transcript_sends_the_correction_to_the_entry()
-    {
-        const string revised = """
-            {"id":"server-1","sourceType":"voice","contentDate":"2026-03-01","createdAtUtc":"2026-03-01T15:50:00Z",
-            "createdOffsetMinutes":480,"originalTranscript":"原来的转写。","revisedTranscript":"改过的转写。",
-            "transcript":"改过的转写。","transcriptionStatus":"succeeded","failureCode":null,"hasAudio":true,
-            "audioContentType":"audio/mp4","audioDurationSeconds":12.5,"isDeleted":false,
-            "transcriptionJobStatus":"succeeded","transcriptionJobAttempts":1,"primaryTopicId":null,"secondaryTopicIds":[]}
-            """;
-
-        var handler = StubHttpHandler.AlwaysJson(HttpStatusCode.OK, revised);
-
-        var result = await Client(handler).ReviseTranscriptAsync("server-1", "改过的转写。", CancellationToken.None);
-
-        Assert.IsTrue(result.Succeeded);
-        Assert.AreEqual("改过的转写。", result.Value!.RevisedTranscript);
-        Assert.AreEqual("原来的转写。", result.Value.OriginalTranscript, "The original is never overwritten.");
-
-        var request = handler.Requests.Single();
-        Assert.AreEqual(HttpMethod.Patch, request.Method);
-        Assert.AreEqual("/api/inputs/server-1", request.RequestUri!.AbsolutePath);
-        Assert.AreEqual("改过的转写。", Read<ReviseTranscriptRequest>(handler).RevisedTranscript);
-    }
-
-    [TestMethod]
-    public async Task Retrying_a_transcription_posts_to_the_retry_route_and_keeps_a_refusal_as_a_code()
-    {
-        var okHandler = new StubHttpHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
-        {
-            Content = new StringContent(InputBody, Encoding.UTF8, "application/json"),
-        });
-
-        var ok = await Client(okHandler).RetryTranscriptionAsync("server-1", CancellationToken.None);
-
-        Assert.IsTrue(ok.Succeeded);
-        Assert.AreEqual("server-1", ok.Value!.Id);
-
-        var request = okHandler.Requests.Single();
-        Assert.AreEqual(HttpMethod.Post, request.Method);
-        Assert.AreEqual("/api/inputs/server-1/retry-transcription", request.RequestUri!.AbsolutePath);
-
-        // A retry the server refuses — the transcription already succeeded, say — is an answer, not a transport failure.
-        var refused = await Client(StubHttpHandler.AlwaysJson(
-                HttpStatusCode.Conflict,
-                """{"code":"transcription.not_retryable","message":"..."}"""))
-            .RetryTranscriptionAsync("server-1", CancellationToken.None);
-
-        Assert.IsTrue(refused.ServerReached);
-        Assert.AreEqual("transcription.not_retryable", refused.FailureCode);
-    }
-
     [TestMethod]
     public async Task Reading_a_day_reports_an_unreachable_server_instead_of_an_empty_one()
     {

@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace DailyMusings.Client.Core;
 
 public enum CaptureKind
@@ -9,8 +11,9 @@ public enum CaptureKind
 /// <summary>
 /// Where a capture stands relative to the server (docs/开发指导.md §9.2).
 /// <para>
-/// The distinction that matters is <see cref="Uploaded"/>: only a capture the server has confirmed as durable may
-/// have its local copy deleted. Until then the device is the only place the thought exists.
+/// <see cref="Uploaded"/> means the server has confirmed it holds the capture. It no longer means the local copy
+/// may be deleted: the phone is the source of truth for 往期记录, so the recording and its recognised text stay on
+/// the device after a successful upload (the phone's own 2026-09-24 scope: 录音、看识别文字、回看往期).
 /// </para>
 /// </summary>
 public enum CaptureUploadState
@@ -18,7 +21,7 @@ public enum CaptureUploadState
     /// <summary>Durable on the device, not yet confirmed by the server.</summary>
     Queued = 0,
 
-    /// <summary>The server confirmed it. The local copy has been (or may be) removed.</summary>
+    /// <summary>The server confirmed it. The local copy is kept.</summary>
     Uploaded = 1,
 
     /// <summary>The last attempt failed. The local copy is kept and the reason is recorded.</summary>
@@ -26,8 +29,12 @@ public enum CaptureUploadState
 }
 
 /// <summary>
-/// One capture on its way to the server. Immutable, so every state change is an explicit new value rather than a
-/// mutation some background loop might race with.
+/// One thought on the device: either a recording with the text the server recognised, or a typed note. Immutable,
+/// so every state change is an explicit new value rather than a mutation some background loop might race with.
+/// <para>
+/// This is also the local archive the calendar reads, which is why <see cref="Transcript"/> lives here rather than
+/// being re-fetched from the server every time the user wants to read what they said.
+/// </para>
 /// </summary>
 public sealed record PendingCapture
 {
@@ -42,9 +49,16 @@ public sealed record PendingCapture
 
     public CaptureKind Kind { get; init; }
 
+    /// <summary>The recording on this device. Kept after a successful upload — it is the local archive's audio.</summary>
     public string? LocalAudioPath { get; init; }
 
+    /// <summary>What the user typed. For a typed note this is also what the server stores as the transcript.</summary>
     public string? Text { get; init; }
+
+    /// <summary>
+    /// What the server recognised (voice) or accepted (text). Null while a recording is still being transcribed.
+    /// </summary>
+    public string? Transcript { get; init; }
 
     /// <summary>When the user captured it, not when it was uploaded — this is what decides the content day (§7).</summary>
     public DateTimeOffset CreatedAtUtc { get; init; }
@@ -68,6 +82,20 @@ public sealed record PendingCapture
 
     public DateTimeOffset? UploadedAtUtc { get; init; }
 
-    /// <summary>True while the device still holds the only copy.</summary>
-    public bool HoldsOnlyCopy => State != CaptureUploadState.Uploaded;
+    /// <summary>When the recognised text arrived from the server; null while there is no text yet.</summary>
+    public DateTimeOffset? TranscriptionAtUtc { get; init; }
+
+    /// <summary>
+    /// True while the server has not confirmed this capture. What the upload loop walks, and what the UI means by
+    /// 「未上传」. Replaces the old <c>HoldsOnlyCopy</c>: the device now always holds a copy, sent or not.
+    /// </summary>
+    [JsonIgnore]
+    public bool NeedsUpload => State != CaptureUploadState.Uploaded;
+
+    /// <summary>What to show the user: the recognised text, or what they typed while there is none.</summary>
+    [JsonIgnore]
+    public string? DisplayText => Transcript ?? Text;
+
+    [JsonIgnore]
+    public bool IsVoice => Kind == CaptureKind.Voice;
 }

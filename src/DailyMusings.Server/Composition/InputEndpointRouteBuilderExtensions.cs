@@ -91,10 +91,16 @@ public static class InputEndpointRouteBuilderExtensions
                 ? TimeSpan.FromMilliseconds(milliseconds)
                 : null;
 
+        // §8.2: the transcript comes back with the upload. Absent means yes — the phone should not have to poll
+        // for something the server already had to compute — and the wait is bounded server-side, so a slow model
+        // costs a late transcript rather than a failed upload.
+        var transcribeNow = !bool.TryParse(form[VoiceUploadFields.TranscribeNow].ToString(), out var requested)
+            || requested;
+
         await using var stream = audio.OpenReadStream();
 
         var result = await ingest
-            .ExecuteAsync(stream, audio.ContentType, duration, captureContext, cancellationToken)
+            .ExecuteAsync(stream, audio.ContentType, duration, captureContext, cancellationToken, transcribeNow)
             .ConfigureAwait(false);
 
         return Results.Ok(new IngestResponse(result.WasAlreadyStored, ToDto(result.Entry, result.TranscriptionJob)));
@@ -136,6 +142,9 @@ public static class InputEndpointRouteBuilderExtensions
     private static async Task<IResult> ListAsync(
         [FromQuery] string? date,
         [FromQuery] int? limit,
+        [FromQuery] int? page,
+        [FromQuery] int? pageSize,
+        [FromQuery] bool? includeDeleted,
         ListInputsUseCase listInputs,
         CancellationToken cancellationToken)
     {
@@ -152,13 +161,27 @@ public static class InputEndpointRouteBuilderExtensions
         }
 
         var effectiveLimit = Math.Clamp(limit ?? DefaultRecentLimit, 1, MaxRecentLimit);
+        var effectivePage = Math.Max(page ?? 1, 1);
+        var effectivePageSize = Math.Clamp(pageSize ?? effectiveLimit, 1, MaxRecentLimit);
 
-        var views = await listInputs
-            .ExecuteAsync(contentDate, effectiveLimit, cancellationToken)
+        var result = await listInputs
+            .ExecutePageAsync(
+                contentDate,
+                effectivePage,
+                effectivePageSize,
+
+                // Tombstones are what the retention sweep leaves behind, and only an operator looking for
+                // "what happened to that entry" wants them. The phone never asks, because a capture the user
+                // deleted must not come back in the timeline.
+                includeDeleted ?? false,
+                cancellationToken)
             .ConfigureAwait(false);
 
         return Results.Ok(new InputListResponse(
-            views.Select(view => ToDto(view.Entry, view.TranscriptionJob)).ToArray()));
+            result.Items.Select(view => ToDto(view.Entry, view.TranscriptionJob)).ToArray(),
+            result.Total,
+            result.Page,
+            result.PageSize));
     }
 
     private static async Task<IResult> GetAsync(

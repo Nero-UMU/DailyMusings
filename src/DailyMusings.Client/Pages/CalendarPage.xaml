@@ -4,68 +4,146 @@
     xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
     xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
     xmlns:pages="clr-namespace:DailyMusings.Client.Pages"
-    Title="日历">
+    Shell.NavBarIsVisible="False">
 
-    <ScrollView>
-        <VerticalStackLayout Padding="16" Spacing="14">
+    <!--
+        §3.3 of the phone spec: the recordings and notes kept on this device, newest first, with a filter and a
+        detail sheet. The list is the device's own archive — the server is never consulted to draw it, so the page
+        works with the server gone.
+    -->
+    <Grid>
 
-            <!-- §10.3: shown for as long as an insecure connection is configured, on every screen. -->
+        <ScrollView>
+            <VerticalStackLayout
+                Padding="20,24,20,36"
+                Spacing="16"
+                HorizontalOptions="Center"
+                MaximumWidthRequest="560">
+
+                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                    <VerticalStackLayout Spacing="2" VerticalOptions="Center">
+                        <Label Text="日历" Style="{StaticResource TitleLabel}" />
+                        <Label x:Name="SubtitleLabel" Style="{StaticResource CaptionLabel}" />
+                    </VerticalStackLayout>
+                    <Button
+                        x:Name="FilterButton"
+                        Grid.Column="1"
+                        Style="{StaticResource GhostButton}"
+                        Text="筛选"
+                        VerticalOptions="Center"
+                        Clicked="OnFilterClicked" />
+                </Grid>
+
+                <Border x:Name="InsecureBanner" Style="{StaticResource WarnBanner}" IsVisible="False">
+                    <Label
+                        TextColor="{StaticResource Danger}"
+                        FontSize="12"
+                        Text="当前使用未加密的 HTTP 连接。密码、设备令牌、录音与文章都可能被截获。请改用 HTTPS、局域网或 VPN。确认过风险提示并不等于连接变安全了。" />
+                </Border>
+
+                <Label x:Name="StatusLabel" Style="{StaticResource CaptionLabel}" />
+
+                <CollectionView x:Name="RecordList" SelectionMode="None">
+                    <CollectionView.ItemTemplate>
+                        <DataTemplate x:DataType="pages:CalendarRow">
+                            <Border Style="{StaticResource Card}" Padding="14" Margin="0,5">
+                                <Border.GestureRecognizers>
+                                    <TapGestureRecognizer Tapped="OnRowTapped" CommandParameter="{Binding Id}" />
+                                </Border.GestureRecognizers>
+                                <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
+                                    <Label
+                                        Text="{Binding Glyph}"
+                                        FontSize="18"
+                                        VerticalOptions="Center" />
+                                    <VerticalStackLayout Grid.Column="1" Spacing="3">
+                                        <Label
+                                            Text="{Binding Time}"
+                                            FontFamily="OpenSansSemibold"
+                                            FontSize="15" />
+                                        <Label
+                                            Text="{Binding Summary}"
+                                            Style="{StaticResource CaptionLabel}"
+                                            MaxLines="2"
+                                            LineBreakMode="TailTruncation" />
+                                    </VerticalStackLayout>
+                                    <Label
+                                        Grid.Column="2"
+                                        Text="{Binding State}"
+                                        TextColor="{Binding StateColor}"
+                                        FontSize="12"
+                                        VerticalOptions="Center" />
+                                </Grid>
+                            </Border>
+                        </DataTemplate>
+                    </CollectionView.ItemTemplate>
+                </CollectionView>
+
+            </VerticalStackLayout>
+        </ScrollView>
+
+        <!-- The detail sheet. It sits outside the ScrollView so it covers the whole screen rather than scrolling with it. -->
+        <Grid x:Name="DetailOverlay" IsVisible="False" BackgroundColor="#D9000000">
             <Border
-                x:Name="InsecureBanner"
-                IsVisible="False"
-                Stroke="#B42318"
-                StrokeThickness="1"
-                BackgroundColor="#FFEBE9"
-                Padding="12">
-                <Border.StrokeShape>
-                    <RoundRectangle CornerRadius="8" />
-                </Border.StrokeShape>
-                <Label
-                    TextColor="#7A271A"
-                    FontSize="13"
-                    Text="当前连接未加密（HTTP）。密码、设备令牌、录音和文章都可能被同一网络中的他人截获。请优先使用 HTTPS、局域网或 VPN。此提示只说明风险，不代表连接已经安全。" />
+                Style="{StaticResource Card}"
+                Margin="16"
+                Padding="18"
+                HorizontalOptions="Center"
+                VerticalOptions="Center"
+                MaximumWidthRequest="560">
+                <VerticalStackLayout Spacing="14">
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                        <Label
+                            x:Name="DetailTitle"
+                            FontFamily="OpenSansSemibold"
+                            FontSize="16"
+                            VerticalOptions="Center" />
+                        <Button
+                            Grid.Column="1"
+                            Text="✕"
+                            Style="{StaticResource GhostButton}"
+                            WidthRequest="48"
+                            Clicked="OnCloseDetailClicked" />
+                    </Grid>
+
+                    <VerticalStackLayout x:Name="DetailPlayback" Spacing="6" IsVisible="False">
+                        <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10">
+                            <Button
+                                x:Name="DetailPlayButton"
+                                Text="▶"
+                                Style="{StaticResource GhostButton}"
+                                WidthRequest="58"
+                                Clicked="OnDetailPlayPauseClicked" />
+                            <Slider
+                                x:Name="DetailSlider"
+                                Grid.Column="1"
+                                Minimum="0"
+                                Maximum="1"
+                                Value="0"
+                                VerticalOptions="Center"
+                                DragStarted="OnDetailSeekStarted"
+                                DragCompleted="OnDetailSeekCompleted"
+                                ValueChanged="OnDetailSliderValueChanged" />
+                            <Label
+                                x:Name="DetailPosition"
+                                Grid.Column="2"
+                                Style="{StaticResource CaptionLabel}"
+                                VerticalOptions="Center" />
+                        </Grid>
+                    </VerticalStackLayout>
+
+                    <ScrollView HeightRequest="300">
+                        <Label x:Name="DetailText" Style="{StaticResource TranscriptLabel}" />
+                    </ScrollView>
+
+                    <Button
+                        x:Name="DetailDeleteButton"
+                        Style="{StaticResource DangerButton}"
+                        Text="删除这段录音"
+                        Clicked="OnDeleteDetailClicked" />
+                </VerticalStackLayout>
             </Border>
+        </Grid>
 
-            <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
-                <Button Text="上个月" Padding="12,4" Clicked="OnPreviousMonthClicked" />
-                <Button Grid.Column="1" Text="回到本月" Padding="12,4" Clicked="OnTodayClicked" />
-                <Button Grid.Column="2" Text="下个月" Padding="12,4" Clicked="OnNextMonthClicked" />
-            </Grid>
-
-            <Label x:Name="MonthStatus" FontAttributes="Bold" />
-            <Label
-                x:Name="ActionStatus"
-                FontSize="13"
-                TextColor="#656D76" />
-
-            <CollectionView x:Name="DayList" SelectionMode="None">
-                <CollectionView.ItemTemplate>
-                    <DataTemplate x:DataType="pages:CalendarDayRow">
-                        <Border Padding="10" Margin="0,4" Stroke="#E1E4E8" StrokeThickness="1">
-                            <Border.StrokeShape>
-                                <RoundRectangle CornerRadius="8" />
-                            </Border.StrokeShape>
-                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
-                                <VerticalStackLayout Spacing="2">
-                                    <Label Text="{Binding Date}" FontAttributes="Bold" />
-                                    <Label Text="{Binding Inputs}" FontSize="12" TextColor="#656D76" />
-                                    <Label Text="{Binding Draft}" FontSize="12" TextColor="#656D76" />
-                                </VerticalStackLayout>
-                                <Button
-                                    Grid.Column="1"
-                                    Text="打开草稿"
-                                    IsVisible="{Binding CanOpen}"
-                                    Padding="10,2"
-                                    FontSize="12"
-                                    Clicked="OnOpenDayClicked"
-                                    CommandParameter="{Binding ContentDate}" />
-                            </Grid>
-                        </Border>
-                    </DataTemplate>
-                </CollectionView.ItemTemplate>
-            </CollectionView>
-
-        </VerticalStackLayout>
-    </ScrollView>
+    </Grid>
 
 </ContentPage>

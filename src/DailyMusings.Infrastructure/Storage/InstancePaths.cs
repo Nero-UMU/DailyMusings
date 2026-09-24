@@ -88,6 +88,17 @@ public sealed class InstancePaths
     /// </summary>
     public string RuntimeConfigPath { get; }
 
+    /// <summary>
+    /// Credentials an operator typed into the admin page, encrypted at rest.
+    /// <para>
+    /// Under the key ring directory on purpose, and for the same two reasons: it is credential-equivalent
+    /// material, so it must stay out of the backup set (which is the instance root), and it is encrypted with
+    /// the DataProtection key ring, so it must live and die with the keys that can read it. Anywhere else would
+    /// either put a credential into every backup or leave ciphertext nothing can decrypt after a restore.
+    /// </para>
+    /// </summary>
+    public string UiSecretsPath => Path.Combine(KeyRingPath, "ui-secrets");
+
     public string DataDirectory => Path.Combine(RootPath, "data");
 
     public string DatabasePath => Path.Combine(DataDirectory, DatabaseFileName);
@@ -135,6 +146,10 @@ public sealed class InstancePaths
         {
             Directory.CreateDirectory(directory);
         }
+
+        // Not in ManagedDirectories: it is a child of the key ring directory, and listing it separately would
+        // suggest it is a backup-worthy location rather than the opposite.
+        Directory.CreateDirectory(UiSecretsPath);
     }
 
     /// <summary>Resolves a stored relative media path against the media root.</summary>

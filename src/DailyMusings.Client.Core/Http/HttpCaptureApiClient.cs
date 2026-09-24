@@ -95,111 +95,14 @@ public sealed class HttpCaptureApiClient : ICaptureApiClient
             .ConfigureAwait(false);
     }
 
-    /// <summary>Stores a correction to a transcript, leaving the original in place (§4.1, §6.1).</summary>
-    public async Task<ApiResult<InputDto>> ReviseTranscriptAsync(
-        string inputId,
-        string? revisedTranscript,
-        CancellationToken cancellationToken)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(inputId);
-
-        return await SendInputAsync(
-            HttpMethod.Patch,
-            $"/api/inputs/{inputId}",
-            new ReviseTranscriptRequest(revisedTranscript),
-            cancellationToken).ConfigureAwait(false);
-    }
-
-    /// <summary>Asks for another transcription attempt on an entry whose first one failed (§9.2).</summary>
-    public async Task<ApiResult<InputDto>> RetryTranscriptionAsync(string inputId, CancellationToken cancellationToken)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(inputId);
-
-        return await SendInputAsync(
-            HttpMethod.Post,
-            $"/api/inputs/{inputId}/retry-transcription",
-            null,
-            cancellationToken).ConfigureAwait(false);
-    }
-
     /// <summary>
-    /// One call that answers with an entry, classified. Shared by the two maintenance actions above so their failure
-    /// vocabulary is identical to the upload path's.
-    /// </summary>
-    private async Task<ApiResult<InputDto>> SendInputAsync(
-        HttpMethod method,
-        string path,
-        object? body,
-        CancellationToken cancellationToken)
-    {
-        using var request = new HttpRequestMessage(method, path);
-
-        if (body is not null)
-        {
-            request.Content = JsonContent.Create(body);
-        }
-
-        try
-        {
-            await AuthorizeAsync(request, cancellationToken).ConfigureAwait(false);
-        }
-        catch (CaptureUploadException exception)
-        {
-            return ApiResult<InputDto>.Unreachable(exception.Code);
-        }
-
-        HttpResponseMessage response;
-
-        try
-        {
-            response = await _httpClient
-                .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
-                .ConfigureAwait(false);
-        }
-        catch (HttpRequestException)
-        {
-            return ApiResult<InputDto>.Unreachable("client.network_unreachable");
-        }
-        catch (TaskCanceledException) when (!cancellationToken.IsCancellationRequested)
-        {
-            return ApiResult<InputDto>.Unreachable("client.timeout");
-        }
-
-        using (response)
-        {
-            if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
-            {
-                return ApiResult<InputDto>.Refused("auth.device_token_rejected");
-            }
-
-            if (!response.IsSuccessStatusCode)
-            {
-                return ApiResult<InputDto>.Refused(await ReadErrorCodeAsync(response, cancellationToken).ConfigureAwait(false)
-                    ?? $"server.rejected.{(int)response.StatusCode}");
-            }
-
-            try
-            {
-                var entry = await response.Content
-                    .ReadFromJsonAsync<InputDto>(cancellationToken)
-                    .ConfigureAwait(false);
-
-                return entry is null ? ApiResult<InputDto>.Refused("client.empty_response") : ApiResult<InputDto>.From(entry);
-            }
-            catch (Exception exception) when (exception is JsonException or NotSupportedException)
-            {
-                return ApiResult<InputDto>.Refused("client.malformed_response");
-            }
-        }
-    }
-
-    /// <summary>
-    /// Reads a day's entries without ever throwing on a transport failure (docs/开发指导.md §9.2).
+    /// Reads recent entries without ever throwing on a transport failure (docs/开发指导.md §9.2).
     /// <para>
-    /// This is the one read the capture screen makes, and it runs while the screen is appearing — an exception here
-    /// used to escape an <c>async void</c> handler and kill the app. It is also a read that must not lie: an empty
-    /// list means "the server has nothing for today", so a server that could not be reached has to be reported as
-    /// exactly that rather than as an empty day.
+    /// This is the read used to fill in the text of recordings whose inline transcription had not finished; the
+    /// calendar itself reads the device's own records. It runs while a screen is appearing, so an exception escaping
+    /// here would reach an <c>async void</c> handler and kill the app — the first half of a bug a real phone found.
+    /// It is also a read that must not lie: an empty list means "the server has nothing", so a server that could not
+    /// be reached has to be reported as exactly that rather than as an empty list.
     /// </para>
     /// </summary>
     public async Task<ApiResult<IReadOnlyList<InputDto>>> GetInputsAsync(string? contentDate, CancellationToken cancellationToken)

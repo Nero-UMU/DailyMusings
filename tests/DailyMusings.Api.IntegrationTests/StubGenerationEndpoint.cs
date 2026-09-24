@@ -186,6 +186,15 @@ internal sealed class StubGenerationState
         ResponseDelay = null;
     }
 
+    /// <summary>
+    /// Topic names the "model" says the day is about (§6.2 as revised). Empty by default, which is a valid
+    /// answer and keeps the tests that are about the text from depending on the filing.
+    /// </summary>
+    public IReadOnlyList<string> Topics { get; set; } = [];
+
+    /// <summary>New topic names the "model" proposes when the existing vocabulary has nothing that fits.</summary>
+    public IReadOnlyList<string> NewTopics { get; set; } = [];
+
     public string DraftContent()
     {
         var body = $"今天试了一下记录。\n\n{GroundedSentence}";
@@ -207,6 +216,8 @@ internal sealed class StubGenerationState
             body,
             tags = new[] { "记录" },
             categories = new[] { "随想" },
+            topics = Topics,
+            newTopics = NewTopics,
             citations,
         });
     }

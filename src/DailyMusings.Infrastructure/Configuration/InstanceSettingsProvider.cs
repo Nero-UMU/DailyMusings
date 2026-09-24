@@ -34,6 +34,7 @@ public sealed class AppSettingInstanceSettingsProvider : IInstanceSettingsProvid
         var maintenance = _configuration.GetSection("Maintenance");
         var backup = _configuration.GetSection("Backup");
         var retrieval = _configuration.GetSection("Retrieval");
+        var transcription = _configuration.GetSection("Transcription");
 
         return new InstanceSettings(
             schedulerIntervalSeconds: StoredSettings.Integer(
@@ -60,6 +61,10 @@ public sealed class AppSettingInstanceSettingsProvider : IInstanceSettingsProvid
                 stored,
                 InstanceSettings.AudioCleanupLocalTimeKey,
                 ReadTime(maintenance, "AudioCleanupLocalTime", defaults.AudioCleanupLocalTime)),
+            contentCleanupLocalTime: StoredSettings.TimeOfDay(
+                stored,
+                InstanceSettings.ContentCleanupLocalTimeKey,
+                ReadTime(maintenance, "ContentCleanupLocalTime", defaults.ContentCleanupLocalTime)),
             backupKeepCount: StoredSettings.Integer(
                 stored,
                 InstanceSettings.BackupKeepCountKey,
@@ -79,7 +84,11 @@ public sealed class AppSettingInstanceSettingsProvider : IInstanceSettingsProvid
             retrievalMinimumLexicalScore: StoredSettings.Decimal(
                 stored,
                 InstanceSettings.RetrievalMinimumLexicalScoreKey,
-                retrieval.GetValue("MinimumLexicalScore", defaults.RetrievalMinimumLexicalScore)));
+                retrieval.GetValue("MinimumLexicalScore", defaults.RetrievalMinimumLexicalScore)),
+            inlineTranscriptionTimeoutSeconds: StoredSettings.Integer(
+                stored,
+                InstanceSettings.InlineTranscriptionTimeoutKey,
+                transcription.GetValue("InlineTimeoutSeconds", defaults.InlineTranscriptionTimeoutSeconds)));
     }
 
     /// <summary>

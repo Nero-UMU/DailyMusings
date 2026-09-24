@@ -1,0 +1,1176 @@
+@page "/system"
+@rendermode InteractiveServer
+@attribute [Authorize]
+@inject IServiceScopeFactory ScopeFactory
+@inject IRuntimeOverridesStore Overrides
+@inject IServer Server
+@inject ILoggerFactory LoggerFactory
+
+@* 系统设置分区：实例本身的八件事（外加保留原有能力所需的「调度与检索」）。
+   每一项都写明「保存后什么时候生效」——端口要重建容器、备份恢复要重启、其余立即生效。 *@
+
+<PageHeader Title="系统设置"
+            Hint="监听端口、自动备份、备份与恢复、保留策略、语义索引、日志与调试、通知快捷入口、账号密码。除端口与恢复之外，保存后立即生效，不需要重启。">
+    <Actions>
+        <button class="btn" @onclick="ReloadAsync" disabled="@_busy">刷新</button>
+    </Actions>
+</PageHeader>
+
+@if (_message is not null)
+{
+    <p class="notice ok">@_message</p>
+}
+
+@if (_error is not null)
+{
+    <p class="notice error">@_error</p>
+}
+
+<div class="card">
+    <div class="card-head">
+        <h2>1 · 监听端口</h2>
+        <span class="badge @(_port is not null && _port != _effectivePort ? "badge-warn" : "badge-ok")">
+            当前生效 @_effectivePort
+        </span>
+    </div>
+
+    <p class="hint">
+        端口是唯一一项<strong>不能</strong>存在设置表里的配置：它决定设置接口本身在哪个端口上，所以只能写在磁盘上的
+        一个文件里，由下次启动读取。覆盖文件：<code>@Overrides.ConfigPath</code>。
+    </p>
+
+    <div class="summary">
+        <div class="summary-item">
+            <span class="label">当前生效端口</span>
+            <span class="value">@_effectivePort</span>
+        </div>
+        <div class="summary-item">
+            <span class="label">已保存的覆盖值</span>
+            <span class="value">@(_port is null ? "未设置（沿用部署配置）" : _port.ToString())</span>
+        </div>
+        <div class="summary-item">
+            <span class="label">部署配置里的端口</span>
+            <span class="value">@_configuredPort</span>
+        </div>
+    </div>
+
+    <div class="form-grid">
+        <label>
+            端口（1024–65535）
+            <input type="number" min="1024" max="65535" value="@_portInput" @onchange="e => _portInput = (string?)e.Value" placeholder="18321" />
+        </label>
+    </div>
+
+    <div class="actions">
+        <button class="btn-primary" @onclick="SavePortAsync" disabled="@_busy">保存端口</button>
+        <button class="btn" @onclick="ClearPortAsync" disabled="@_busy">清除覆盖</button>
+    </div>
+
+    @if (_port is not null && _port != _effectivePort)
+    {
+        <div class="risk">
+            <strong>端口改动需要两步才会生效。</strong>
+            <p>
+                容器的端口映射在<strong>容器启动时</strong>就固定了，所以后台只能保存值。请按下面两步做完，
+                否则映射会指向一个没人监听的端口（那时容器健康检查仍会通过，但外部连不上）：
+            </p>
+            <ol>
+                <li>
+                    在 <code>deploy/.env</code> 里把内部端口改成同一个值：
+                    <br />
+                    <code class="code">DAILYMUSINGS_INTERNAL_PORT=@_port</code>
+                </li>
+                <li>
+                    重建容器：
+                    <br />
+                    <code class="code">docker compose -f deploy/compose.yaml up -d --force-recreate</code>
+                </li>
+            </ol>
+            <p>
+                万一新端口用不了、页面再也打不开，用这个环境变量忽略覆盖文件（或在宿主机上删掉
+                <code>@Overrides.ConfigPath</code>）：
+                <br />
+                <code class="code">DAILYMUSINGS_IGNORE_RUNTIME_OVERRIDES=1</code>
+            </p>
+        </div>
+    }
+</div>
+
+<div class="card">
+    <div class="card-head">
+        <h2>2 · 自动备份</h2>
+    </div>
+
+    @if (_instance is null)
+    {
+        <p class="muted">正在读取…</p>
+    }
+    else
+    {
+        <div class="form-grid">
+            <label>
+                备份时刻（HH:mm，内容时区）
+                <input value="@_backupTime" @onchange="e => _backupTime = (string?)e.Value" placeholder="03:30" />
+            </label>
+            <label>
+                内容清理时刻（HH:mm，内容时区）
+                <input value="@_contentCleanupTime" @onchange="e => _contentCleanupTime = (string?)e.Value" placeholder="04:30" />
+            </label>
+            <label>
+                备份保留份数（1–365）
+                <input type="number" value="@_backupKeepCount" @onchange="e => _backupKeepCount = ParseIntOrDefault(e.Value, _backupKeepCount)" />
+            </label>
+        </div>
+
+        <label class="checkbox">
+            <input type="checkbox" checked="@_backupEnabled" @onchange="e => _backupEnabled = e.Value is true" />
+            每晚自动备份
+        </label>
+
+        <div class="actions">
+            <button class="btn-primary" @onclick="SaveBackupAsync" disabled="@_busy">保存备份设置</button>
+        </div>
+
+        <p class="hint">
+            备份与内容清理按时刻执行，<strong>不受「是否配置了模型端点」影响</strong>。
+            音频清理时刻在「保留策略」里设置（它比内容清理便宜，跑在前面）。
+        </p>
+    }
+</div>
+
+<div class="card">
+    <div class="card-head">
+        <h2>3 · 备份与导出</h2>
+        <span class="hint">导出在 <code>exports/</code>，备份在 <code>backups/</code></span>
+    </div>
+
+    <p class="hint">
+        两者都<strong>不包含任何 Secret</strong>；备份还会剥掉设备令牌（所以恢复后所有设备都要重新配对），
+        并且从不进入 DataProtection 密钥环所在的目录（§15.2）。
+    </p>
+
+    <div class="actions">
+        <button class="btn-primary" @onclick="CreateExportAsync" disabled="@_busy">立即导出（可阅读）</button>
+        <button class="btn" @onclick="CreateBackupAsync" disabled="@_busy">立即备份</button>
+    </div>
+
+    @if (_exports is null || _backups is null)
+    {
+        <p class="muted">正在读取…</p>
+    }
+    else
+    {
+        <h3>可阅读导出（@_exports.Count 份）</h3>
+        @if (_exports.Count == 0)
+        {
+            <p class="notice info">还没有导出。</p>
+        }
+        else
+        {
+            <div class="table-wrap">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>目录</th>
+                            <th>时间（本地）</th>
+                            <th>文件数</th>
+                            <th>大小</th>
+                            <th>音频保留策略</th>
+                            <th>下载</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var item in _exports)
+                        {
+                            <tr>
+                                <td><code>@item.RelativeRoot</code></td>
+                                <td class="nowrap">@AdminFormat.When(item.CreatedAtUtc)</td>
+                                <td>@item.FileCount</td>
+                                <td class="nowrap">@AdminFormat.Bytes(item.TotalBytes)</td>
+                                <td>@item.RetentionPolicy</td>
+                                <td>
+                                    @* The package is served as a zip built on demand; the endpoint is admin-only, so the
+                                       browser's admin cookie is what authorises it. *@
+                                    <a class="btn btn-sm" href="@($"/api/exports/{item.RelativeRoot}/download")">下载</a>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+
+        <h3>备份（@_backups.Count 份，默认保留最近七份）</h3>
+        @if (_backups.Count == 0)
+        {
+            <p class="notice info">还没有备份。</p>
+        }
+        else
+        {
+            <div class="table-wrap">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>文件</th>
+                            <th>时间（本地）</th>
+                            <th>大小</th>
+                            <th>已剥离的设备凭据</th>
+                            <th>下载</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var item in _backups)
+                        {
+                            <tr>
+                                <td><code>@item.FileName</code></td>
+                                <td class="nowrap">@AdminFormat.When(item.CreatedAtUtc)</td>
+                                <td class="nowrap">@AdminFormat.Bytes(item.ByteCount)</td>
+                                <td>
+                                    <span class="badge @(item.RedactedDeviceTokens > 0 ? "badge-ok" : "badge-muted")">
+                                        @item.RedactedDeviceTokens 条
+                                    </span>
+                                </td>
+                                <td>
+                                    <a class="btn btn-sm" href="@($"/api/backups/{item.FileName}/download")">下载</a>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    }
+
+    <div class="risk">
+        <strong>还原备份会替换实例的数据，而且要到重启时才真正生效。</strong>
+        <p>
+            上传一份备份后，服务器会先<strong>校验</strong>它（是不是本产品的备份、是否来自更新的版本、是否还带着
+            设备令牌），然后暂存；<strong>重启实例</strong>时才会真正替换数据。替换前会把当前数据库另存为
+            <code>pre-restore-*.db</code>，所以恢复错了还有退路。
+        </p>
+
+        <InputFile OnChange="OnArchiveSelectedAsync" accept=".zip" />
+
+        <div class="actions">
+            <button class="btn-primary" @onclick="StageRestoreAsync" disabled="@(_busy || _archive is null)">校验并暂存</button>
+        </div>
+    </div>
+
+    @if (_restore is not null)
+    {
+        <p class="notice @(_restore.IsValid ? "ok" : "error")">
+            @if (_restore.IsValid)
+            {
+                <span>
+                    已暂存，<strong>重启实例后生效</strong>。
+                    @if (_restore.Contents.Count > 0)
+                    {
+                        <text>包内共 @_restore.Contents.Count 项，含数据库快照。</text>
+                    }
+                </span>
+            }
+            else
+            {
+                <span>@_restore.Code：@_restore.Detail</span>
+            }
+        </p>
+    }
+</div>
+
+<div class="card">
+    <div class="card-head">
+        <h2>4 · 保留策略</h2>
+    </div>
+
+    @if (_content is null)
+    {
+        <p class="muted">正在读取…</p>
+    }
+    else
+    {
+        <div class="form-grid">
+            <label>
+                随想录音自动删除（天）
+                <input type="number" value="@_audioRetentionDays" @onchange="e => _audioRetentionDays = ParseIntOrDefault(e.Value, _audioRetentionDays)" />
+            </label>
+            <label>
+                随想内容自动删除（天）
+                <input type="number" value="@_contentRetentionDays" @onchange="e => _contentRetentionDays = ParseIntOrDefault(e.Value, _contentRetentionDays)" />
+            </label>
+            <label>
+                音频清理时刻（HH:mm，内容时区）
+                <input value="@_audioCleanupTime" @onchange="e => _audioCleanupTime = (string?)e.Value" placeholder="04:00" />
+            </label>
+        </div>
+
+        <div class="actions">
+            <button class="btn-primary" @onclick="SaveRetentionAsync" disabled="@_busy">保存保留策略</button>
+            <button class="btn" @onclick="RunAudioCleanupAsync" disabled="@_busy">立即清理一次录音</button>
+            <button class="btn" @onclick="RunContentCleanupAsync" disabled="@_busy">立即清理一次随想内容</button>
+        </div>
+
+        <p class="hint">
+            <strong>-1 = 永久保留</strong>，<strong>0 = 草稿确认后立即删除</strong>，N = 保留 N 天。
+            录音默认 30 天，随想内容默认 <code>-1</code>（不删除）——「留一段录音好核对转写」和「删掉我说过的话」
+            是两个不同的承诺，所以是两个设置。
+        </p>
+
+        <p class="hint">
+            清理的边界：录音清理只删音频文件，转写与输入记录保留；内容清理会把随想内容置空（记录仍留作历史文章的
+            来源引用）——两者都不会改写任何文章的正文或来源映射。
+            清理只对<strong>已确认</strong>的那一天开始计时，并且永远不会删除转写失败的录音（那是重试所需的原始材料）。
+            立刻清理是放进队列执行，稍后刷新这一页看结果。
+        </p>
+    }
+</div>
+
+<div class="card">
+    <div class="card-head">
+        <h2>5 · 语义索引</h2>
+        @if (_index is not null && _index.ConfiguredVersion is not null)
+        {
+            <span class="badge @(_index.SemanticSearchAvailable ? "badge-ok" : "badge-warn")">
+                @(_index.SemanticSearchAvailable ? "语义检索可用" : "重建中（降级检索）")
+            </span>
+        }
+    </div>
+
+    @if (_index is null)
+    {
+        <p class="muted">正在读取…</p>
+    }
+    else if (_index.ConfiguredVersion is null)
+    {
+        <p class="notice info">
+            未配置 Embedding 端点，因此没有索引；历史检索退化为主题标签与全文匹配（§8.3），产品照常工作。
+        </p>
+    }
+    else
+    {
+        <div class="summary">
+            <div class="summary-item">
+                <span class="label">已索引条目</span>
+                <span class="value">@_index.IndexedEntries</span>
+            </div>
+            <div class="summary-item">
+                <span class="label">已索引的配置指纹</span>
+                <span class="value"><code>@Short(_index.IndexedVersion)</code></span>
+            </div>
+            <div class="summary-item">
+                <span class="label">当前配置指纹</span>
+                <span class="value"><code>@Short(_index.ConfiguredVersion)</code></span>
+            </div>
+        </div>
+
+        <div class="actions">
+            <button class="btn-primary" @onclick="RebuildIndexAsync" disabled="@_busy">重建索引</button>
+        </div>
+
+        <p class="hint">
+            更换 Embedding 模型、维度或 Base URL 会让旧索引整体失效，语义检索进入「重建中」，
+            检索自动降级为主题标签与全文匹配——重建期间降级一直可用，完成后原子切换。
+        </p>
+    }
+</div>
+
+<div class="card">
+    <div class="card-head">
+        <h2>6 · 日志与调试</h2>
+        @if (_logLevel is not null)
+        {
+            <span class="hint">当前保留级别 @_logLevel · 最近 @_logs.Count 行</span>
+        }
+    </div>
+
+    <p class="hint">
+        默认日志只记录请求 / 任务 ID、状态变化、耗时、重试次数和脱敏错误码。
+        下面是<strong>唯一</strong>会让内容（转写正文、提示词、模型响应）进入日志的开关，它会自动到期。
+    </p>
+
+    @if (_logs.Count == 0)
+    {
+        <p class="notice info">还没有日志行（进程刚启动，或日志级别把一切都过滤掉了）。</p>
+    }
+    else
+    {
+        <div class="log">
+            @foreach (var line in _logs)
+            {
+                <span class="log-line">
+                    <span class="log-time">@line.TimestampUtc.ToLocalTime().ToString("HH:mm:ss")</span>
+                    <span class="@LevelClass(line.Level)">@line.Level</span>
+                    <span class="log-time">@line.Category</span>
+                    @line.Message
+                </span>
+            }
+        </div>
+    }
+
+    <div class="actions">
+        <button class="btn" @onclick="RefreshLogsAsync" disabled="@_busy">刷新日志</button>
+    </div>
+
+    @if (_diagnostic is null)
+    {
+        <p class="muted">正在读取调试模式状态…</p>
+    }
+    else
+    {
+        <p>
+            临时调试模式：
+            <span class="badge @(_diagnostic.Enabled ? "badge-warn" : "badge-muted")">
+                @(_diagnostic.Enabled ? "已开启" : "关闭")
+            </span>
+            @if (_diagnostic.Enabled)
+            {
+                <span class="hint">
+                    剩余 @((int)_diagnostic.RemainingAt(DateTimeOffset.UtcNow).TotalMinutes) 分钟，由 @_diagnostic.EnabledBy 开启，
+                    到期自动关闭
+                </span>
+            }
+        </p>
+
+        <div class="risk">
+            <strong>开启后，转写正文、提示词与模型响应可能被写入日志。</strong>
+            <p>只在你确实需要排查时才开启，并在结束后立即关闭；它会自己到期，最长 4 小时。</p>
+            <label>
+                时长（分钟，1–240）
+                <input type="number" value="@_diagnosticMinutes" @onchange="e => _diagnosticMinutes = ParseIntOrDefault(e.Value, _diagnosticMinutes)" />
+            </label>
+            <label class="checkbox">
+                <input type="checkbox" checked="@_diagnosticAcknowledged" @onchange="e => _diagnosticAcknowledged = e.Value is true" />
+                我已了解这可能把私人内容写进日志
+            </label>
+            <div class="actions">
+                <button class="btn-primary" @onclick="EnableDiagnosticAsync" disabled="@(_busy || !_diagnosticAcknowledged)">
+                    开启调试模式
+                </button>
+                @if (_diagnostic.Enabled)
+                {
+                    <button class="btn-danger" @onclick="DisableDiagnosticAsync" disabled="@_busy">立即关闭</button>
+                }
+            </div>
+        </div>
+    }
+</div>
+
+<div class="card">
+    <div class="card-head">
+        <h2>7 · 通知设置</h2>
+        <a class="btn btn-sm" href="/notifications">去通知管理（SMTP 配置与测试邮件）</a>
+    </div>
+
+    @if (_notifications is null)
+    {
+        <p class="muted">正在读取…</p>
+    }
+    else
+    {
+        <p class="hint">
+            这里与「通知管理」是同一份设置，只是快捷入口：SMTP 服务器、密码与「发送测试邮件」在那张页面。
+            邮件只携带元数据（日期、标题、状态），不含草稿正文（§12）。
+        </p>
+
+        <div class="summary">
+            <div class="summary-item">
+                <span class="label">收件地址</span>
+                <span class="value">
+                    @(string.IsNullOrWhiteSpace(_notifications.ToAddress) ? "（未填，什么都发不出去）" : _notifications.ToAddress)
+                </span>
+            </div>
+            <div class="summary-item">
+                <span class="label">SMTP</span>
+                <span class="value">@(_notifications.SmtpConfigured ? "已启用" : "未启用")</span>
+            </div>
+        </div>
+
+        <div class="stack">
+            <label class="checkbox">
+                <input type="checkbox" checked="@_draftReady" @onchange="e => _draftReady = e.Value is true" />
+                新草稿待确认时发信
+            </label>
+            <label class="checkbox">
+                <input type="checkbox" checked="@_jobFailed" @onchange="e => _jobFailed = e.Value is true" />
+                任务最终失败时发信
+            </label>
+            <label class="checkbox">
+                <input type="checkbox" checked="@_automaticPublication" @onchange="e => _automaticPublication = e.Value is true" />
+                自动发布有结果时发信
+            </label>
+        </div>
+
+        <div class="actions">
+            <button class="btn-primary" @onclick="SaveNotificationsAsync" disabled="@_busy">保存通知开关</button>
+        </div>
+
+        <p class="notice @(_draftReady || _jobFailed || _automaticPublication ? "ok" : "warn")">
+            @if (_draftReady || _jobFailed || _automaticPublication)
+            {
+                <text>至少一个事件开着；只要收件地址非空且 SMTP 已启用，就会按事件发信。</text>
+            }
+            else
+            {
+                <text>三个开关全关：不会发出任何邮件。</text>
+            }
+        </p>
+    }
+</div>
+
+<div class="card">
+    <div class="card-head">
+        <h2>8 · 修改账号与密码</h2>
+    </div>
+
+    <p class="hint">
+        需要当前密码才能改：一个被偷走的会话 Cookie 不足以换掉凭据（§10.1）。
+        新账号 3–64 位，只能用字母、数字、点、下划线与连字符；新密码至少 12 位。
+        修改后本次会话的 Cookie 仍然有效，但里面的用户名已经过时——<strong>请退出登录再重新登录</strong>。
+    </p>
+
+    <div class="form-grid">
+        <label>
+            当前密码
+            <input type="password" value="@_currentPassword" @onchange="e => _currentPassword = (string?)e.Value"
+                   autocomplete="current-password" />
+        </label>
+        <label>
+            新账号
+            <input value="@_newUsername" @onchange="e => _newUsername = (string?)e.Value"
+                   autocomplete="username" minlength="3" maxlength="64" />
+        </label>
+        <label>
+            新密码（至少 12 位）
+            <input type="password" value="@_newPassword" @onchange="e => _newPassword = (string?)e.Value"
+                   autocomplete="new-password" />
+        </label>
+        <label>
+            确认新密码
+            <input type="password" value="@_confirmPassword" @onchange="e => _confirmPassword = (string?)e.Value"
+                   autocomplete="new-password" />
+        </label>
+    </div>
+
+    <div class="actions">
+        <button class="btn-primary" @onclick="ChangeCredentialsAsync" disabled="@_busy">保存账号与密码</button>
+        <form method="post" action="@ApiRoutes.AdminSignOut" data-enhance="false" class="inline">
+            <button type="submit" class="btn">退出登录</button>
+        </form>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-head">
+        <h2>附 · 调度与检索</h2>
+    </div>
+
+    <p class="hint">
+        这一组不在八张卡片的要求里，但原来就在实例设置页上，保留下来以免能力丢失。
+        每一项都写在设置表里，保存后立即生效。
+    </p>
+
+    @if (_instance is null)
+    {
+        <p class="muted">正在读取…</p>
+    }
+    else
+    {
+        <div class="form-grid">
+            <label>
+                调度轮询间隔（秒，1–3600）
+                <input type="number" value="@_schedulerInterval" @onchange="e => _schedulerInterval = ParseIntOrDefault(e.Value, _schedulerInterval)" />
+            </label>
+            <label>
+                补跑窗口（天，1–3650）
+                <input type="number" value="@_schedulerBackfill" @onchange="e => _schedulerBackfill = ParseIntOrDefault(e.Value, _schedulerBackfill)" />
+            </label>
+            <label>
+                每次调度的生成上限（1–100）
+                <input type="number" value="@_schedulerBatch" @onchange="e => _schedulerBatch = ParseIntOrDefault(e.Value, _schedulerBatch)" />
+            </label>
+            <label>
+                检索最多返回材料条数
+                <input type="number" value="@_maxMaterials" @onchange="e => _maxMaterials = ParseIntOrDefault(e.Value, _maxMaterials)" />
+            </label>
+            <label>
+                候选扫描上限
+                <input type="number" value="@_candidateScanLimit" @onchange="e => _candidateScanLimit = ParseIntOrDefault(e.Value, _candidateScanLimit)" />
+            </label>
+            <label>
+                相关性下限（0–1）
+                <input type="number" step="0.01" value="@_minimumRelevance" @onchange="e => _minimumRelevance = ParseDoubleOrDefault(e.Value, _minimumRelevance)" />
+            </label>
+            <label>
+                词面匹配下限（0–1）
+                <input type="number" step="0.01" value="@_minimumLexicalScore" @onchange="e => _minimumLexicalScore = ParseDoubleOrDefault(e.Value, _minimumLexicalScore)" />
+            </label>
+        </div>
+
+        <div class="actions">
+            <button class="btn-primary" @onclick="SaveSchedulerAsync" disabled="@_busy">保存调度与检索</button>
+        </div>
+
+        <p class="hint">
+            补跑窗口决定停机或离线后最多往前找多少天有待生成素材的日期；生成上限决定一次调度最多把几天放进队列，
+            避免长时间停机后一次性打出一串模型调用。检索这几项在 Embedding 未启用时决定降级行为。
+        </p>
+    }
+</div>
+
+@code {
+    /// <summary>The port the deployment ships with, shown when the environment says nothing.</summary>
+    private const int FallbackPort = 18321;
+
+    /// <summary>Matches <c>RuntimeOverridesFile</c>'s bounds, which this project cannot reference.</summary>
+    private const int MinimumPort = 1024;
+    private const int MaximumPort = 65535;
+
+    private int? _port;
+    private string? _portInput;
+    private int _effectivePort;
+    private int _configuredPort;
+
+    private InstanceSettings? _instance;
+    private bool _backupEnabled;
+    private string? _backupTime;
+    private string? _audioCleanupTime;
+    private string? _contentCleanupTime;
+    private int _backupKeepCount;
+
+    private int _schedulerInterval;
+    private int _schedulerBackfill;
+    private int _schedulerBatch;
+    private int _maxMaterials;
+    private int _candidateScanLimit;
+    private double _minimumRelevance;
+    private double _minimumLexicalScore;
+
+    private ContentSettings? _content;
+    private int _audioRetentionDays;
+    private int _contentRetentionDays;
+
+    private IReadOnlyList<InstanceExportSummary>? _exports;
+    private IReadOnlyList<BackupSummary>? _backups;
+    private RestoreValidation? _restore;
+    private IBrowserFile? _archive;
+
+    private IndexStatus? _index;
+
+    private IReadOnlyList<LogLine> _logs = [];
+    private string? _logLevel;
+    private DiagnosticModeState? _diagnostic;
+    private int _diagnosticMinutes = 30;
+    private bool _diagnosticAcknowledged;
+
+    private NotificationSettingsView? _notifications;
+    private bool _draftReady;
+    private bool _jobFailed;
+    private bool _automaticPublication;
+
+    private string? _currentPassword;
+    private string? _newUsername;
+    private string? _newPassword;
+    private string? _confirmPassword;
+
+    private string? _message;
+    private string? _error;
+    private bool _busy;
+
+    private ILogger Logger => LoggerFactory.CreateLogger("DailyMusings.Admin.System");
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Guarded as well: an unguarded first load left the page on「正在读取…」for ever, or took the circuit down
+        // when the database was momentarily unavailable.
+        _error = await AdminOperation.RunAsync(LoadAsync, Logger);
+    }
+
+    private async Task LoadAsync()
+    {
+        await using var scope = ScopeFactory.CreateAsyncScope();
+        var services = scope.ServiceProvider;
+
+        var current = Overrides.Read();
+        _port = current.ListeningPort;
+        _portInput = current.ListeningPort?.ToString(CultureInfo.InvariantCulture);
+        _configuredPort = ReadConfiguredPort();
+
+        // The address the host is actually bound to. This is the closest thing to "the port in use" available from
+        // inside a circuit: HttpContext is long gone by the time an interactive page renders.
+        _effectivePort = ReadBoundPort() ?? _configuredPort;
+
+        _instance = await services.GetRequiredService<IInstanceSettingsProvider>().GetAsync(CancellationToken.None);
+        ApplyInstanceSettings(_instance);
+
+        _content = await services.GetRequiredService<IContentSettingsProvider>().GetAsync(CancellationToken.None);
+        _audioRetentionDays = _content.AudioRetentionDays;
+        _contentRetentionDays = _content.ContentRetentionDays;
+
+        var data = services.GetRequiredService<ListInstanceDataUseCase>();
+        _exports = await data.ListExportsAsync(CancellationToken.None);
+        _backups = await data.ListBackupsAsync(CancellationToken.None);
+        _restore = await data.GetPendingRestoreAsync(CancellationToken.None);
+
+        _index = await services.GetRequiredService<GetIndexStatusUseCase>().ExecuteAsync(CancellationToken.None);
+        _diagnostic = await services.GetRequiredService<ManageDiagnosticModeUseCase>().GetAsync(CancellationToken.None);
+
+        var logs = services.GetRequiredService<IRecentLogReader>();
+        _logs = logs.Read(200);
+        _logLevel = logs.MinimumLevel;
+
+        _notifications = await services
+            .GetRequiredService<ReadNotificationSettingsUseCase>()
+            .ExecuteAsync(CancellationToken.None);
+
+        _draftReady = _notifications.DraftReady;
+        _jobFailed = _notifications.JobFailed;
+        _automaticPublication = _notifications.AutomaticPublication;
+    }
+
+    private void ApplyInstanceSettings(InstanceSettings settings)
+    {
+        _schedulerInterval = settings.SchedulerIntervalSeconds;
+        _schedulerBackfill = settings.SchedulerBackfillWindowDays;
+        _schedulerBatch = settings.SchedulerMaxGenerationsPerTick;
+        _backupEnabled = settings.BackupEnabled;
+        _backupTime = ContentSettings.FormatTime(settings.BackupLocalTime);
+        _audioCleanupTime = ContentSettings.FormatTime(settings.AudioCleanupLocalTime);
+        _contentCleanupTime = ContentSettings.FormatTime(settings.ContentCleanupLocalTime);
+        _backupKeepCount = settings.BackupKeepCount;
+        _maxMaterials = settings.RetrievalMaxMaterials;
+        _candidateScanLimit = settings.RetrievalCandidateScanLimit;
+        _minimumRelevance = settings.RetrievalMinimumRelevance;
+        _minimumLexicalScore = settings.RetrievalMinimumLexicalScore;
+    }
+
+    /// <summary>What the deployment says, which is what applies when there is no override on disk.</summary>
+    private static int ReadConfiguredPort() =>
+        ParsePortFromUrl(Environment.GetEnvironmentVariable("ASPNETCORE_URLS")) ?? FallbackPort;
+
+    private int? ReadBoundPort()
+    {
+        var addresses = Server.Features.Get<IServerAddressesFeature>()?.Addresses;
+
+        if (addresses is null)
+        {
+            return null;
+        }
+
+        foreach (var address in addresses)
+        {
+            if (ParsePortFromUrl(address) is { } port)
+            {
+                return port;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>Takes the port out of <c>http://host:port</c>, tolerating the <c>+</c> / IPv6-in-brackets forms.</summary>
+    private static int? ParsePortFromUrl(string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            return null;
+        }
+
+        var separator = url.LastIndexOf(':');
+
+        return separator >= 0 &&
+               int.TryParse(
+                   url[(separator + 1)..].TrimEnd('/'),
+                   NumberStyles.Integer,
+                   CultureInfo.InvariantCulture,
+                   out var port)
+            ? port
+            : null;
+    }
+
+    private async Task ReloadAsync() => await RunAsync(LoadAsync);
+
+    private async Task SavePortAsync() => await RunAsync(async () =>
+    {
+        if (!int.TryParse(_portInput, NumberStyles.Integer, CultureInfo.InvariantCulture, out var port))
+        {
+            _error = "端口需要是一个数字。";
+            return;
+        }
+
+        if (port is < MinimumPort or > MaximumPort)
+        {
+            _error = $"端口需要介于 {MinimumPort} 与 {MaximumPort} 之间："
+                + "低于 1024 的端口容器里的非特权用户绑定不了，那会让实例重启后连不上。";
+            return;
+        }
+
+        Overrides.Write(port, "admin", DateTimeOffset.UtcNow);
+        await LoadAsync();
+
+        _message = $"已保存端口 {port}。它要在重建容器之后才生效（后台改不了容器的端口映射），步骤见上方说明。";
+    });
+
+    private async Task ClearPortAsync() => await RunAsync(async () =>
+    {
+        // Null clears the override, so the instance goes back to whatever the deployment says.
+        Overrides.Write(null, "admin", DateTimeOffset.UtcNow);
+        await LoadAsync();
+
+        _message = "已清除端口覆盖，重建容器后回到部署配置里的端口。";
+    });
+
+    private async Task SaveBackupAsync() => await RunAsync(async services =>
+    {
+        if (!TimeOnly.TryParseExact(_backupTime, "HH:mm", CultureInfo.InvariantCulture, DateTimeStyles.None, out var backupTime) ||
+            !TimeOnly.TryParseExact(_contentCleanupTime, "HH:mm", CultureInfo.InvariantCulture, DateTimeStyles.None, out var contentCleanupTime))
+        {
+            _error = "备份时刻与内容清理时刻都需要写成 HH:mm，例如 03:30。";
+            return;
+        }
+
+        var saved = await services
+            .GetRequiredService<UpdateInstanceSettingsUseCase>()
+            .ExecuteAsync(
+                new InstanceSettingsUpdate(
+                    SchedulerIntervalSeconds: null,
+                    SchedulerBackfillWindowDays: null,
+                    SchedulerMaxGenerationsPerTick: null,
+                    BackupEnabled: _backupEnabled,
+                    BackupLocalTime: backupTime,
+                    AudioCleanupLocalTime: null,
+                    BackupKeepCount: _backupKeepCount,
+                    RetrievalMaxMaterials: null,
+                    RetrievalCandidateScanLimit: null,
+                    RetrievalMinimumRelevance: null,
+                    RetrievalMinimumLexicalScore: null,
+                    ContentCleanupLocalTime: contentCleanupTime),
+                CancellationToken.None);
+
+        _instance = saved;
+        ApplyInstanceSettings(saved);
+
+        _message = "已保存备份设置：每晚按时刻备份，并按保留份数裁剪。";
+    });
+
+    private async Task SaveSchedulerAsync() => await RunAsync(async services =>
+    {
+        var saved = await services
+            .GetRequiredService<UpdateInstanceSettingsUseCase>()
+            .ExecuteAsync(
+                new InstanceSettingsUpdate(
+                    SchedulerIntervalSeconds: _schedulerInterval,
+                    SchedulerBackfillWindowDays: _schedulerBackfill,
+                    SchedulerMaxGenerationsPerTick: _schedulerBatch,
+                    BackupEnabled: null,
+                    BackupLocalTime: null,
+                    AudioCleanupLocalTime: null,
+                    BackupKeepCount: null,
+                    RetrievalMaxMaterials: _maxMaterials,
+                    RetrievalCandidateScanLimit: _candidateScanLimit,
+                    RetrievalMinimumRelevance: _minimumRelevance,
+                    RetrievalMinimumLexicalScore: _minimumLexicalScore),
+                CancellationToken.None);
+
+        _instance = saved;
+        ApplyInstanceSettings(saved);
+
+        _message = "已保存调度与检索设置，下一次调度与下一次检索即按新值执行。";
+    });
+
+    private async Task SaveRetentionAsync() => await RunAsync(async services =>
+    {
+        if (!TimeOnly.TryParseExact(_audioCleanupTime, "HH:mm", CultureInfo.InvariantCulture, DateTimeStyles.None, out var audioCleanupTime))
+        {
+            _error = "音频清理时刻需要写成 HH:mm，例如 04:00。";
+            return;
+        }
+
+        var saved = await services
+            .GetRequiredService<UpdateContentSettingsUseCase>()
+            .ExecuteAsync(
+                // Schedule fields belong to the publishing page; null means "leave it as it is".
+                new ContentSettingsUpdate(
+                    TimeZoneId: null,
+                    GenerationLocalTime: null,
+                    PublishLocalTime: null,
+                    PublishWindowMinutes: null,
+                    AudioRetentionDays: _audioRetentionDays,
+                    ContentRetentionDays: _contentRetentionDays),
+                CancellationToken.None);
+
+        _content = saved;
+        _audioRetentionDays = saved.AudioRetentionDays;
+        _contentRetentionDays = saved.ContentRetentionDays;
+
+        var instance = await services
+            .GetRequiredService<UpdateInstanceSettingsUseCase>()
+            .ExecuteAsync(
+                new InstanceSettingsUpdate(
+                    SchedulerIntervalSeconds: null,
+                    SchedulerBackfillWindowDays: null,
+                    SchedulerMaxGenerationsPerTick: null,
+                    BackupEnabled: null,
+                    BackupLocalTime: null,
+                    audioCleanupTime,
+                    BackupKeepCount: null,
+                    RetrievalMaxMaterials: null,
+                    RetrievalCandidateScanLimit: null,
+                    RetrievalMinimumRelevance: null,
+                    RetrievalMinimumLexicalScore: null),
+                CancellationToken.None);
+
+        _instance = instance;
+        ApplyInstanceSettings(instance);
+
+        _message = $"已保存保留策略：录音 {DescribeRetention(saved.AudioRetentionDays)}，内容 {DescribeRetention(saved.ContentRetentionDays)}，"
+            + $"清理时刻 {_audioCleanupTime}（内容清理 {_contentCleanupTime}）。";
+    });
+
+    private async Task CreateExportAsync() => await RunAsync(async services =>
+    {
+        var result = await services.GetRequiredService<CreateExportUseCase>().ExecuteAsync(CancellationToken.None);
+        await LoadAsync();
+
+        _message = $"导出完成：exports/{result.RelativeRoot}（{result.Entries.Count} 个文件，含 {result.CopiedBlobs} 个录音）。";
+    });
+
+    private async Task CreateBackupAsync() => await RunAsync(async services =>
+    {
+        var summary = await services.GetRequiredService<CreateBackupUseCase>().ExecuteAsync(CancellationToken.None);
+        await LoadAsync();
+
+        _message = $"备份完成：backups/{summary.FileName}（{AdminFormat.Bytes(summary.ByteCount)}，"
+            + $"剥离 {summary.RedactedDeviceTokens} 条设备凭据）。";
+    });
+
+    private async Task RunAudioCleanupAsync() => await RunAsync(async services =>
+    {
+        var result = await services.GetRequiredService<RunAudioCleanupUseCase>().ExecuteAsync(CancellationToken.None);
+        await LoadAsync();
+
+        _message = result.DeletedBlobs == 0
+            ? "没有到期的录音需要清理。"
+            : $"已清理 {result.DeletedBlobs} 个录音（释放 {AdminFormat.Bytes(result.ReleasedBytes)}），失败 {result.FailedDeletions} 个。";
+    });
+
+    private async Task RunContentCleanupAsync() => await RunAsync(async services =>
+    {
+        var job = await services
+            .GetRequiredService<RunMaintenanceJobUseCase>()
+            .ExecuteAsync(JobType.ContentCleanup, CancellationToken.None);
+
+        await LoadAsync();
+        _message = $"已把一次随想内容清理放进队列（任务 {job.Id}），稍后刷新这一页看队列状态。";
+    });
+
+    private async Task RebuildIndexAsync() => await RunAsync(async services =>
+    {
+        var fingerprint = await services.GetRequiredService<RequestIndexRebuildUseCase>().ExecuteAsync(CancellationToken.None);
+        await LoadAsync();
+
+        _message = fingerprint is null
+            ? "未配置 Embedding 端点，无需重建。"
+            : "已排队重建语义索引；重建期间检索继续使用主题标签与全文匹配。";
+    });
+
+    private async Task RefreshLogsAsync() => await RunAsync(async services =>
+    {
+        var logs = services.GetRequiredService<IRecentLogReader>();
+        _logs = logs.Read(200);
+        _logLevel = logs.MinimumLevel;
+    });
+
+    private async Task EnableDiagnosticAsync() => await RunAsync(async services =>
+    {
+        var state = await services
+            .GetRequiredService<ManageDiagnosticModeUseCase>()
+            .EnableAsync("admin", TimeSpan.FromMinutes(_diagnosticMinutes), CancellationToken.None);
+
+        _diagnostic = state;
+        _diagnosticAcknowledged = false;
+        _message = $"调试模式已开启，将于 {AdminFormat.When(state.ExpiresAtUtc)} 自动到期。";
+    });
+
+    private async Task DisableDiagnosticAsync() => await RunAsync(async services =>
+    {
+        await services.GetRequiredService<ManageDiagnosticModeUseCase>().DisableAsync(CancellationToken.None);
+        _diagnostic = await services.GetRequiredService<ManageDiagnosticModeUseCase>().GetAsync(CancellationToken.None);
+
+        _message = "调试模式已关闭。";
+    });
+
+    private async Task SaveNotificationsAsync() => await RunAsync(async services =>
+    {
+        await services
+            .GetRequiredService<UpdateNotificationSettingsUseCase>()
+            .ExecuteAsync(
+                // The recipient is owned by the notifications page's own save, which validates it as an address.
+                toAddress: null,
+                instanceUrl: null,
+                _draftReady,
+                _jobFailed,
+                _automaticPublication,
+                CancellationToken.None);
+
+        // Read back rather than trusting the form: what the instance stored is what the next mail will use.
+        _notifications = await services
+            .GetRequiredService<ReadNotificationSettingsUseCase>()
+            .ExecuteAsync(CancellationToken.None);
+
+        _message = "已保存通知开关。";
+    });
+
+    /// <summary>
+    /// Replaces the administrator's credentials. The domain's own refusals are translated here rather than left to
+    /// the shared guard, because their messages are English and this page is Chinese throughout; anything else still
+    /// travels out to <c>AdminOperation</c>.
+    /// </summary>
+    private async Task ChangeCredentialsAsync() => await RunAsync(async services =>
+    {
+        if (string.IsNullOrWhiteSpace(_currentPassword) ||
+            string.IsNullOrWhiteSpace(_newUsername) ||
+            string.IsNullOrEmpty(_newPassword))
+        {
+            _error = "请填写当前密码、新账号与新密码。";
+            return;
+        }
+
+        if (!string.Equals(_newPassword, _confirmPassword, StringComparison.Ordinal))
+        {
+            _error = "两次输入的新密码不一致。";
+            return;
+        }
+
+        try
+        {
+            var account = await services
+                .GetRequiredService<ChangeAdminCredentialsUseCase>()
+                .ExecuteAsync(_currentPassword, _newUsername, _newPassword, CancellationToken.None);
+
+            _currentPassword = null;
+            _newPassword = null;
+            _confirmPassword = null;
+            _newUsername = null;
+
+            _message = $"凭据已更新（现在的账号是「{account.Username}」）。"
+                + "本次会话的 Cookie 仍然有效，但里面的用户名已经过时——请退出登录并重新登录。";
+        }
+        catch (UseCaseException exception) when (exception.Code == "admin.current_password.invalid")
+        {
+            _error = "当前密码不正确。";
+        }
+        catch (DomainException exception) when (exception.Code is "admin.credentials.unchanged")
+        {
+            _error = "新凭据与当前凭据完全相同，没有改动。";
+        }
+        catch (DomainException exception) when (exception.Code is "admin.username.length" or "admin.username.charset")
+        {
+            _error = "新账号需要 3–64 位，且只能包含字母、数字、点、下划线与连字符。";
+        }
+        catch (DomainException exception) when (exception.Code is "admin.password.too_short")
+        {
+            _error = $"新密码至少需要 {AdminAccount.MinPasswordLength} 位。";
+        }
+        catch (DomainException exception) when (exception.Code is "admin.password.too_long")
+        {
+            _error = $"新密码不能超过 {AdminAccount.MaxPasswordLength} 位。";
+        }
+    });
+
+    private async Task OnArchiveSelectedAsync(InputFileChangeEventArgs args)
+    {
+        _error = null;
+
+        var failure = await AdminOperation.RunAsync(
+            () =>
+            {
+                _archive = args.File;
+                return Task.CompletedTask;
+            },
+            Logger);
+
+        if (failure is not null)
+        {
+            _error = failure;
+        }
+    }
+
+    private async Task StageRestoreAsync() => await RunAsync(async services =>
+    {
+        if (_archive is null)
+        {
+            return;
+        }
+
+        await using var stream = _archive.OpenReadStream(maxAllowedSize: 4L * 1024 * 1024 * 1024);
+
+        var validation = await services
+            .GetRequiredService<StageRestoreUseCase>()
+            .ExecuteAsync(stream, CancellationToken.None);
+
+        _restore = validation;
+        _message = validation.IsValid
+            ? "备份已校验并暂存。重启实例后生效；替换前的数据库会被保留为 pre-restore-*.db。"
+            : null;
+    });
+
+    /// <summary>
+    /// The single funnel every handler on this page goes through, so <c>_busy</c> and the message/error slots cannot
+    /// drift apart per handler.
+    /// <para>
+    /// The body runs inside <c>AdminOperation</c>: an exception escaping an <c>@onclick</c> handler terminates the
+    /// Blazor circuit, after which every control on the page is inert — that is the real shape of 「按钮点不了」,
+    /// and <c>ErrorBoundary</c> cannot see it (it observes render-time exceptions only).
+    /// </para>
+    /// </summary>
+    private Task RunAsync(Func<Task> work) => RunAsync(_ => work());
+
+    private async Task RunAsync(Func<IServiceProvider, Task> work)
+    {
+        _busy = true;
+        _message = null;
+        _error = null;
+
+        try
+        {
+            var failure = await AdminOperation.RunAsync(
+                async () =>
+                {
+                    await using var scope = ScopeFactory.CreateAsyncScope();
+                    await work(scope.ServiceProvider);
+                },
+                Logger);
+
+            if (failure is not null)
+            {
+                _error = failure;
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private static int ParseIntOrDefault(object? value, int fallback) =>
+        int.TryParse(value as string, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) ? parsed : fallback;
+
+    private static double ParseDoubleOrDefault(object? value, double fallback) =>
+        double.TryParse(value as string, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed) ? parsed : fallback;
+
+    private static string DescribeRetention(int days) => days switch
+    {
+        < 0 => "永久保留",
+        0 => "确认后立即删除",
+        _ => $"保留 {days} 天",
+    };
+
+    private static string LevelClass(string level) => level switch
+    {
+        "Warning" => "log-warn",
+        "Error" or "Critical" or "Fatal" => "log-error",
+        _ => "log-level",
+    };
+
+    private static string Short(string? value) =>
+        string.IsNullOrEmpty(value) ? "（无）" : value.Length <= 12 ? value : value[..12] + "…";
+}

@@ -44,6 +44,18 @@ public static class ReflectionEndpointRouteBuilderExtensions
         topics.MapPatch("/{id}", RenameTopicAsync);
         topics.MapPost("/merge", MergeTopicsAsync).DisableAntiforgery();
 
+        // Deleting a topic and asking who is using it are administrator operations, and they are mapped outside
+        // the group so the policy is simply "administrator" rather than "device-or-admin *and* administrator" —
+        // a combination that works but reads as a mistake. Both questions belong to the admin page: a device
+        // token may file its own capture under a topic, not retire the vocabulary.
+        endpoints
+            .MapGet("/api/topics/{id}/usage", GetTopicUsageAsync)
+            .RequireAuthorization(ServerAuthenticationPolicies.AdminOnly);
+
+        endpoints
+            .MapDelete("/api/topics/{id}", DeleteTopicAsync)
+            .RequireAuthorization(ServerAuthenticationPolicies.AdminOnly);
+
         var reflections = endpoints
             .MapGroup("/api/reflections")
             .RequireAuthorization(ServerAuthenticationPolicies.DeviceOrAdmin);
@@ -55,6 +67,13 @@ public static class ReflectionEndpointRouteBuilderExtensions
         reflections.MapPost("/{date}/regenerate-stale", RegenerateStaleAsync).DisableAntiforgery();
         reflections.MapPatch("/{date}/working-version", SwitchWorkingVersionAsync);
         reflections.MapPatch("/{date}/working-version/content", EditVersionAsync);
+
+        // Re-filing an article's topics is the migration path the topic deletion guard sends the user to, so it
+        // is administrator-only for the same reason deletion is.
+        endpoints
+            .MapPatch("/api/reflections/{date}/topics", AssignReflectionTopicsAsync)
+            .RequireAuthorization(ServerAuthenticationPolicies.AdminOnly);
+
         reflections.MapPost("/{date}/confirm", ConfirmAsync).DisableAntiforgery();
 
         // Filing an input under topics belongs to the input's own URL, per §13.
@@ -75,16 +94,147 @@ public static class ReflectionEndpointRouteBuilderExtensions
 
     private static async Task<IResult> ListTopicsAsync(
         [FromQuery] bool? includeMerged,
-        ListTopicsUseCase list,
+        ListTopicsWithUsageUseCase list,
         CancellationToken cancellationToken)
     {
-        var topics = await list.ExecuteAsync(includeMerged ?? false, cancellationToken).ConfigureAwait(false);
-        return Results.Ok(new TopicListResponse(topics.Select(ToDto).ToArray()));
+        var summaries = await list.ExecuteAsync(includeMerged ?? false, cancellationToken).ConfigureAwait(false);
+
+        return Results.Ok(new TopicListResponse(summaries.Select(ToDto).ToArray()));
+    }
+
+    private static async Task<IResult> GetTopicUsageAsync(
+        string id,
+        GetTopicUsageUseCase usage,
+        CancellationToken cancellationToken)
+    {
+        if (!Guid.TryParse(id, out var parsed))
+        {
+            return NotFoundTopic();
+        }
+
+        try
+        {
+            var view = await usage.ExecuteAsync(new TopicId(parsed), cancellationToken).ConfigureAwait(false);
+
+            return Results.Ok(new TopicUsageDto(
+                view.Topic.Id.ToString(),
+                view.Articles
+                    .Select(article => new TopicUsageArticleDto(
+                        article.ReflectionId.ToString(),
+                        article.ContentDate.ToString(),
+                        article.VersionId.ToString(),
+                        article.Title,
+                        ToWireName(article.Status),
+                        article.PublicationStatus is { } status ? status.ToString() : null))
+                    .ToArray(),
+                view.InputCount));
+        }
+        catch (UseCaseException exception)
+        {
+            return MapUseCaseFailure(exception);
+        }
+    }
+
+    /// <summary>
+    /// Deletes a topic (§6.2). A refusal arrives as 409 with <c>topic.in_use</c> rather than as a silent
+    /// detach: the user is being told which articles to move first, and the message says so.
+    /// </summary>
+    private static async Task<IResult> DeleteTopicAsync(
+        string id,
+        DeleteTopicUseCase delete,
+        CancellationToken cancellationToken)
+    {
+        if (!Guid.TryParse(id, out var parsed))
+        {
+            return NotFoundTopic();
+        }
+
+        try
+        {
+            await delete.ExecuteAsync(new TopicId(parsed), cancellationToken).ConfigureAwait(false);
+            return Results.NoContent();
+        }
+        catch (UseCaseException exception)
+        {
+            return MapUseCaseFailure(exception);
+        }
+        catch (DomainException exception)
+        {
+            return MapDomainFailure(exception);
+        }
+    }
+
+    /// <summary>
+    /// Re-files the working version's topics. Answered with the refreshed draft so the caller can re-render
+    /// without a second request.
+    /// </summary>
+    private static async Task<IResult> AssignReflectionTopicsAsync(
+        string date,
+        [FromBody] AssignReflectionTopicsRequest? request,
+        AssignReflectionVersionTopicsUseCase assign,
+        GetReflectionUseCase get,
+        CancellationToken cancellationToken)
+    {
+        if (!ContentDate.TryParse(date, out var contentDate))
+        {
+            return Invalid("The date must be formatted as YYYY-MM-DD.");
+        }
+
+        if (request is null)
+        {
+            return Invalid("A topic assignment is required.");
+        }
+
+        TopicId? primary = null;
+        if (!string.IsNullOrWhiteSpace(request.PrimaryTopicId))
+        {
+            if (!Guid.TryParse(request.PrimaryTopicId, out var primaryId))
+            {
+                return Invalid("primaryTopicId must be a UUID.");
+            }
+
+            primary = new TopicId(primaryId);
+        }
+
+        var secondary = new List<TopicId>();
+        foreach (var value in request.SecondaryTopicIds ?? [])
+        {
+            if (!Guid.TryParse(value, out var secondaryId))
+            {
+                return Invalid("Every secondary topic id must be a UUID.");
+            }
+
+            secondary.Add(new TopicId(secondaryId));
+        }
+
+        try
+        {
+            await assign
+                .ExecuteAsync(contentDate, primary, secondary, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (UseCaseException exception)
+        {
+            return MapUseCaseFailure(exception);
+        }
+        catch (DomainException exception)
+        {
+            return MapDomainFailure(exception);
+        }
+
+        var view = await get.ExecuteAsync(contentDate, cancellationToken).ConfigureAwait(false);
+
+        return view is null
+            ? Results.Json(
+                new ApiError(ApiErrorCodes.NotFound, "No reflection has been produced for that day yet."),
+                statusCode: StatusCodes.Status404NotFound)
+            : Results.Ok(ToDto(view));
     }
 
     private static async Task<IResult> CreateTopicAsync(
         [FromBody] CreateTopicRequest? request,
         CreateTopicUseCase create,
+        GetTopicUsageUseCase usage,
         CancellationToken cancellationToken)
     {
         if (request is null || string.IsNullOrWhiteSpace(request.Name))
@@ -95,12 +245,13 @@ public static class ReflectionEndpointRouteBuilderExtensions
         try
         {
             var (topic, created) = await create.ExecuteAsync(request.Name, cancellationToken).ConfigureAwait(false);
+            var dto = await ToDtoAsync(topic, usage, cancellationToken).ConfigureAwait(false);
 
             // 201 on creation, 200 when the name already existed: creating twice is not an error, and the caller
             // can tell the difference without a second request.
             return created
-                ? Results.Created($"/api/topics/{topic.Id}", ToDto(topic))
-                : Results.Ok(ToDto(topic));
+                ? Results.Created($"/api/topics/{topic.Id}", dto)
+                : Results.Ok(dto);
         }
         catch (DomainException exception)
         {
@@ -112,6 +263,7 @@ public static class ReflectionEndpointRouteBuilderExtensions
         string id,
         [FromBody] RenameTopicRequest? request,
         RenameTopicUseCase rename,
+        GetTopicUsageUseCase usage,
         CancellationToken cancellationToken)
     {
         if (!Guid.TryParse(id, out var parsed))
@@ -130,7 +282,7 @@ public static class ReflectionEndpointRouteBuilderExtensions
                 .ExecuteAsync(new TopicId(parsed), request.Name, cancellationToken)
                 .ConfigureAwait(false);
 
-            return Results.Ok(ToDto(topic));
+            return Results.Ok(await ToDtoAsync(topic, usage, cancellationToken).ConfigureAwait(false));
         }
         catch (DomainException exception)
         {
@@ -145,6 +297,7 @@ public static class ReflectionEndpointRouteBuilderExtensions
     private static async Task<IResult> MergeTopicsAsync(
         [FromBody] MergeTopicsRequest? request,
         MergeTopicsUseCase merge,
+        GetTopicUsageUseCase usage,
         CancellationToken cancellationToken)
     {
         if (request is null ||
@@ -160,7 +313,9 @@ public static class ReflectionEndpointRouteBuilderExtensions
                 .ExecuteAsync(new TopicId(sourceId), new TopicId(targetId), cancellationToken)
                 .ConfigureAwait(false);
 
-            return Results.Ok(new TopicMergeResponse(ToDto(source), remapped));
+            return Results.Ok(new TopicMergeResponse(
+                await ToDtoAsync(source, usage, cancellationToken).ConfigureAwait(false),
+                remapped));
         }
         catch (DomainException exception)
         {
@@ -239,6 +394,8 @@ public static class ReflectionEndpointRouteBuilderExtensions
     private static async Task<IResult> ListReflectionsAsync(
         [FromQuery] string? from,
         [FromQuery] string? to,
+        [FromQuery] int? page,
+        [FromQuery] int? pageSize,
         ListReflectionsUseCase list,
         IContentCalendarProvider calendars,
         IClock clock,
@@ -267,11 +424,23 @@ public static class ReflectionEndpointRouteBuilderExtensions
             return Invalid($"A range may not exceed {MaxListDays} days.");
         }
 
-        var views = await list
-            .ExecuteAsync(fromInclusive, toInclusive, cancellationToken)
+        var effectivePage = Math.Max(page ?? 1, 1);
+
+        // Without an explicit pageSize the whole requested range comes back, which is the behaviour this
+        // endpoint had before it learned to page: the phone's calendar asks for a range and draws all of it, and
+        // silently truncating that to a default page size would look like days with no draft.
+        var rangeDays = toInclusive.Value.DayNumber - fromInclusive.Value.DayNumber + 1;
+        var effectivePageSize = Math.Clamp(pageSize ?? rangeDays, 1, MaxListDays);
+
+        var result = await list
+            .ExecutePageAsync(fromInclusive, toInclusive, effectivePage, effectivePageSize, cancellationToken)
             .ConfigureAwait(false);
 
-        return Results.Ok(new ReflectionListResponse(views.Select(ToDto).ToArray()));
+        return Results.Ok(new ReflectionListResponse(
+            result.Items.Select(ToDto).ToArray(),
+            result.Total,
+            effectivePage,
+            effectivePageSize));
     }
 
     private static async Task<IResult> GetReflectionAsync(
@@ -490,12 +659,31 @@ public static class ReflectionEndpointRouteBuilderExtensions
         return ContentDate.TryParse(value, out result);
     }
 
-    private static TopicDto ToDto(Topic topic) => new(
+    private static TopicDto ToDto(TopicSummary summary) =>
+        ToDto(summary.Topic, summary.ArticleCount, summary.InputCount);
+
+    /// <summary>
+    /// A single topic with its counts, for the create/rename/merge answers. Those responses carry the same shape
+    /// as the list so a client can drop the result straight into its table instead of re-reading it.
+    /// </summary>
+    private static async Task<TopicDto> ToDtoAsync(
+        Topic topic,
+        GetTopicUsageUseCase usage,
+        CancellationToken cancellationToken)
+    {
+        var view = await usage.ExecuteAsync(topic.Id, cancellationToken).ConfigureAwait(false);
+        return ToDto(topic, view.Articles.Count, view.InputCount);
+    }
+
+    private static TopicDto ToDto(Topic topic, int articleCount, int inputCount) => new(
         topic.Id.ToString(),
         topic.Name,
         topic.CreatedAtUtc.ToString("o", CultureInfo.InvariantCulture),
         topic.MergedIntoId?.ToString(),
-        topic.MergedAtUtc?.ToString("o", CultureInfo.InvariantCulture));
+        topic.MergedAtUtc?.ToString("o", CultureInfo.InvariantCulture),
+        topic.Origin == TopicOrigin.Model ? TopicOriginNames.Model : TopicOriginNames.User,
+        articleCount,
+        inputCount);
 
     private static ReflectionDto ToDto(ReflectionView view) => new(
         view.Id.ToString(),
@@ -531,6 +719,9 @@ public static class ReflectionEndpointRouteBuilderExtensions
         view.Sources.Select(ToDto).ToArray(),
         view.UnsourcedClaims
             .Select(claim => new UnsourcedClaimDto(claim.BlockIndex, claim.CharStart, claim.CharEnd, claim.Reason))
+            .ToArray(),
+        view.Topics
+            .Select(topic => new TopicRefDto(topic.Id.ToString(), topic.Name, topic.IsPrimary))
             .ToArray());
 
     private static SourceReferenceDto ToDto(SourceReferenceView view) => new(
@@ -627,7 +818,13 @@ public static class ReflectionEndpointRouteBuilderExtensions
             "reflection.confirm.unsourced_claims_not_acknowledged" or
                 "topic.merge.target_retired" or
                 "topic.retired" or
-                "topic.merge.self" => StatusCodes.Status409Conflict,
+                "topic.merge.self" or
+
+                // The topic is in use, or is the target of a merge: both are refusals about the instance's
+                // current state rather than about the request, so 409 with the code and the instruction is the
+                // honest answer (§6.2: 请先在内容管理里迁移相关内容).
+                "topic.in_use" or
+                "topic.merge_target" => StatusCodes.Status409Conflict,
 
             _ => StatusCodes.Status400BadRequest,
         };

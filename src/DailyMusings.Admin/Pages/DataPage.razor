@@ -1,0 +1,406 @@
+@page "/data"
+@rendermode InteractiveServer
+@attribute [Authorize]
+@inject IServiceScopeFactory ScopeFactory
+@inject ILoggerFactory LoggerFactory
+
+@* 数据管理分区：从新到旧一条一行，录音与手写同级。
+   单元格高度由 CSS 变量 --cell-h 决定：手写 = --cell-h（64px），录音 = 1.5 × --cell-h（96px），
+   多出来的那半个格子正好放下内容下方的一行播放条（原生 <audio>：播放/暂停、进度、时长都有了）。 *@
+
+<PageHeader Title="数据管理"
+            Hint="从新到旧列出实例收到的随想，录音与手写同级。一行四项：时间、类型、状态、内容；录音的播放条在内容下方。">
+    <Actions>
+        <button class="btn" @onclick="ReloadAsync" disabled="@_busy">刷新</button>
+    </Actions>
+</PageHeader>
+
+@if (_message is not null)
+{
+    <p class="notice ok">@_message</p>
+}
+
+@if (_error is not null)
+{
+    <p class="notice error">@_error</p>
+}
+
+<div class="toolbar">
+    <label>
+        类型
+        <select @bind="_typeFilter">
+            <option value="all">全部</option>
+            <option value="voice">录音</option>
+            <option value="text">手写</option>
+        </select>
+    </label>
+
+    <label>
+        状态
+        <select @bind="_statusFilter">
+            <option value="all">全部</option>
+            <option value="succeeded">已上传转写成功</option>
+            <option value="running">转写中</option>
+            <option value="failed">转写失败</option>
+        </select>
+    </label>
+
+    <label class="checkbox">
+        <input type="checkbox" checked="@_includeDeleted" @onchange="OnIncludeDeletedChanged" />
+        包含已删除（保留策略清理后留下的记录）
+    </label>
+
+    <div class="actions">
+        <button class="btn" @onclick="ReloadAsync" disabled="@_busy">重新读取</button>
+    </div>
+</div>
+
+<p class="hint">
+    分页由服务端做：它按「从新到旧」取第 @_pageNumber 页、每页 @PageSize 条 —— 整库不会一次渲染出来。
+    上方的两个筛选只作用在<strong>已取回的这一页</strong>上（分页接口不接受类型与状态参数），
+    所以筛完看到的条数可能少于整页。手写随想没有转写状态，选「转写成功 / 转写中 / 转写失败」时它们不会出现；
+    只看手写请把类型选成「手写」。
+</p>
+
+@if (_page is null)
+{
+    <p class="muted">正在读取…</p>
+}
+else if (VisibleItems().Count == 0)
+{
+    <p class="notice info">
+        @if (_page.Total == 0)
+        {
+            <text>实例里还没有任何随想。</text>
+        }
+        else
+        {
+            <text>这一页没有符合筛选条件的随想，翻到别的页或把筛选改回「全部」。</text>
+        }
+    </p>
+}
+else
+{
+    <div class="data-list">
+        <div class="data-head">
+            <span>时间</span>
+            <span>类型</span>
+            <span>状态</span>
+            <span>内容</span>
+            <span>操作</span>
+        </div>
+
+        @foreach (var item in VisibleItems())
+        {
+            var entry = item.Entry;
+            var isVoice = entry.SourceType == InputSourceType.Voice;
+
+            <div class="data-row @(isVoice ? "voice" : "text")">
+                <div class="data-cell when">
+                    @DeviceLocalTime(entry)
+                    <span class="player-meta">@AdminFormat.Utc(entry.CreatedAtUtc)</span>
+                </div>
+
+                <div class="data-cell type">
+                    @(isVoice ? "录音" : "手写")
+                </div>
+
+                <div class="data-cell status">
+                    <span class="badge @AdminLabels.TranscriptionBadge(entry.TranscriptionStatus)">@AdminLabels.TranscriptionText(entry.TranscriptionStatus)</span>
+                    @if (item.FailureCode is { Length: > 0 } failureCode)
+                    {
+                        <span class="player-meta"><code>@failureCode</code></span>
+                    }
+
+                    @if (entry.IsDeleted)
+                    {
+                        <span class="badge badge-muted">内容已清理</span>
+                    }
+                </div>
+
+                <div class="data-cell">
+                    @if (entry.TranscriptForGeneration is { Length: > 0 } transcript)
+                    {
+                        @if (entry.RevisedTranscript is { Length: > 0 })
+                        {
+                            <span class="player-meta">已修订（原稿仍保留）</span>
+                        }
+
+                        <div class="transcript @(IsExpanded(entry.Id) || !IsLong(transcript) ? "" : "clamp-3")">@transcript</div>
+
+                        @if (IsLong(transcript))
+                        {
+                            <button class="expand-link" @onclick="() => ToggleExpandAsync(entry.Id)" disabled="@_busy">
+                                @(IsExpanded(entry.Id) ? "收起" : "展开全文")
+                            </button>
+                        }
+                    }
+                    else
+                    {
+                        <span class="muted">还没有文字。</span>
+                    }
+
+                    @if (entry.HasAudio)
+                    {
+                        @* 音频由 GET /api/inputs/{id}/audio 提供：管理员 Cookie 与设备令牌都能认证，
+                           返回的就是手机播放的同一份字节（支持 Range，可以拖动进度）。 *@
+                        <audio class="player" controls preload="none" src="@($"/api/inputs/{entry.Id}/audio")"></audio>
+                        <span class="player-meta">
+                            @(entry.AudioDuration is { } duration ? $"{duration.TotalSeconds:0.0} 秒" : "时长未知")
+                            @if (entry.AudioContentType is { Length: > 0 } contentType)
+                            {
+                                <text> · @contentType</text>
+                            }
+                        </span>
+                    }
+                    else if (isVoice)
+                    {
+                        <span class="player-meta">录音已被保留策略清理（转写与记录保留）。</span>
+                    }
+                </div>
+
+                <div class="data-cell">
+                    @if (_confirmingDelete == entry.Id)
+                    {
+                        <div class="stack">
+                            <span class="hint">
+                                删除后这条随想不再出现在列表与检索里；历史文章对它的来源引用不会被改写。
+                                录音文件也一并删除。
+                            </span>
+                            <div class="actions">
+                                <button class="btn-danger btn-sm" @onclick="() => DeleteAsync(entry.Id)" disabled="@_busy">
+                                    确认删除
+                                </button>
+                                <button class="btn btn-sm" @onclick="CancelDelete" disabled="@_busy">取消</button>
+                            </div>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="actions">
+                            <button class="btn btn-sm" @onclick="() => BeginDelete(entry.Id)" disabled="@_busy">删除…</button>
+
+                            @if (entry.TranscriptionStatus == TranscriptionStatus.Failed)
+                            {
+                                <button class="btn btn-sm" @onclick="() => RetryTranscriptionAsync(entry.Id)" disabled="@_busy">
+                                    重试转写
+                                </button>
+                            }
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+    </div>
+}
+
+@if (_page is not null)
+{
+    <div class="pager">
+        <span class="pager-info">
+            共 @_page.Total 条 · 第 @_pageNumber / @TotalPages() 页 · 本页 @_page.Items.Count 条，
+            其中符合筛选 @VisibleItems().Count 条
+        </span>
+
+        <span class="actions">
+            <button class="btn btn-sm" @onclick="PreviousPageAsync" disabled="@(_busy || _pageNumber <= 1)">上一页</button>
+            <button class="btn btn-sm" @onclick="NextPageAsync" disabled="@(_busy || _pageNumber >= TotalPages())">下一页</button>
+        </span>
+    </div>
+}
+
+@code {
+    private const int PageSize = 20;
+
+    private InputPage? _page;
+    private int _pageNumber = 1;
+
+    private string _typeFilter = "all";
+    private string _statusFilter = "all";
+    private bool _includeDeleted;
+
+    private InputEntryId? _expanded;
+    private InputEntryId? _confirmingDelete;
+
+    private string? _message;
+    private string? _error;
+    private bool _busy;
+
+    private ILogger Logger => LoggerFactory.CreateLogger("DailyMusings.Admin.Data");
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Guarded as well: an unguarded first load left the page on「正在读取…」for ever, or took the circuit down
+        // when the database was momentarily unavailable.
+        _error = await AdminOperation.RunAsync(LoadAsync, Logger);
+    }
+
+    private async Task LoadAsync()
+    {
+        await using var scope = ScopeFactory.CreateAsyncScope();
+
+        _page = await scope.ServiceProvider
+            .GetRequiredService<ListInputsUseCase>()
+            .ExecutePageAsync(
+                contentDate: null,
+                Math.Max(1, _pageNumber),
+                PageSize,
+                _includeDeleted,
+                CancellationToken.None);
+
+        _pageNumber = _page.Page;
+    }
+
+    /// <summary>
+    /// What the toolbar filters down to. Filtering happens here rather than on the server because the paged read
+    /// has no such parameters; the page says so above the list instead of pretending the filter is global.
+    /// </summary>
+    private IReadOnlyList<InputStatusView> VisibleItems()
+    {
+        if (_page is null)
+        {
+            return Array.Empty<InputStatusView>();
+        }
+
+        return _page.Items
+            .Where(MatchesType)
+            .Where(MatchesStatus)
+            .ToArray();
+    }
+
+    private bool MatchesType(InputStatusView item) => _typeFilter switch
+    {
+        "voice" => item.Entry.SourceType == InputSourceType.Voice,
+        "text" => item.Entry.SourceType == InputSourceType.Text,
+        _ => true,
+    };
+
+    private bool MatchesStatus(InputStatusView item) => _statusFilter switch
+    {
+        "succeeded" => item.Entry.TranscriptionStatus == TranscriptionStatus.Succeeded,
+        "running" => item.Entry.TranscriptionStatus is TranscriptionStatus.Pending or TranscriptionStatus.InProgress,
+        "failed" => item.Entry.TranscriptionStatus == TranscriptionStatus.Failed,
+        _ => true,
+    };
+
+    private int TotalPages() =>
+        _page is null || _page.Total <= 0
+            ? 1
+            : Math.Max(1, (int)Math.Ceiling(_page.Total / (double)PageSize));
+
+    private bool IsExpanded(InputEntryId id) => _expanded == id;
+
+    /// <summary>
+    /// Whether a transcript is worth a 展开 link. Long enough to be clipped, or holding its own line breaks —
+    /// those are the two ways a clamped three-line box hides something the operator would want to see.
+    /// </summary>
+    private static bool IsLong(string transcript) =>
+        transcript.Length > 160 || transcript.Contains('\n', StringComparison.Ordinal);
+
+    private async Task ReloadAsync() => await RunAsync(async () =>
+    {
+        _confirmingDelete = null;
+        await LoadAsync();
+    });
+
+    private async Task PreviousPageAsync() => await RunAsync(async () =>
+    {
+        _pageNumber = Math.Max(1, _pageNumber - 1);
+        _confirmingDelete = null;
+        await LoadAsync();
+    });
+
+    private async Task NextPageAsync() => await RunAsync(async () =>
+    {
+        _pageNumber = Math.Min(TotalPages(), _pageNumber + 1);
+        _confirmingDelete = null;
+        await LoadAsync();
+    });
+
+    private async Task OnIncludeDeletedChanged(ChangeEventArgs args) => await RunAsync(async () =>
+    {
+        _includeDeleted = args.Value is true;
+        _pageNumber = 1;
+        _confirmingDelete = null;
+        await LoadAsync();
+    });
+
+    private async Task ToggleExpandAsync(InputEntryId id) => await RunAsync(() =>
+    {
+        _expanded = _expanded == id ? null : id;
+        return Task.CompletedTask;
+    });
+
+    private void BeginDelete(InputEntryId id)
+    {
+        _message = null;
+        _error = null;
+        _confirmingDelete = id;
+    }
+
+    private void CancelDelete() => _confirmingDelete = null;
+
+    private async Task DeleteAsync(InputEntryId id) => await RunAsync(async () =>
+    {
+        await using var scope = ScopeFactory.CreateAsyncScope();
+        await scope.ServiceProvider
+            .GetRequiredService<DeleteInputUseCase>()
+            .ExecuteAsync(id, CancellationToken.None);
+
+        _confirmingDelete = null;
+        await LoadAsync();
+
+        _message = "已删除这条随想（录音一并删除，历史文章的来源引用不改写）。";
+    });
+
+    private async Task RetryTranscriptionAsync(InputEntryId id) => await RunAsync(async () =>
+    {
+        await using var scope = ScopeFactory.CreateAsyncScope();
+        await scope.ServiceProvider
+            .GetRequiredService<RetryTranscriptionUseCase>()
+            .ExecuteAsync(id, CancellationToken.None);
+
+        await LoadAsync();
+
+        _message = "已把这条随想放回转写队列（音频还在，重跑是安全的），稍后刷新查看结果。";
+    });
+
+    /// <summary>
+    /// The single funnel every handler on this page goes through, so <c>_busy</c> and the message/error slots cannot
+    /// drift apart per handler.
+    /// <para>
+    /// The body runs inside <c>AdminOperation</c>, which is the only thing standing between a handler and the
+    /// circuit: an exception escaping an <c>@onclick</c> handler terminates the Blazor circuit, and from that moment
+    /// every control on the page is inert — which the operator reports as 「删除 点不了」, not as an error.
+    /// </para>
+    /// </summary>
+    private async Task RunAsync(Func<Task> work)
+    {
+        _busy = true;
+        _message = null;
+        _error = null;
+
+        try
+        {
+            var failure = await AdminOperation.RunAsync(work, Logger);
+
+            if (failure is not null)
+            {
+                _error = failure;
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    /// <summary>
+    /// The moment the device saw, using the offset it recorded. A capture's time is a property of the capture,
+    /// not of the server's clock — that is why the entry carries its own offset.
+    /// </summary>
+    private static string DeviceLocalTime(InputEntry entry) =>
+        entry.CreatedAtUtc
+            .ToOffset(TimeSpan.FromMinutes(entry.CreatedOffsetMinutes))
+            .ToString("yyyy-MM-dd HH:mm:ss");
+}

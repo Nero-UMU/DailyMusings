@@ -1,13 +1,19 @@
+using System.Globalization;
+using DailyMusings.Client.Core.Audio;
+using DailyMusings.Client.Core.Capture;
 using DailyMusings.Client.Core.Settings;
 using DailyMusings.Client.Services;
 
 namespace DailyMusings.Client.Pages;
 
 /// <summary>
-/// Where the user points the app at their instance and pairs the device (docs/开发指导.md §9.3, §10.2, §10.3).
+/// 设置 (phone spec §3.4): where the instance is, whether this device is paired, how much room the local archive
+/// takes, and the model names the instance is configured with.
 /// <para>
 /// The risk notice here is not decoration. Saving a plain-HTTP address requires an explicit acknowledgement, the
-/// banner stays visible afterwards, and the text never suggests the acknowledgement improved anything.
+/// banner stays visible afterwards, and the text never suggests the acknowledgement improved anything (§10.3).
+/// Notification preferences are gone from this screen with the rest of the reviewed feature set — the admin page
+/// owns them — so what is left is exactly what a phone needs to be set up and to hand its space back.
 /// </para>
 /// </summary>
 public partial class SettingsPage : ContentPage
@@ -15,20 +21,28 @@ public partial class SettingsPage : ContentPage
     private readonly ClientSettings _settings;
     private readonly PairingService _pairing;
     private readonly SecureDeviceTokenProvider _tokens;
-    private readonly DynamicInstanceApiClient _instance;
+    private readonly IModelNameApiClient _models;
+    private readonly CaptureController _controller;
+    private readonly IAudioPlayer _player;
+
+    private bool _busy;
 
     public SettingsPage(
         ClientSettings settings,
         PairingService pairing,
         SecureDeviceTokenProvider tokens,
-        DynamicInstanceApiClient instance)
+        IModelNameApiClient models,
+        CaptureController controller,
+        IAudioPlayer player)
     {
         InitializeComponent();
 
         _settings = settings;
         _pairing = pairing;
         _tokens = tokens;
-        _instance = instance;
+        _models = models;
+        _controller = controller;
+        _player = player;
     }
 
     protected override async void OnAppearing()
@@ -37,13 +51,12 @@ public partial class SettingsPage : ContentPage
 
         ServerUrlEntry.Text = _settings.ServerBaseUrl ?? string.Empty;
 
-        // The platform and its version, in that order.
         DeviceInfoLabel.Text =
             $"{DeviceInfo.Current.Manufacturer} {DeviceInfo.Current.Model} · " +
             $"{DeviceInfo.Current.Platform} {DeviceInfo.Current.VersionString}";
 
-        // Nothing in an async void handler may throw: this screen reads three things from the server, and any of them
-        // failing must not take the process down. (The capture and draft screens learned this on a real device.)
+        // Nothing in an async void handler may throw: this screen reads the token store, the archive and the
+        // instance, and any of them failing must not take the process down.
         try
         {
             await RefreshAsync();
@@ -55,8 +68,7 @@ public partial class SettingsPage : ContentPage
         }
     }
 
-    private async void OnRefreshNotificationsClicked(object? sender, EventArgs e) =>
-        await RefreshNotificationsAsync();
+    private async void OnRefreshModelsClicked(object? sender, EventArgs e) => await GuardAsync(RefreshModelsAsync);
 
     /// <summary>
     /// §8.1's client-side half: which model each job will use, and whether it is switched on. Names only — the Base
@@ -64,23 +76,28 @@ public partial class SettingsPage : ContentPage
     /// </summary>
     private async Task RefreshModelsAsync()
     {
-        if (!_settings.IsConfigured || !await _tokens.HasTokenAsync(CancellationToken.None))
+        if (!_settings.IsConfigured || !await IsPairedAsync())
         {
+            ModelSection.IsVisible = false;
             ModelStatus.Text = "配置服务器并配对后可以看到模型名。";
             return;
         }
 
-        var models = await ((IModelNameApiClient)_instance).GetAsync(CancellationToken.None);
+        ModelSection.IsVisible = true;
+
+        var models = await _models.GetAsync(CancellationToken.None);
 
         if (!models.Succeeded)
         {
-            ModelStatus.Text = DailyMusings.Client.Core.Reflections.ReflectionReview.DescribeTransportFailure(models.FailureCode);
+            ModelStatus.Text = DescribeTransportFailure(models.FailureCode);
             return;
         }
 
-        ModelStatus.Text = string.Join(
-            "\n",
-            models.Value!.Select(model => $"{DescribeService(model.Service)}：{(model.Enabled ? model.Model : "未启用")}"));
+        ModelStatus.Text = models.Value!.Count == 0
+            ? "实例还没有配置任何模型。"
+            : string.Join(
+                "\n",
+                models.Value!.Select(model => $"{DescribeService(model.Service)}：{(model.Enabled ? model.Model : "未启用")}"));
     }
 
     private static string DescribeService(string service) => service switch
@@ -91,53 +108,7 @@ public partial class SettingsPage : ContentPage
         _ => service,
     };
 
-    /// <summary>
-    /// Shows the notification preferences (docs/开发指导.md §9.3 通知偏好, §12) without offering to change them.
-    /// The reason is worth a sentence on screen: a device token that could redirect the instance's mail could send
-    /// the day's date and title to an address of the token holder's choosing, so the recipient and the event switches
-    /// stay an administrator's decision on the admin page. What the client can do honestly is show the state.
-    /// </summary>
-    private async Task RefreshNotificationsAsync()
-    {
-        if (!_settings.IsConfigured || !await _tokens.HasTokenAsync(CancellationToken.None))
-        {
-            NotificationStatus.Text = "配置服务器并配对后可以看到通知偏好。";
-            return;
-        }
-
-        var settings = await ((INotificationSettingsApiClient)_instance).GetAsync(CancellationToken.None);
-
-        if (!settings.Succeeded)
-        {
-            NotificationStatus.Text = settings.FailureCode == "auth.forbidden"
-                ? "通知偏好只对管理员显示；请到管理页的运维页修改。"
-                : DailyMusings.Client.Core.Reflections.ReflectionReview.DescribeTransportFailure(settings.FailureCode);
-            return;
-        }
-
-        var value = settings.Value!;
-        var events = new List<string>();
-
-        if (value.SmtpConfigured)
-        {
-            events.Add("SMTP 已配置");
-        }
-        else
-        {
-            events.Add("SMTP 未配置，不会发信");
-        }
-
-        if (value.DraftReady) events.Add("草稿待确认");
-        if (value.JobFailed) events.Add("任务失败");
-        if (value.AutomaticPublication) events.Add("自动发布");
-
-        NotificationStatus.Text =
-            $"收件地址：{(string.IsNullOrWhiteSpace(value.ToAddress) ? "未设置" : value.ToAddress)}\n" +
-            $"已开启的事件：{string.Join("、", events)}\n" +
-            "改动请到管理页的运维页（设备令牌没有修改收件地址的权限）。";
-    }
-
-    private async void OnSaveServerClicked(object? sender, EventArgs e)
+    private async void OnSaveServerClicked(object? sender, EventArgs e) => await GuardAsync(async () =>
     {
         var candidate = ServerUrlEntry.Text?.Trim() ?? string.Empty;
 
@@ -146,7 +117,7 @@ public partial class SettingsPage : ContentPage
             _settings.ServerBaseUrl = null;
             await RefreshAsync();
             await RefreshInstanceInfoAsync();
-            ServerStatus.Text = "已清除服务器地址。";
+            ServerStatus.Text = "已清除服务器地址。本机记录仍然保留。";
             return;
         }
 
@@ -179,20 +150,20 @@ public partial class SettingsPage : ContentPage
         await RefreshAsync();
         await RefreshInstanceInfoAsync();
         ServerStatus.Text = "地址已保存。";
-    }
+    });
 
-    private async void OnTestConnectionClicked(object? sender, EventArgs e)
+    private async void OnTestConnectionClicked(object? sender, EventArgs e) => await GuardAsync(async () =>
     {
         ServerStatus.Text = "正在测试…";
 
         var reachable = await _pairing.TestConnectionAsync(CancellationToken.None);
 
         ServerStatus.Text = reachable
-            ? "服务器有响应。"
+            ? "服务器有响应。接下来用管理页签发的配对码完成配对。"
             : "连接失败，请检查地址、网络，以及服务端是否在运行。";
-    }
+    });
 
-    private async void OnPairClicked(object? sender, EventArgs e)
+    private async void OnPairClicked(object? sender, EventArgs e) => await GuardAsync(async () =>
     {
         var code = PairingCodeEntry.Text?.Trim() ?? string.Empty;
 
@@ -209,24 +180,23 @@ public partial class SettingsPage : ContentPage
         if (result.Succeeded)
         {
             PairingCodeEntry.Text = string.Empty;
-            PairingStatus.Text = $"配对成功：{result.DeviceName}。录音与文字现在会自动上传。";
+            PairingStatus.Text = $"配对成功：{result.DeviceName}。现在可以把本机的随想上传到服务器。";
 
-            // Both sections only become readable once the device has a token, so pairing is exactly when they
-            // have to be read. Without this the page kept telling a freshly paired device to go and pair — the
-            // stale hint sat right below the success line.
+            // The model section only becomes readable once the device has a token, so pairing is exactly when it has
+            // to be read. Without this the page kept telling a freshly paired device to go and pair.
             await RefreshAsync();
             await RefreshInstanceInfoAsync();
             return;
         }
 
         PairingStatus.Text = result.FailureMessage ?? "配对失败。";
-    }
+    });
 
-    private async void OnUnpairClicked(object? sender, EventArgs e)
+    private async void OnUnpairClicked(object? sender, EventArgs e) => await GuardAsync(async () =>
     {
         var confirmed = await DisplayAlertAsync(
             "解除配对？",
-            "本机会删除设备令牌。已经上传的内容不受影响，但要重新配对才能继续上传。",
+            "本机会删除设备令牌。本机记录不受影响，但要重新配对才能上传。",
             "解除",
             "取消");
 
@@ -237,20 +207,49 @@ public partial class SettingsPage : ContentPage
 
         _tokens.Clear();
 
-        // The offline queue is deliberately left alone: unpairing must not throw away thoughts that were never sent.
-        PairingStatus.Text = "已解除配对。待上传的内容仍然保留在本机。";
+        // The local archive is deliberately left alone: unpairing must not throw away thoughts that were never sent.
+        PairingStatus.Text = "已解除配对。本机记录仍然保留。";
         await RefreshAsync();
         await RefreshInstanceInfoAsync();
-    }
+    });
+
+    private async void OnClearLocalClicked(object? sender, EventArgs e) => await GuardAsync(async () =>
+    {        var usage = await _controller.GetLocalUsageAsync(CancellationToken.None);
+
+        if (usage.Count == 0)
+        {
+            LocalStatus.Text = "本机没有记录可清。";
+            return;
+        }
+
+        var confirmed = await DisplayAlertAsync(
+            "清空本机记录？",
+            $"这会删除本机的 {usage.Count} 条记录和全部录音（{FormatBytes(usage.AudioBytes)}）。\n\n" +
+            "还没上传的内容会因此永久丢失；已经上传到服务器的内容不会被删除。\n\n这一步无法撤销。",
+            "确认清空",
+            "取消");
+
+        if (!confirmed)
+        {
+            LocalStatus.Text = "已取消，本机记录未改变。";
+            return;
+        }
+
+        await _player.StopAsync(CancellationToken.None);
+
+        var removed = await _controller.ClearLocalAsync(CancellationToken.None);
+
+        await RefreshLocalUsageAsync();
+        LocalStatus.Text = $"已删除本机的 {removed} 条记录。";
+    }, LocalStatus);
 
     /// <summary>
-    /// Re-reads everything the instance tells this device: the notification preferences and the model names.
-    /// They share one lifetime — both need a token, and both go stale the moment the address or the pairing
-    /// changes — so they are refreshed together rather than one caller at a time.
+    /// Re-reads what the instance tells this device. It needs a token, and it goes stale the moment the address or
+    /// the pairing changes — so it is refreshed on appear and after either of those changes, rather than only when a
+    /// refresh button is pressed.
     /// </summary>
     private async Task RefreshInstanceInfoAsync()
     {
-        await RefreshNotificationsAsync();
         await RefreshModelsAsync();
     }
 
@@ -258,10 +257,69 @@ public partial class SettingsPage : ContentPage
     {
         InsecureBanner.IsVisible = _settings.IsInsecureConnection;
 
-        var paired = await _tokens.HasTokenAsync(CancellationToken.None);
+        var paired = await IsPairedAsync();
 
         PairingState.Text = paired
             ? "此设备已配对，可以上传。"
-            : "此设备尚未配对。";
+            : "此设备尚未配对。到管理页生成配对码后填到下面。";
+
+        await RefreshLocalUsageAsync();
+    }
+
+    private async Task RefreshLocalUsageAsync()
+    {
+        var usage = await _controller.GetLocalUsageAsync(CancellationToken.None);
+
+        LocalUsage.Text = usage.Count == 0
+            ? "本机还没有记录。"
+            : $"本机保存 {usage.Count} 条记录，其中 {usage.VoiceCount} 段录音，录音共 {FormatBytes(usage.AudioBytes)}。";
+
+        ClearLocalButton.IsEnabled = usage.Count > 0;
+    }
+
+    private Task<bool> IsPairedAsync() => _tokens.HasTokenAsync(CancellationToken.None);
+
+    private static string FormatBytes(long bytes) => bytes switch
+    {
+        < 1024 => $"{bytes} B",
+        < 1024 * 1024 => string.Create(CultureInfo.InvariantCulture, $"{bytes / 1024.0:F1} KB"),
+        _ => string.Create(CultureInfo.InvariantCulture, $"{bytes / (1024.0 * 1024.0):F1} MB"),
+    };
+
+    private static string DescribeTransportFailure(string? failureCode) => failureCode switch
+    {
+        "client.not_configured" => "还没有填写服务器地址。",
+        "client.not_paired" => "设备还没有配对。",
+        "client.network_unreachable" => "连不上服务器，请检查地址与网络。",
+        "client.timeout" => "服务器没有及时响应。",
+        "auth.device_token_rejected" or "auth.unauthenticated" => "设备令牌已失效，请重新配对。",
+        "client.malformed_response" => "服务器返回了读不懂的内容。",
+        null => string.Empty,
+        _ => failureCode,
+    };
+
+    private async Task GuardAsync(Func<Task> work, Label? statusTarget = null)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+
+        try
+        {
+            await work();
+        }
+        catch (Exception exception)
+        {
+            // Reported where the user was looking: a failure to clear the archive belongs under 本机记录, not under
+            // the server address.
+            (statusTarget ?? ServerStatus).Text = $"操作失败：{exception.Message}";
+        }
+        finally
+        {
+            _busy = false;
+        }
     }
 }

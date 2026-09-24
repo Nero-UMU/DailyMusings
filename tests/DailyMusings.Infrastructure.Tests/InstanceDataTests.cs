@@ -139,6 +139,11 @@ public class InstanceDataTests
         Directory.CreateDirectory(paths.SecretsPath);
         await File.WriteAllTextAsync(Path.Combine(paths.SecretsPath, "openai-api-key"), "sk-do-not-export-me-000000000000");
 
+        // And one the operator typed into the admin page, which is the new way a credential can exist. It is
+        // stored encrypted outside the backup set, so this is the assertion §10.4 now needs in two places.
+        var uiSecrets = new EncryptedUiSecretStore(paths);
+        await uiSecrets.SetAsync("smtp-password", "smtp-do-not-export-me-000000000000", CancellationToken.None);
+
         await SeedAsync(inputs, reflections, unitOfWork, clock, audio, confirmed: true);
 
         var build = Build(reflections, inputs, topics, publications, targets, settings, content, migrator, clock);
@@ -174,6 +179,14 @@ public class InstanceDataTests
             Assert.IsFalse(
                 text.Contains("sk-do-not-export-me", StringComparison.Ordinal),
                 $"{entry.FullName} contains secret material (§10.4).");
+
+            Assert.IsFalse(
+                text.Contains("smtp-do-not-export-me", StringComparison.Ordinal),
+                $"{entry.FullName} contains a credential the admin page stored (§10.4).");
+
+            Assert.IsFalse(
+                text.Contains("ui-secrets", StringComparison.Ordinal),
+                $"{entry.FullName} names the credential store, which means the backup touched it.");
         }
 
         // §15.2 step 7 asks for exactly this check, so the test asserts the exclusion rather than trusting it.

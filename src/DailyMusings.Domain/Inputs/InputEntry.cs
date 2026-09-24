@@ -343,6 +343,36 @@ public sealed class InputEntry
         }
     }
 
+    /// <summary>
+    /// Strips everything the content-retention sweep removes and leaves the row in place as a tombstone.
+    /// <para>
+    /// A soft delete rather than a real one, and that is the whole point of doing it here rather than in SQL:
+    /// <c>source_reference</c> rows point at this entry, so removing the row would leave a historical article's
+    /// provenance dangling (and the schema would refuse it). The entry therefore keeps its identity, its content
+    /// day and its place in the source map, while the text and the recording are gone for good — which is
+    /// exactly what the user asked the retention window to mean.
+    /// </para>
+    /// </summary>
+    /// <returns>The audio path the caller must delete from storage, or <c>null</c> if there was none.</returns>
+    public string? PurgeContent(DateTimeOffset at)
+    {
+        if (IsDeleted)
+        {
+            return null; // idempotent: a second sweep over the same day must not behave differently
+        }
+
+        var path = AudioPath;
+
+        AudioPath = null;
+        AudioDuration = null;
+        AudioDeletedAtUtc = path is null ? AudioDeletedAtUtc : at;
+        OriginalTranscript = null;
+        RevisedTranscript = null;
+        DeletedAtUtc = at;
+
+        return path;
+    }
+
     public void SetAllowFutureRecall(bool allow)
     {
         EnsureNotDeleted();

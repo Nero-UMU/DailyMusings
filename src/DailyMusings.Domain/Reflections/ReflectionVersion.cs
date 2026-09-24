@@ -1,5 +1,6 @@
 using DailyMusings.Domain.Common;
 using DailyMusings.Domain.Reflections.Sources;
+using DailyMusings.Domain.Topics;
 
 namespace DailyMusings.Domain.Reflections;
 
@@ -37,6 +38,7 @@ public sealed class ReflectionVersion
     private readonly List<string> _categories = [];
     private readonly List<SourceReference> _sources = [];
     private readonly List<UnsourcedClaim> _unsourcedClaims = [];
+    private readonly List<TopicId> _topicIds = [];
 
     private ReflectionVersion(
         ReflectionVersionId id,
@@ -69,6 +71,17 @@ public sealed class ReflectionVersion
     public IReadOnlyList<string> Tags => _tags;
 
     public IReadOnlyList<string> Categories => _categories;
+
+    /// <summary>
+    /// The topics this article is about, primary first (§6.2 as revised: the model picks or coins them during
+    /// generation, and the admin page may re-file an article).
+    /// <para>
+    /// Held on the version rather than derived from the day's inputs on purpose. A version is a snapshot of one
+    /// article; the inputs' own filing answers a different question ("where is this recording filed") and the
+    /// user is free to change it afterwards without silently rewriting what the article was about.
+    /// </para>
+    /// </summary>
+    public IReadOnlyList<TopicId> TopicIds => _topicIds;
 
     /// <summary>Paragraph/sentence to input mappings for this exact revision of the body.</summary>
     public IReadOnlyList<SourceReference> Sources => _sources;
@@ -118,7 +131,8 @@ public sealed class ReflectionVersion
         string? promptVersion,
         DateTimeOffset createdAtUtc,
         IEnumerable<string>? tags = null,
-        IEnumerable<string>? categories = null)
+        IEnumerable<string>? categories = null,
+        IEnumerable<TopicId>? topics = null)
     {
         ArgumentNullException.ThrowIfNull(settings);
 
@@ -136,6 +150,11 @@ public sealed class ReflectionVersion
         };
 
         version.ReplaceTags(tags, categories);
+
+        // The list's order is the decision: the first entry is the day's main topic, the rest are secondary.
+        var attached = CleanTopics(topics);
+        version.AttachTopics(attached.Count > 0 ? attached[0] : null, attached.Skip(1).ToArray());
+
         return version;
     }
 
@@ -154,7 +173,8 @@ public sealed class ReflectionVersion
         DateTimeOffset? editedAtUtc,
         IEnumerable<string>? tags = null,
         IEnumerable<string>? categories = null,
-        DateTimeOffset? sourcesCheckedAtUtc = null)
+        DateTimeOffset? sourcesCheckedAtUtc = null,
+        IEnumerable<TopicId>? topics = null)
     {
         var version = new ReflectionVersion(id, reflectionId, title, summary, body, settings, createdAtUtc)
         {
@@ -166,6 +186,8 @@ public sealed class ReflectionVersion
         };
 
         version.ReplaceTags(tags, categories);
+        version.AttachTopics(topics?.FirstOrDefault(), topics?.Skip(1) ?? []);
+
         return version;
     }
 
@@ -205,6 +227,30 @@ public sealed class ReflectionVersion
                 .Where(v => !string.IsNullOrWhiteSpace(v))
                 .Select(v => v.Trim())
                 .Distinct(StringComparer.Ordinal);
+    }
+
+    /// <summary>
+    /// Replaces the topics this article is about (docs/开发指导.md §6.2 as revised).
+    /// <para>
+    /// <paramref name="primary"/> is the single "mainly about" topic and is stored first; it may be
+    /// <c>null</c> when the model named only secondary themes. Duplicates are dropped and the primary can
+    /// never also appear among the secondary ones, for the same reason an input's filing enforces that
+    /// (§6.2): a list that says "this is mainly A, and also A" is not a list anyone can act on.
+    /// </para>
+    /// </summary>
+    public void AttachTopics(TopicId? primary, IEnumerable<TopicId> secondary)
+    {
+        var cleaned = CleanTopics(secondary);
+        cleaned.RemoveAll(topicId => topicId == primary);
+
+        _topicIds.Clear();
+
+        if (primary is { IsEmpty: false } main)
+        {
+            _topicIds.Add(main);
+        }
+
+        _topicIds.AddRange(cleaned);
     }
 
     /// <summary>Attaches the source map produced alongside this version's text.</summary>
@@ -251,4 +297,25 @@ public sealed class ReflectionVersion
     /// </summary>
     public IReadOnlyList<SourceDriftResult> CheckSourceDrift() =>
         _sources.Select(source => new SourceDriftResult(source, SourceLocator.Check(Body, source))).ToList();
+
+    /// <summary>
+    /// Drops empty ids and duplicates. Insertion order is preserved, because the first topic is the primary
+    /// one and losing that order would silently change what the article claims to be about.
+    /// </summary>
+    private static List<TopicId> CleanTopics(IEnumerable<TopicId>? values)
+    {
+        var cleaned = new List<TopicId>();
+
+        foreach (var topicId in values ?? [])
+        {
+            if (topicId.IsEmpty || cleaned.Contains(topicId))
+            {
+                continue;
+            }
+
+            cleaned.Add(topicId);
+        }
+
+        return cleaned;
+    }
 }

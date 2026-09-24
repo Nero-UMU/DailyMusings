@@ -38,14 +38,14 @@ internal sealed class InMemoryAppSettingStore : IAppSettingStore
 public class ModelAndSmtpSettingsTests
 {
     private static (UpdateModelEndpointUseCase Update, InMemoryAppSettingStore Store) Model() =>
-        (new UpdateModelEndpointUseCase(new InMemoryAppSettingStore()), new InMemoryAppSettingStore());
+        (new UpdateModelEndpointUseCase(new InMemoryAppSettingStore(), new InMemoryUiSecretStore()), new InMemoryAppSettingStore());
 
     [TestMethod]
     public async Task Saving_an_endpoint_writes_every_field_the_guide_lists()
     {
         var store = new InMemoryAppSettingStore();
 
-        await new UpdateModelEndpointUseCase(store).ExecuteAsync(
+        await new UpdateModelEndpointUseCase(store, new InMemoryUiSecretStore()).ExecuteAsync(
             ModelService.Embedding,
             new ModelEndpointUpdate(
                 Enabled: true,
@@ -70,7 +70,7 @@ public class ModelAndSmtpSettingsTests
     public async Task A_field_left_out_is_a_field_left_alone()
     {
         var store = new InMemoryAppSettingStore();
-        var update = new UpdateModelEndpointUseCase(store);
+        var update = new UpdateModelEndpointUseCase(store, new InMemoryUiSecretStore());
 
         await update.ExecuteAsync(
             ModelService.Generation,
@@ -94,7 +94,7 @@ public class ModelAndSmtpSettingsTests
     [TestMethod]
     public async Task Values_that_would_fail_at_three_in_the_morning_are_refused_here()
     {
-        var update = new UpdateModelEndpointUseCase(new InMemoryAppSettingStore());
+        var update = new UpdateModelEndpointUseCase(new InMemoryAppSettingStore(), new InMemoryUiSecretStore());
 
         foreach (var (update_, code) in new (ModelEndpointUpdate, string)[]
                  {
@@ -126,7 +126,7 @@ public class ModelAndSmtpSettingsTests
     {
         var store = new InMemoryAppSettingStore();
 
-        await new UpdateModelEndpointUseCase(store).ExecuteAsync(
+        await new UpdateModelEndpointUseCase(store, new InMemoryUiSecretStore()).ExecuteAsync(
             ModelService.Transcription,
             new ModelEndpointUpdate(true, "https://api.example.com/v1", "whisper-1", "openai-api-key", 120, null),
             CancellationToken.None);
@@ -142,7 +142,7 @@ public class ModelAndSmtpSettingsTests
     public async Task Smtp_settings_are_written_and_validated_the_same_way()
     {
         var store = new InMemoryAppSettingStore();
-        var update = new UpdateSmtpSettingsUseCase(store);
+        var update = new UpdateSmtpSettingsUseCase(store, new InMemoryUiSecretStore());
 
         await update.ExecuteAsync(
             new SmtpSettingsUpdate(

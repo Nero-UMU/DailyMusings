@@ -13,7 +13,8 @@ public enum ModelService
 
 /// <summary>
 /// One model endpoint as the admin page shows it: everything §8.1 lists — Base URL, model name, the secret's
-/// <em>name</em>, timeout and whether it is on — plus the embedding dimension when that is meaningful.
+/// <em>name</em>, timeout and whether it is on — plus the embedding dimension when that is meaningful, and
+/// where the credential actually comes from.
 /// </summary>
 public sealed record ModelEndpointView(
     string Service,
@@ -22,11 +23,24 @@ public sealed record ModelEndpointView(
     string Model,
     string SecretName,
     int TimeoutSeconds,
-    int? Dimensions);
+    int? Dimensions,
+    SecretSource PasswordSource)
+{
+    /// <summary>
+    /// Whether a key resolves at all. Reported rather than inferred: "配置好了但发不出去" and "还没填密钥" are
+    /// different problems, and an operator looking at a switched-on endpoint needs to know which one they have.
+    /// </summary>
+    public bool HasPassword => PasswordSource != SecretSource.None;
+}
 
 /// <summary>
 /// What an administrator may change. Every field is optional: a page that toggles 启用 should not have to echo the
 /// rest back, and a field left out is left alone.
+/// <para>
+/// <c>Password</c> is write-only and mirrors the SMTP form: a model key that can only be provisioned by editing
+/// compose and recreating the container is a key most instances will never set. The value is encrypted at rest
+/// outside the instance root, so it still never reaches the settings table, an export or a backup (§10.4).
+/// </para>
 /// </summary>
 public sealed record ModelEndpointUpdate(
     bool? Enabled,
@@ -34,7 +48,9 @@ public sealed record ModelEndpointUpdate(
     string? Model,
     string? SecretName,
     int? TimeoutSeconds,
-    int? Dimensions);
+    int? Dimensions,
+    string? Password = null,
+    bool? ClearPassword = null);
 
 /// <summary>
 /// The one place the model endpoints' stored settings live (docs/开发指导.md §8.1, §10.4).
@@ -71,15 +87,18 @@ public sealed class ReadModelEndpointsUseCase
     private readonly ITranscriptionSettingsProvider _transcription;
     private readonly IGenerationSettingsProvider _generation;
     private readonly IEmbeddingSettingsProvider _embedding;
+    private readonly ISecretStore _secrets;
 
     public ReadModelEndpointsUseCase(
         ITranscriptionSettingsProvider transcription,
         IGenerationSettingsProvider generation,
-        IEmbeddingSettingsProvider embedding)
+        IEmbeddingSettingsProvider embedding,
+        ISecretStore secrets)
     {
         _transcription = transcription;
         _generation = generation;
         _embedding = embedding;
+        _secrets = secrets;
     }
 
     public async Task<IReadOnlyList<ModelEndpointView>> ExecuteAsync(CancellationToken cancellationToken)
@@ -97,7 +116,8 @@ public sealed class ReadModelEndpointsUseCase
                 transcription.Model,
                 transcription.SecretName,
                 (int)transcription.Timeout.TotalSeconds,
-                null),
+                null,
+                Resolve(transcription.SecretName)),
             new ModelEndpointView(
                 "generation",
                 generation.Enabled,
@@ -105,7 +125,8 @@ public sealed class ReadModelEndpointsUseCase
                 generation.Model,
                 generation.SecretName,
                 (int)generation.Timeout.TotalSeconds,
-                null),
+                null,
+                Resolve(generation.SecretName)),
             new ModelEndpointView(
                 "embedding",
                 embedding.Enabled,
@@ -113,8 +134,14 @@ public sealed class ReadModelEndpointsUseCase
                 embedding.Model,
                 embedding.SecretName,
                 (int)embedding.Timeout.TotalSeconds,
-                embedding.Dimensions),
+                embedding.Dimensions,
+                Resolve(embedding.SecretName)),
         ];
+
+        // A name that cannot be resolved as a secret name at all reads as "not provisioned" rather than throwing:
+        // the admin page is exactly where a broken configuration should be visible, not a 500.
+        SecretSource Resolve(string name) =>
+            string.IsNullOrWhiteSpace(name) ? SecretSource.None : _secrets.ResolveSource(name);
     }
 }
 
@@ -133,8 +160,13 @@ public sealed class UpdateModelEndpointUseCase
     private const int MaximumTimeoutSeconds = 600;
 
     private readonly IAppSettingStore _settings;
+    private readonly IUiSecretStore _uiSecrets;
 
-    public UpdateModelEndpointUseCase(IAppSettingStore settings) => _settings = settings;
+    public UpdateModelEndpointUseCase(IAppSettingStore settings, IUiSecretStore uiSecrets)
+    {
+        _settings = settings;
+        _uiSecrets = uiSecrets;
+    }
 
     public async Task ExecuteAsync(
         ModelService service,
@@ -156,6 +188,29 @@ public sealed class UpdateModelEndpointUseCase
         if (update.SecretName is { } secretName)
         {
             await SetAsync(ModelSettingKeys.SecretName(service), ValidateSecretName(secretName), cancellationToken).ConfigureAwait(false);
+        }
+
+        // The key is stored under the endpoint's own secret name, so "which file would this have come from" and
+        // "what did the operator just type" are the same key. Resolving the name means reading the settings back
+        // when the request did not carry one.
+        if (update.Password is not null || update.ClearPassword == true)
+        {
+            var target = update.SecretName ?? await ReadSecretNameAsync(service, cancellationToken).ConfigureAwait(false);
+
+            if (update.ClearPassword == true)
+            {
+                await _uiSecrets.DeleteAsync(target, cancellationToken).ConfigureAwait(false);
+            }
+
+            if (update.Password is { } password)
+            {
+                if (password.Length is 0 or > 4096)
+                {
+                    throw new UseCaseException("model.password.invalid", "密钥不能为空，也不能超过 4096 个字符。");
+                }
+
+                await _uiSecrets.SetAsync(target, password, cancellationToken).ConfigureAwait(false);
+            }
         }
 
         if (update.TimeoutSeconds is { } timeout)
@@ -192,6 +247,29 @@ public sealed class UpdateModelEndpointUseCase
 
     private Task SetAsync(string key, string value, CancellationToken cancellationToken) =>
         _settings.SetAsync(key, value, cancellationToken);
+
+    /// <summary>
+    /// The secret name this endpoint currently resolves to. Read from the settings table (which is what the admin
+    /// page writes) and falling back to the built-in default, so a password typed before the name was ever set
+    /// still lands under the name the model clients will look up.
+    /// </summary>
+    private async Task<string> ReadSecretNameAsync(ModelService service, CancellationToken cancellationToken)
+    {
+        var stored = await _settings.GetAllAsync(cancellationToken).ConfigureAwait(false);
+        var key = ModelSettingKeys.SecretName(service);
+
+        if (stored.TryGetValue(key, out var value) && !string.IsNullOrWhiteSpace(value))
+        {
+            return value.Trim();
+        }
+
+        return service switch
+        {
+            ModelService.Transcription => TranscriptionSettings.Default.SecretName,
+            ModelService.Generation => GenerationSettings.Default.SecretName,
+            _ => EmbeddingSettings.Default.SecretName,
+        };
+    }
 
     private static string ValidateBaseUrl(string value)
     {

@@ -47,6 +47,24 @@ public interface IInputEntryRepository
     Task<IReadOnlyList<InputEntry>> ListRecentAsync(int limit, CancellationToken cancellationToken);
 
     /// <summary>
+    /// One page of entries, newest first, for the admin content list.
+    /// <para>
+    /// <paramref name="includeDeleted"/> exists because the retention sweep leaves tombstones (the row keeps a
+    /// historical article's provenance alive), and an operator looking for "what happened to that entry" needs
+    /// to be able to see them. The phone never asks for them: a capture the user deleted must not reappear in
+    /// the timeline.
+    /// </para>
+    /// </summary>
+    Task<IReadOnlyList<InputEntry>> ListPageAsync(
+        int offset,
+        int limit,
+        bool includeDeleted,
+        CancellationToken cancellationToken);
+
+    /// <summary>How many entries a page of the same shape would have in total.</summary>
+    Task<int> CountAsync(bool includeDeleted, CancellationToken cancellationToken);
+
+    /// <summary>
     /// Every entry, oldest first, including days that never produced a draft. Used by the export and the backup:
     /// §15.1 asks for 输入 in the export, and an input on a day with no reflection is still the user's material.
     /// </summary>

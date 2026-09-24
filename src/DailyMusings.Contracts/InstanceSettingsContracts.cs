@@ -14,11 +14,13 @@ public sealed record InstanceSettingsDto(
     bool BackupEnabled,
     string BackupLocalTime,
     string AudioCleanupLocalTime,
+    string ContentCleanupLocalTime,
     int BackupKeepCount,
     int RetrievalMaxMaterials,
     int RetrievalCandidateScanLimit,
     double RetrievalMinimumRelevance,
-    double RetrievalMinimumLexicalScore);
+    double RetrievalMinimumLexicalScore,
+    int InlineTranscriptionTimeoutSeconds);
 
 /// <summary>Every field is optional: absent means "leave it as it is".</summary>
 public sealed record UpdateInstanceSettingsRequest(
@@ -32,7 +34,9 @@ public sealed record UpdateInstanceSettingsRequest(
     int? RetrievalMaxMaterials,
     int? RetrievalCandidateScanLimit,
     double? RetrievalMinimumRelevance,
-    double? RetrievalMinimumLexicalScore);
+    double? RetrievalMinimumLexicalScore,
+    string? ContentCleanupLocalTime = null,
+    int? InlineTranscriptionTimeoutSeconds = null);
 
 /// <summary>
 /// The listening port, which is the one setting that cannot live in the settings table (§8.1).

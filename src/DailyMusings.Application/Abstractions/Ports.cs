@@ -36,6 +36,13 @@ public interface IDeviceRepository
     Task AddAsync(Device device, CancellationToken cancellationToken);
 
     Task UpdateAsync(Device device, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Removes the row entirely. Only ever called for a device that is already revoked: revoking is the security
+    /// action (it takes effect on the next request), deleting is housekeeping — it drops a dead credential's hash
+    /// out of the database so the revoked list stays a record of what happened rather than one that grows forever.
+    /// </summary>
+    Task DeleteAsync(DeviceId id, CancellationToken cancellationToken);
 }
 
 public interface IPairingCodeRepository

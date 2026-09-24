@@ -1,4 +1,5 @@
 using System.Globalization;
+using DailyMusings.Domain.Inputs;
 using DailyMusings.Domain.Time;
 
 namespace DailyMusings.Application.Configuration;
@@ -18,6 +19,13 @@ public sealed record ContentSettings
     public const string PublishWindowKey = "publish.windowMinutes";
     public const string AudioRetentionKey = "retention.audioDays";
 
+    /// <summary>
+    /// How long the captured content itself is kept after a day is confirmed. <c>-1</c> means "keep everything",
+    /// which is the default: a fresh instance never deletes anything on its own, and the audio policy above is
+    /// the only retention a user gets without asking for more.
+    /// </summary>
+    public const string ContentRetentionKey = "retention.contentDays";
+
     /// <summary>Default content time zone, per §7.</summary>
     public const string DefaultTimeZoneId = ContentTimeZone.DefaultId;
 
@@ -33,25 +41,31 @@ public sealed record ContentSettings
     /// <summary>Default audio retention, per decision A.1. Negative means "keep forever".</summary>
     public const int DefaultAudioRetentionDays = 30;
 
+    /// <summary>Content retention is off by default: nothing is deleted unless the user asks for it.</summary>
+    public const int DefaultContentRetentionDays = ContentRetentionPolicy.KeepForever;
+
     public static ContentSettings Default { get; } = new(
         DefaultTimeZoneId,
         DefaultGenerationTime,
         DefaultPublishTime,
         DefaultPublishWindowMinutes,
-        DefaultAudioRetentionDays);
+        DefaultAudioRetentionDays,
+        DefaultContentRetentionDays);
 
     public ContentSettings(
         string timeZoneId,
         TimeOnly generationLocalTime,
         TimeOnly publishLocalTime,
         int publishWindowMinutes,
-        int audioRetentionDays)
+        int audioRetentionDays,
+        int contentRetentionDays = DefaultContentRetentionDays)
     {
         TimeZoneId = timeZoneId;
         GenerationLocalTime = generationLocalTime;
         PublishLocalTime = publishLocalTime;
         PublishWindowMinutes = publishWindowMinutes;
         AudioRetentionDays = audioRetentionDays;
+        ContentRetentionDays = contentRetentionDays;
     }
 
     public string TimeZoneId { get; init; }
@@ -65,6 +79,14 @@ public sealed record ContentSettings
     /// <summary>Days to keep a recording. <c>-1</c> means "keep forever", <c>0</c> means "delete as soon as
     /// the day's draft is confirmed" (decision A.1).</summary>
     public int AudioRetentionDays { get; init; }
+
+    /// <summary>Days to keep the captured content itself after confirmation. <c>-1</c> (the default) keeps it
+    /// forever, and <c>0</c> deletes it as soon as the day is confirmed.</summary>
+    public int ContentRetentionDays { get; init; }
+
+    public AudioRetentionPolicy ResolveAudioRetention() => new(AudioRetentionDays);
+
+    public ContentRetentionPolicy ResolveContentRetention() => new(ContentRetentionDays);
 
     public TimeSpan PublishWindow => TimeSpan.FromMinutes(PublishWindowMinutes);
 
@@ -82,7 +104,8 @@ public sealed record ContentSettings
             ReadTime(values, GenerationTimeKey, DefaultGenerationTime),
             ReadTime(values, PublishTimeKey, DefaultPublishTime),
             ReadInt(values, PublishWindowKey, DefaultPublishWindowMinutes),
-            ReadInt(values, AudioRetentionKey, DefaultAudioRetentionDays));
+            ReadInt(values, AudioRetentionKey, DefaultAudioRetentionDays),
+            ReadInt(values, ContentRetentionKey, DefaultContentRetentionDays));
     }
 
     public IReadOnlyDictionary<string, string> ToValues() => new Dictionary<string, string>(StringComparer.Ordinal)
@@ -92,6 +115,7 @@ public sealed record ContentSettings
         [PublishTimeKey] = FormatTime(PublishLocalTime),
         [PublishWindowKey] = PublishWindowMinutes.ToString(CultureInfo.InvariantCulture),
         [AudioRetentionKey] = AudioRetentionDays.ToString(CultureInfo.InvariantCulture),
+        [ContentRetentionKey] = ContentRetentionDays.ToString(CultureInfo.InvariantCulture),
     };
 
     public static string FormatTime(TimeOnly time) => time.ToString("HH:mm", CultureInfo.InvariantCulture);

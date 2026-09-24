@@ -67,7 +67,7 @@ internal sealed class StubTokenProvider : IDeviceTokenProvider
 
 /// <summary>
 /// A recording stand-in for the server. It also observes whether the local audio still exists at the moment it is
-/// asked to upload — which is how the "delete only after confirmation" ordering gets tested rather than assumed.
+/// asked to upload — which is how "the device keeps its own copy" gets tested rather than assumed.
 /// </summary>
 internal sealed class FakeCaptureApiClient : ICaptureApiClient
 {
@@ -90,6 +90,25 @@ internal sealed class FakeCaptureApiClient : ICaptureApiClient
 
     public bool ReportAlreadyStored { get; set; }
 
+    /// <summary>
+    /// What the server recognises for a voice upload. <c>null</c> models the upload that answered while the model
+    /// was still working, which is the case the polling path exists for.
+    /// </summary>
+    public string? VoiceTranscript { get; set; } = "识别回来的文字。";
+
+    /// <summary>Whether that recognition succeeded or is still pending.</summary>
+    public string VoiceTranscriptionStatus { get; set; } = TranscriptionStatusNames.Succeeded;
+
+    /// <summary>What <c>GET /api/inputs/{id}</c> answers with. <c>null</c> models "not found".</summary>
+    public InputDto? ServerInput { get; set; }
+
+    /// <summary>Which entries were read back, in order.</summary>
+    public List<string> ReadInputIds { get; } = [];
+
+    /// <summary>What <c>GET /api/inputs</c> answers with.</summary>
+    public ApiResult<IReadOnlyList<InputDto>> InputsResult { get; set; } =
+        ApiResult<IReadOnlyList<InputDto>>.From([]);
+
     public Task<IngestResponse> UploadVoiceAsync(VoiceUpload upload, CancellationToken cancellationToken)
     {
         VoiceUploads.Add(upload);
@@ -105,7 +124,7 @@ internal sealed class FakeCaptureApiClient : ICaptureApiClient
             throw Failures.Dequeue();
         }
 
-        return Task.FromResult(BuildResponse(upload.IdempotencyKey, InputSourceNames.Voice));
+        return Task.FromResult(Entry(InputSourceNames.Voice, text: null));
     }
 
     public Task<IngestResponse> UploadTextAsync(TextUpload upload, CancellationToken cancellationToken)
@@ -122,42 +141,32 @@ internal sealed class FakeCaptureApiClient : ICaptureApiClient
             throw Failures.Dequeue();
         }
 
-        return Task.FromResult(BuildResponse(upload.IdempotencyKey, InputSourceNames.Text));
+        return Task.FromResult(Entry(InputSourceNames.Text, upload.Text));
     }
 
-    public Task<InputDto?> GetInputAsync(string serverInputId, CancellationToken cancellationToken) =>
-        Task.FromResult<InputDto?>(null);
-
-    /// <summary>Corrections the screen asked for, in order.</summary>
-    public List<(string InputId, string? Revised)> Revisions { get; } = [];
-
-    /// <summary>Entries whose transcription the screen asked to retry.</summary>
-    public List<string> TranscriptionRetries { get; } = [];
-
-    public Task<ApiResult<InputDto>> ReviseTranscriptAsync(
-        string inputId,
-        string? revisedTranscript,
-        CancellationToken cancellationToken)
+    public Task<InputDto?> GetInputAsync(string serverInputId, CancellationToken cancellationToken)
     {
-        Revisions.Add((inputId, revisedTranscript));
-        return Task.FromResult(ApiResult<InputDto>.Refused("test.not_implemented"));
-    }
+        ReadInputIds.Add(serverInputId);
 
-    public Task<ApiResult<InputDto>> RetryTranscriptionAsync(string inputId, CancellationToken cancellationToken)
-    {
-        TranscriptionRetries.Add(inputId);
-        return Task.FromResult(ApiResult<InputDto>.Refused("test.not_implemented"));
-    }
+        if (Exceptions.Count > 0)
+        {
+            throw Exceptions.Dequeue();
+        }
 
-    /// <summary>What the server would answer when a day is read. Defaults to "reached, nothing there".</summary>
-    public ApiResult<IReadOnlyList<InputDto>> InputsResult { get; set; } = ApiResult<IReadOnlyList<InputDto>>.From([]);
+        return Task.FromResult(ServerInput is null ? null : ServerInput with { Id = serverInputId });
+    }
 
     public Task<ApiResult<IReadOnlyList<InputDto>>> GetInputsAsync(string? contentDate, CancellationToken cancellationToken) =>
         Task.FromResult(InputsResult);
 
-    private IngestResponse BuildResponse(string idempotencyKey, string sourceType)
+    private IngestResponse Entry(string sourceType, string? text)
     {
         var id = $"server-{_nextServerId++}";
+        var isText = sourceType == InputSourceNames.Text;
+
+        // The server stores what the user typed as the transcript of a typed note, and what the model recognised for
+        // a recording (voice spec §0.1). OriginalTranscript stays a separate field, as it does on the wire.
+        var transcript = isText ? text : VoiceTranscript;
 
         return new IngestResponse(
             ReportAlreadyStored,
@@ -167,16 +176,16 @@ internal sealed class FakeCaptureApiClient : ICaptureApiClient
                 "2026-03-01",
                 "2026-03-01T15:50:00.0000000+00:00",
                 480,
-                sourceType == InputSourceNames.Text ? "text" : null,
                 null,
-                sourceType == InputSourceNames.Text ? "text" : null,
-                sourceType == InputSourceNames.Text ? TranscriptionStatusNames.NotApplicable : TranscriptionStatusNames.Pending,
                 null,
-                sourceType == InputSourceNames.Voice,
-                sourceType == InputSourceNames.Voice ? "audio/mp4" : null,
+                transcript,
+                isText ? TranscriptionStatusNames.NotApplicable : VoiceTranscriptionStatus,
                 null,
+                !isText,
+                isText ? null : "audio/mp4",
+                isText ? null : 12.5,
                 false,
-                sourceType == InputSourceNames.Voice ? JobStatusNames.Pending : null,
+                isText ? null : JobStatusNames.Pending,
                 0,
                 null,
                 []));

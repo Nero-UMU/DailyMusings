@@ -2,28 +2,67 @@
 @rendermode InteractiveServer
 @attribute [Authorize]
 @inject IServiceScopeFactory ScopeFactory
+@inject IJSRuntime Js
 @inject ILoggerFactory LoggerFactory
 
-<h1>已配对设备</h1>
-<p class="hint">
-    每台设备用自己独立的令牌访问实例。令牌以哈希保存，可单独轮换或撤销；
-    撤销在<strong>下一次请求</strong>即生效，不需要重启服务。
-</p>
+@* 设备分区：配对码、已连接设备、已撤销设备。配对码从状态页搬到了这里 —— 它属于「设备」这件事。 *@
+
+<PageHeader Title="设备"
+            Hint="每台设备用自己独立的令牌访问实例，令牌以哈希保存、可单独轮换或撤回。撤回在下一次请求即生效，不需要重启服务。">
+    <Actions>
+        <button class="btn btn-primary" @onclick="IssueCodeAsync" disabled="@_busy || _issuingCode">
+            @(_issuingCode ? "正在签发…" : "生成配对码")
+        </button>
+    </Actions>
+</PageHeader>
+
+@if (_message is not null)
+{
+    <p class="notice ok">@_message</p>
+}
 
 @if (_error is not null)
 {
     <p class="notice error">@_error</p>
 }
 
-@if (_rotated is not null)
+@if (_code is { } code)
 {
-    <p class="notice ok">
-        设备 <code>@_rotated.DeviceId</code> 的新令牌：
-        <br />
-        <code class="code">@_rotated.Token</code>
-        <br />
-        旧令牌已立即失效。<strong>此值只显示这一次</strong>，请立刻填入客户端。
-    </p>
+    <div class="card">
+        <div class="card-head">
+            <h2>配对码</h2>
+            <span class="badge badge-warn">10 分钟内有效 · 只能用一次</span>
+        </div>
+
+        <p class="code code-lg">@(code.Code)</p>
+
+        <p class="hint">
+            有效期至 @AdminFormat.Utc(code.ExpiresAtUtc)（本地时间 @AdminFormat.When(code.ExpiresAtUtc)）。
+            在客户端里输入它即可完成配对；<strong>此码只显示这一次</strong>，关掉页面就再也看不到，
+            需要时重新签发一个即可（旧码会在到期或使用后失效）。
+        </p>
+
+        <div class="actions">
+            <button class="btn" @onclick="() => CopyAsync(code.Code)">复制配对码</button>
+            <button class="btn" @onclick="DismissCode">收起</button>
+        </div>
+    </div>
+}
+
+@if (_rotated is { } rotated)
+{
+    <div class="notice ok">
+        <strong>新令牌已经签发，旧令牌立即失效。</strong>
+        <p class="code code-md">@rotated.Token</p>
+        <p>
+            这是<strong>唯一一次</strong>能看到明文令牌的机会，请立刻填进客户端的设置页。
+            离开或刷新页面后就无法再次查看，只能再轮换一次。
+        </p>
+        <div class="actions">
+            <button class="btn" @onclick="() => CopyAsync(rotated.Token)">复制令牌</button>
+            <button class="btn" @onclick="DismissToken">我已保存，收起</button>
+        </div>
+    </div>
 }
 
 @if (_devices is null)
@@ -33,93 +72,185 @@
 else if (_devices.Count == 0)
 {
     <div class="card">
-        <p>尚未配对任何设备。</p>
-        <div class="actions">
-            <a class="btn btn-primary" href="/">去状态页生成配对码</a>
-        </div>
+        <p>还没有任何设备。点右上角「生成配对码」，然后在客户端里输入它。</p>
     </div>
 }
 else
 {
-    <div class="table-wrap">
-        <table class="table">
-            <thead>
-                <tr>
-                    <th>名称</th>
-                    <th>平台</th>
-                    <th>状态</th>
-                    <th>配对时间（UTC）</th>
-                    <th>最近活动（UTC）</th>
-                    <th>操作</th>
-                </tr>
-            </thead>
-            <tbody>
-                @foreach (var device in _devices)
-                {
-                    <tr>
-                        <td><strong>@device.Name</strong></td>
-                        <td>@(device.Platform ?? "—")</td>
-                        <td>
-                            <span class="badge @(device.IsRevoked ? "badge-muted" : "badge-ok")">
-                                @(device.IsRevoked ? "已撤销" : "有效")
-                            </span>
-                        </td>
-                        <td class="nowrap">@device.CreatedAtUtc.ToString("u")</td>
-                        <td class="nowrap">@(device.LastSeenAtUtc?.ToString("u") ?? "—")</td>
-                        <td>
-                            @if (!device.IsRevoked)
-                            {
-                                @if (_confirmingRevoke == device.Id)
-                                {
-                                    <div class="stack">
-                                        <span class="hint">撤销后该设备立刻失效，需要重新配对。</span>
-                                        <div class="actions">
-                                            <button class="btn-danger btn-sm" @onclick="() => RevokeAsync(device.Id)" disabled="@_busy">
-                                                确认撤销
-                                            </button>
-                                            <button class="btn-sm" @onclick="CancelRevoke" disabled="@_busy">取消</button>
+    @foreach (var group in Groups())
+    {
+        <div class="card-head">
+            <h2>@group.Title（@group.Items.Count）</h2>
+            <span class="hint">@group.Hint</span>
+        </div>
+
+        @if (group.Items.Count == 0)
+        {
+            <p class="notice info">这一组目前没有设备。</p>
+        }
+        else
+        {
+            <div class="table-wrap">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>名称</th>
+                            <th>平台</th>
+                            <th>创建时间（本地）</th>
+                            <th>最后在线（本地）</th>
+                            <th>状态</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var device in group.Items)
+                        {
+                            <tr>
+                                <td><strong>@device.Name</strong></td>
+                                <td>@(string.IsNullOrWhiteSpace(device.Platform) ? "—" : device.Platform)</td>
+                                <td class="nowrap">@AdminFormat.When(device.CreatedAtUtc)</td>
+                                <td class="nowrap">@AdminFormat.When(device.LastSeenAtUtc)</td>
+                                <td>
+                                    @if (device.IsRevoked)
+                                    {
+                                        <span class="badge badge-muted">已撤销</span>
+                                        <div class="hint">撤销于 @AdminFormat.When(device.RevokedAtUtc)</div>
+                                    }
+                                    else
+                                    {
+                                        <span class="badge badge-ok">已连接</span>
+                                    }
+                                </td>
+                                <td>
+                                    @if (_confirming == device.Id)
+                                    {
+                                        <div class="stack">
+                                            @if (_confirmDelete)
+                                            {
+                                                <span class="hint">
+                                                    这会<strong>真正删除</strong>这台设备的记录：令牌哈希不再留在库里。
+                                                    它对已经失效的设备才可用，删除后不可恢复（想再用就重新配对）。
+                                                </span>
+                                                <div class="actions">
+                                                    <button class="btn-danger btn-sm"
+                                                            @onclick="() => DeleteAsync(device.Id)"
+                                                            disabled="@_busy">
+                                                        确认删除这条记录
+                                                    </button>
+                                                    <button class="btn btn-sm" @onclick="CancelConfirm" disabled="@_busy">取消</button>
+                                                </div>
+                                            }
+                                            else
+                                            {
+                                                <span class="hint">
+                                                    撤回后这台设备立刻失效，客户端会报「令牌无效」，需要重新配对才能继续采集。
+                                                    其他设备不受影响。
+                                                </span>
+                                                <div class="actions">
+                                                    <button class="btn-danger btn-sm"
+                                                            @onclick="() => RevokeAsync(device.Id)"
+                                                            disabled="@_busy">
+                                                        确认撤回授权
+                                                    </button>
+                                                    <button class="btn btn-sm" @onclick="CancelConfirm" disabled="@_busy">取消</button>
+                                                </div>
+                                            }
                                         </div>
-                                    </div>
-                                }
-                                else
-                                {
-                                    <div class="actions">
-                                        <button class="btn-sm" @onclick="() => RotateAsync(device.Id)" disabled="@_busy">
-                                            轮换令牌
-                                        </button>
-                                        <button class="btn-sm" @onclick="() => BeginRevoke(device.Id)" disabled="@_busy">
-                                            撤销…
-                                        </button>
-                                    </div>
-                                }
-                            }
-                            else
-                            {
-                                <span class="muted">—</span>
-                            }
-                        </td>
-                    </tr>
-                }
-            </tbody>
-        </table>
-    </div>
+                                    }
+                                    else if (device.IsRevoked)
+                                    {
+                                        <div class="actions">
+                                            <button class="btn btn-sm"
+                                                    @onclick="() => BeginConfirm(device.Id, delete: true)"
+                                                    disabled="@_busy">
+                                                从列表移除…
+                                            </button>
+                                        </div>
+                                    }
+                                    else
+                                    {
+                                        <div class="actions">
+                                            <button class="btn btn-sm"
+                                                    @onclick="() => BeginRotate(device.Id)"
+                                                    disabled="@_busy">
+                                                更换设备令牌…
+                                            </button>
+                                            <button class="btn btn-sm"
+                                                    @onclick="() => BeginConfirm(device.Id, delete: false)"
+                                                    disabled="@_busy">
+                                                撤回授权…
+                                            </button>
+                                        </div>
+
+                                        @if (_confirmingRotate == device.Id)
+                                        {
+                                            <div class="risk">
+                                                <strong>更换令牌会让旧令牌立刻失效。</strong>
+                                                <p>
+                                                    新令牌只显示一次，必须马上填进客户端；如果填丢了，只能再轮换一次。
+                                                </p>
+                                                <div class="actions">
+                                                    <button class="btn-danger btn-sm"
+                                                            @onclick="() => RotateAsync(device.Id)"
+                                                            disabled="@_busy">
+                                                        确认更换
+                                                    </button>
+                                                    <button class="btn btn-sm" @onclick="CancelConfirm" disabled="@_busy">取消</button>
+                                                </div>
+                                            </div>
+                                        }
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    }
 }
 
 @code {
     private IReadOnlyList<Device>? _devices;
+    private IssuedPairingCode? _code;
     private RotatedDeviceToken? _rotated;
-    private bool _busy;
-
-    /// <summary>Which device the operator has asked to revoke, so a destructive action takes two clicks.</summary>
-    private DeviceId? _confirmingRevoke;
-
+    private string? _message;
     private string? _error;
+    private bool _busy;
+    private bool _issuingCode;
+
+    /// <summary>Which device a destructive action is about to happen to, so it takes two clicks.</summary>
+    private DeviceId? _confirming;
+
+    /// <summary>Whether <see cref="_confirming"/> is the 「从列表移除」 path rather than 「撤回授权」.</summary>
+    private bool _confirmDelete;
+
+    private DeviceId? _confirmingRotate;
 
     private ILogger Logger => LoggerFactory.CreateLogger("DailyMusings.Admin.Devices");
 
     protected override async Task OnInitializedAsync()
     {
+        // Guarded as well: an unguarded first load terminated the circuit when the database was momentarily
+        // unavailable, and the page stayed on「正在读取…」for ever.
         _error = await AdminOperation.RunAsync(LoadAsync, Logger);
+    }
+
+    private IReadOnlyList<(string Title, string Hint, IReadOnlyList<Device> Items)> Groups()
+    {
+        var devices = _devices ?? [];
+
+        return
+        [
+            (
+                "已连接",
+                "这些设备的令牌当前有效，可以继续采集。",
+                devices.Where(device => !device.IsRevoked).ToArray()),
+            (
+                "已撤销",
+                "令牌已经失效，设备无法再访问实例；重新配对即可恢复。",
+                devices.Where(device => device.IsRevoked).ToArray()),
+        ];
     }
 
     private async Task LoadAsync()
@@ -130,24 +261,78 @@ else
             .ExecuteAsync(CancellationToken.None);
     }
 
-    private void BeginRevoke(DeviceId deviceId)
+    private async Task IssueCodeAsync()
     {
+        _issuingCode = true;
+        _message = null;
         _error = null;
-        _rotated = null;
-        _confirmingRevoke = deviceId;
+
+        try
+        {
+            // Every handler body goes through the guard: an exception escaping an @onclick handler terminates the
+            // circuit, and from then on every button on the page is dead — which an operator reports as
+            // 「生成配对码 点不了」, not as an error.
+            var failure = await AdminOperation.RunAsync(
+                async () =>
+                {
+                    await using var scope = ScopeFactory.CreateAsyncScope();
+                    _code = await scope.ServiceProvider
+                        .GetRequiredService<IssuePairingCodeUseCase>()
+                        .ExecuteAsync(CancellationToken.None);
+
+                    _rotated = null;
+                },
+                Logger);
+
+            if (failure is not null)
+            {
+                _error = failure;
+            }
+        }
+        finally
+        {
+            _issuingCode = false;
+        }
     }
 
-    private void CancelRevoke() => _confirmingRevoke = null;
+    private void BeginRotate(DeviceId deviceId)
+    {
+        _message = null;
+        _error = null;
+        _rotated = null;
+        _confirming = null;
+        _confirmingRotate = deviceId;
+    }
+
+    private void BeginConfirm(DeviceId deviceId, bool delete)
+    {
+        _message = null;
+        _error = null;
+        _rotated = null;
+        _confirmingRotate = null;
+        _confirming = deviceId;
+        _confirmDelete = delete;
+    }
+
+    private void CancelConfirm()
+    {
+        _confirming = null;
+        _confirmDelete = false;
+        _confirmingRotate = null;
+    }
+
+    private void DismissCode() => _code = null;
+
+    private void DismissToken() => _rotated = null;
 
     private async Task RevokeAsync(DeviceId deviceId)
     {
         _busy = true;
         _error = null;
+        _message = null;
 
         try
         {
-            // Guarded: an exception escaping an @onclick handler terminates the Blazor circuit, after which every
-            // control on this page is inert. That is the real shape of "轮换令牌 / 撤销 点不了".
             var failure = await AdminOperation.RunAsync(
                 async () =>
                 {
@@ -166,7 +351,55 @@ else
                 return;
             }
 
-            _confirmingRevoke = null;
+            _confirming = null;
+            _message = "已撤回该设备的授权，它的令牌立刻失效。";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    /// <summary>
+    /// 「删除已撤销的设备」：真正把设备行删掉。
+    /// <para>
+    /// 与「撤回授权」是两件事，而且服务端也分成两条路由：撤回是安全动作（对一台还在用的设备，立刻失效），
+    /// 删除是清理动作（只对已撤销的设备，把死掉的令牌哈希从库里去掉）。这样分开，操作者不会在没打算
+    /// 切断某台设备的时候顺手把它删掉。
+    /// </para>
+    /// </summary>
+    private async Task DeleteAsync(DeviceId deviceId)
+    {
+        _busy = true;
+        _error = null;
+        _message = null;
+
+        try
+        {
+            Device? device = null;
+
+            var failure = await AdminOperation.RunAsync(
+                async () =>
+                {
+                    await using var scope = ScopeFactory.CreateAsyncScope();
+                    device = _devices?.FirstOrDefault(item => item.Id == deviceId);
+
+                    await scope.ServiceProvider
+                        .GetRequiredService<DeleteDeviceUseCase>()
+                        .ExecuteAsync(deviceId, CancellationToken.None);
+
+                    await LoadAsync();
+                },
+                Logger);
+
+            if (failure is not null)
+            {
+                _error = failure;
+                return;
+            }
+
+            _confirming = null;
+            _message = $"已删除「{device?.Name ?? deviceId.ToString()}」的设备记录，它的令牌哈希不再留在库里。";
         }
         finally
         {
@@ -178,6 +411,7 @@ else
     {
         _busy = true;
         _error = null;
+        _message = null;
 
         try
         {
@@ -196,11 +430,41 @@ else
             if (failure is not null)
             {
                 _error = failure;
+                return;
             }
+
+            _confirmingRotate = null;
+            _message = "已更换令牌：新令牌见下方，旧令牌立刻失效。";
         }
         finally
         {
             _busy = false;
         }
+    }
+
+    /// <summary>
+    /// 复制到剪贴板。走 <c>navigator.clipboard</c>，它在明文 HTTP 下被浏览器禁用（只有 HTTPS 与 localhost 可用），
+    /// 所以失败不是异常情况而是一种正常结果：提示手动选中复制，而不是让操作者以为按钮坏了。
+    /// </summary>
+    private async Task CopyAsync(string value)
+    {
+        _message = null;
+        _error = null;
+
+        var failure = await AdminOperation.RunAsync(
+            async () =>
+            {
+                await Js.InvokeVoidAsync("navigator.clipboard.writeText", value);
+            },
+            Logger);
+
+        if (failure is null)
+        {
+            _message = "已复制到剪贴板。";
+            return;
+        }
+
+        // The JS exception text is a browser message and would be noise here; what matters is what to do instead.
+        _message = "浏览器没有允许自动复制（明文 HTTP 下会禁用剪贴板）。请在上面的框里手动选中后复制。";
     }
 }

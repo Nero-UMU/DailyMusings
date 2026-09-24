@@ -34,14 +34,60 @@ public static class SourceDriftNames
     public const string Unresolvable = "unresolvable";
 }
 
+/// <summary>Wire names for where a topic's name came from (§6.2).</summary>
+public static class TopicOriginNames
+{
+    /// <summary>A person typed this name.</summary>
+    public const string User = "user";
+
+    /// <summary>Generation coined it because the existing vocabulary had nothing that fitted.</summary>
+    public const string Model = "model";
+}
+
+/// <summary>
+/// A topic plus what it is used by. The two counts are what the admin list needs in order to show whether a
+/// topic can be deleted without asking: <c>ArticleCount</c> is the deletion guard's input, and
+/// <c>InputCount</c> is how much capture material is filed under it.
+/// </summary>
 public sealed record TopicDto(
     string Id,
     string Name,
     string CreatedAtUtc,
     string? MergedIntoId,
-    string? MergedAtUtc);
+    string? MergedAtUtc,
+    string Origin,
+    int ArticleCount,
+    int InputCount);
 
 public sealed record TopicListResponse(IReadOnlyList<TopicDto> Items);
+
+/// <summary>One article that uses a topic, as the "migrate these first" list shows it.</summary>
+public sealed record TopicUsageArticleDto(
+    string ReflectionId,
+    string ContentDate,
+    string VersionId,
+    string Title,
+    string Status,
+    string? PublicationStatus);
+
+/// <summary>
+/// Which articles are holding a topic in use (docs/开发指导.md §6.2: 删除主题不得删除原始输入, and an in-use
+/// topic is refused rather than silently detached).
+/// </summary>
+public sealed record TopicUsageDto(
+    string TopicId,
+    IReadOnlyList<TopicUsageArticleDto> Articles,
+    int InputCount);
+
+/// <summary>
+/// Re-files the working version of a day's article under different topics — the "内容管理" half of the
+/// deletion guard. Only the day's own filing changes; no historical source map is touched (§6.2, A.9).
+/// </summary>
+public sealed record AssignReflectionTopicsRequest(string? PrimaryTopicId, IReadOnlyList<string>? SecondaryTopicIds);
+
+/// <summary>A topic an article was written about. <c>IsPrimary</c> marks the day's main theme.</summary>
+public sealed record TopicRefDto(string Id, string Name, bool IsPrimary);
+
 
 public sealed record CreateTopicRequest(string Name);
 
@@ -96,7 +142,13 @@ public sealed record ReflectionVersionDto(
     /// <summary>Null means the source check has not completed. It never means "clean" (§8.4).</summary>
     string? SourcesCheckedAtUtc,
     IReadOnlyList<SourceReferenceDto> Sources,
-    IReadOnlyList<UnsourcedClaimDto> UnsourcedClaims);
+    IReadOnlyList<UnsourcedClaimDto> UnsourcedClaims,
+
+    /// <summary>
+    /// The topics this version is about, primary first (§6.2). Empty is a normal answer: an article written
+    /// before this feature existed has no topics, and the admin page says so rather than inventing one.
+    /// </summary>
+    IReadOnlyList<TopicRefDto> Topics);
 
 /// <summary>Whether semantic history retrieval is usable, so the client can say "语义检索重建中" (§8.3).</summary>
 public sealed record SemanticSearchDto(bool Enabled, bool Available, bool Rebuilding);
@@ -120,7 +172,11 @@ public sealed record ReflectionDto(
     ReflectionVersionDto? WorkingVersion,
     SemanticSearchDto SemanticSearch);
 
-public sealed record ReflectionListResponse(IReadOnlyList<ReflectionDto> Items);
+/// <summary>
+/// A page of drafts. Paged because the admin content list is a table over every day the instance has ever
+/// written, and "load them all" stops being an answer long before the archive is large.
+/// </summary>
+public sealed record ReflectionListResponse(IReadOnlyList<ReflectionDto> Items, int Total, int Page, int PageSize);
 
 /// <summary>
 /// A generation request. Both flags are user decisions that must be explicit: §7 lets the user go ahead despite

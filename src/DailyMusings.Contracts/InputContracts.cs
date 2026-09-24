@@ -53,7 +53,11 @@ public sealed record InputDto(
     string? PrimaryTopicId,
     IReadOnlyList<string> SecondaryTopicIds);
 
-public sealed record InputListResponse(IReadOnlyList<InputDto> Items);
+/// <summary>
+/// A page of captures. <c>Items</c> is what every existing caller already reads; the three new fields are what
+/// lets the admin content list page through the archive instead of guessing a limit.
+/// </summary>
+public sealed record InputListResponse(IReadOnlyList<InputDto> Items, int Total, int Page, int PageSize);
 
 /// <summary>
 /// Text capture. <c>IdempotencyKey</c> is what makes a retried upload harmless; <c>CreatedAtUtc</c> and
@@ -92,4 +96,11 @@ public static class VoiceUploadFields
     public const string CreatedOffsetMinutes = "createdOffsetMinutes";
     public const string DurationMilliseconds = "durationMilliseconds";
     public const string IdempotencyKey = "idempotencyKey";
+
+    /// <summary>
+    /// Optional. Absent means "yes, try to transcribe while I wait", which is the §8.2 behaviour the phone
+    /// wants; <c>false</c> asks for the pure queue path, which is what a caller that would rather not hold a
+    /// connection open sends.
+    /// </summary>
+    public const string TranscribeNow = "transcribeNow";
 }

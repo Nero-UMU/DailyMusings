@@ -72,6 +72,12 @@ public sealed class SqliteDeviceRepository : IDeviceRepository
             ("$lastSeen", SqliteValues.InstantOrNull(device.LastSeenAtUtc)),
             ("$revokedAt", SqliteValues.InstantOrNull(device.RevokedAtUtc))).ConfigureAwait(false);
 
+    public async Task DeleteAsync(DeviceId id, CancellationToken cancellationToken) =>
+        await _accessor.ExecuteAsync(
+            "DELETE FROM device WHERE id = $id;",
+            cancellationToken,
+            ("$id", id.ToString())).ConfigureAwait(false);
+
     private static Device Map(SqliteDataReader reader) =>
         Device.Rehydrate(
             SqliteIds.Device(reader.GetString(0)),

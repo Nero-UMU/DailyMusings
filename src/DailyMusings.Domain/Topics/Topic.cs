@@ -3,6 +3,23 @@ using DailyMusings.Domain.Common;
 namespace DailyMusings.Domain.Topics;
 
 /// <summary>
+/// Who named a topic (docs/开发指导.md §6.2).
+/// <para>
+/// Recorded for display and audit, never for authority: a model-named topic and a user-named one can be
+/// renamed, merged and deleted by exactly the same rules. The distinction exists so the admin list can say
+/// "the model coined this name" — a fact the user needs in order to decide whether to keep it.
+/// </para>
+/// </summary>
+public enum TopicOrigin
+{
+    /// <summary>A person typed this name.</summary>
+    User = 0,
+
+    /// <summary>Generation proposed this name because the existing vocabulary had nothing that fitted.</summary>
+    Model = 1,
+}
+
+/// <summary>
 /// A theme that inputs are filed under (docs/开发指导.md §6.2).
 /// <para>
 /// Merge is modelled as a tombstone rather than a delete (decision A.9): the row survives with
@@ -12,11 +29,12 @@ namespace DailyMusings.Domain.Topics;
 /// </summary>
 public sealed class Topic
 {
-    private Topic(TopicId id, string name, DateTimeOffset createdAtUtc)
+    private Topic(TopicId id, string name, DateTimeOffset createdAtUtc, TopicOrigin origin)
     {
         Id = id;
         Name = name;
         CreatedAtUtc = createdAtUtc;
+        Origin = origin;
     }
 
     /// <summary>Stable and immutable for the lifetime of the topic.</summary>
@@ -26,16 +44,23 @@ public sealed class Topic
 
     public DateTimeOffset CreatedAtUtc { get; }
 
+    /// <summary>Immutable: a rename does not make a model-named topic the user's, or the other way round.</summary>
+    public TopicOrigin Origin { get; }
+
     public TopicId? MergedIntoId { get; private set; }
 
     public DateTimeOffset? MergedAtUtc { get; private set; }
 
     public bool IsMerged => MergedIntoId is not null;
 
-    public static Topic Create(TopicId id, string name, DateTimeOffset createdAtUtc)
+    /// <summary>Creates a topic a person named. The overload with an origin is for the generation path.</summary>
+    public static Topic Create(TopicId id, string name, DateTimeOffset createdAtUtc) =>
+        Create(id, name, createdAtUtc, TopicOrigin.User);
+
+    public static Topic Create(TopicId id, string name, DateTimeOffset createdAtUtc, TopicOrigin origin)
     {
         ValidateName(name);
-        return new Topic(id, name.Trim(), createdAtUtc);
+        return new Topic(id, name.Trim(), createdAtUtc, origin);
     }
 
     /// <summary>
@@ -47,9 +72,10 @@ public sealed class Topic
         string name,
         DateTimeOffset createdAtUtc,
         TopicId? mergedIntoId,
-        DateTimeOffset? mergedAtUtc)
+        DateTimeOffset? mergedAtUtc,
+        TopicOrigin origin = TopicOrigin.User)
     {
-        var topic = Create(id, name, createdAtUtc);
+        var topic = Create(id, name, createdAtUtc, origin);
 
         if (mergedIntoId is { IsEmpty: false } target)
         {

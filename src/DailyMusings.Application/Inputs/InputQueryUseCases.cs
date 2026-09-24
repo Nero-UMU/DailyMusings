@@ -20,6 +20,13 @@ public sealed record InputStatusView(InputEntry Entry, ProcessingJob? Transcript
     public string? FailureCode => TranscriptionJob?.ErrorCode ?? Entry.TranscriptionErrorCode;
 }
 
+/// <summary>One page of captures plus the total a pager needs (docs/开发指导.md §13).</summary>
+public sealed record InputPage(IReadOnlyList<InputStatusView> Items, int Total, int Page, int PageSize)
+{
+    public static InputPage Single(IReadOnlyList<InputStatusView> items) =>
+        new(items, items.Count, 1, Math.Max(items.Count, 1));
+}
+
 /// <summary>Reads entries for a day, or the most recent ones.</summary>
 public sealed class ListInputsUseCase
 {
@@ -41,6 +48,54 @@ public sealed class ListInputsUseCase
             ? await _inputs.ListByContentDateAsync(day, cancellationToken).ConfigureAwait(false)
             : await _inputs.ListRecentAsync(recentLimit, cancellationToken).ConfigureAwait(false);
 
+        return await ToViewsAsync(entries, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// One page for the admin content list.
+    /// <para>
+    /// A day query stays exactly what it was — the phone's timeline asks for one day and shows all of it, in
+    /// capture order, and paging that would only be a way of hiding rows from a screen that has nothing to
+    /// scroll. The undated query is the archive view, and that one is newest-first and paged.
+    /// </para>
+    /// </summary>
+    /// <param name="includeDeleted">
+    /// Whether soft-deleted tombstones are listed. The retention sweep leaves them behind (they hold a
+    /// historical article's provenance), and an operator asking "what happened to that entry" needs to see
+    /// them; the phone never asks, because a capture the user deleted must not come back.
+    /// </param>
+    public async Task<InputPage> ExecutePageAsync(
+        ContentDate? contentDate,
+        int page,
+        int pageSize,
+        bool includeDeleted,
+        CancellationToken cancellationToken)
+    {
+        if (contentDate is { } day)
+        {
+            var dayEntries = await _inputs.ListByContentDateAsync(day, cancellationToken).ConfigureAwait(false);
+
+            return InputPage.Single(await ToViewsAsync(dayEntries, cancellationToken).ConfigureAwait(false));
+        }
+
+        var offset = (page - 1) * pageSize;
+        var entries = await _inputs
+            .ListPageAsync(offset, pageSize, includeDeleted, cancellationToken)
+            .ConfigureAwait(false);
+
+        var total = await _inputs.CountAsync(includeDeleted, cancellationToken).ConfigureAwait(false);
+
+        return new InputPage(
+            await ToViewsAsync(entries, cancellationToken).ConfigureAwait(false),
+            total,
+            page,
+            pageSize);
+    }
+
+    private async Task<IReadOnlyList<InputStatusView>> ToViewsAsync(
+        IReadOnlyList<InputEntry> entries,
+        CancellationToken cancellationToken)
+    {
         var views = new List<InputStatusView>(entries.Count);
 
         foreach (var entry in entries)

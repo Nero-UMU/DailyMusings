@@ -166,6 +166,7 @@ public sealed class ReflectionSchedulerService : BackgroundService
         var backupEnabled = instanceSettings.BackupEnabled;
         var backupTime = instanceSettings.BackupLocalTime;
         var cleanupTime = instanceSettings.AudioCleanupLocalTime;
+        var contentCleanupTime = instanceSettings.ContentCleanupLocalTime;
 
         await using var scope = _scopeFactory.CreateAsyncScope();
         var services = scope.ServiceProvider;
@@ -198,6 +199,19 @@ public sealed class ReflectionSchedulerService : BackgroundService
                 JobType.AudioCleanup,
                 day.ToString(),
                 $"audio-cleanup:{day}",
+                payload: null,
+                requeueFailed: false,
+                cancellationToken).ConfigureAwait(false);
+        }
+
+        // The content sweep runs after the audio one: it is the more destructive of the two, and doing it second
+        // means an instance that is interrupted between them has still done the reversible half.
+        if (now >= calendar.AtLocalTime(day, contentCleanupTime))
+        {
+            await jobs.EnsureAsync(
+                JobType.ContentCleanup,
+                day.ToString(),
+                $"content-cleanup:{day}",
                 payload: null,
                 requeueFailed: false,
                 cancellationToken).ConfigureAwait(false);

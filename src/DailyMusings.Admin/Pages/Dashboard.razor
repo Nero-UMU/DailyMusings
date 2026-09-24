@@ -4,131 +4,276 @@
 @inject IServiceScopeFactory ScopeFactory
 @inject ILoggerFactory LoggerFactory
 
-<h1>实例状态</h1>
-<p class="hint">
-    基础检查只覆盖本实例能控制的部分：数据库可写、媒体目录可写、后台任务执行器存活。
-    外部模型与 SMTP 的连通性<strong>故意不参与</strong>这里，它们各自有「测试连接」。
-</p>
+@* 状态分区：一个实例现在是什么样子。只有聚合数字，没有任何随想正文、标题或主题名 —— 这是刻意的，
+   统计读数是最容易顺手把私人内容泄漏出去的地方（InstanceStatistics 的类型本身就不允许带这些字段）。 *@
+
+<PageHeader Title="状态"
+            Hint="今日采集与稿件、累计数量、队列、设备与能力状态的汇总。外部模型与 SMTP 的连通性故意不参与这里的健康检查，它们各有「测试连接」。">
+    <Actions>
+        <button class="btn" @onclick="RefreshAsync" disabled="@_busy">刷新</button>
+        <a class="btn btn-primary" href="/data">去看数据管理</a>
+    </Actions>
+</PageHeader>
 
 @if (_error is not null)
 {
     <p class="notice error">@_error</p>
 }
 
-@if (_health is null)
+@if (_statistics is null)
 {
     <p class="muted">正在读取…</p>
 }
 else
 {
-    <p class="notice @(_health.Healthy ? "ok" : "error")">
-        <strong>@(_health.Healthy ? "全部正常。" : "存在失败的检查项。")</strong>
-        检查时间 @_health.CheckedAtUtc.ToString("u")
-    </p>
-
-    <div class="table-wrap">
-        <table class="table">
-            <thead>
-                <tr>
-                    <th>检查项</th>
-                    <th>结果</th>
-                    <th>说明</th>
-                </tr>
-            </thead>
-            <tbody>
-                @foreach (var probe in _health.Probes)
+    <div class="stat-grid">
+        <div class="stat">
+            <span class="label">今日随想（@_statistics.Today）</span>
+            <span class="value">@_statistics.TodayInputCount</span>
+            <span class="sub">录音 @_statistics.TodayVoiceCount · 手写 @_statistics.TodayTextCount</span>
+        </div>
+        <div class="stat">
+            <span class="label">今日稿件状态</span>
+            <span class="value value-sm">@AdminLabels.ReflectionText(_statistics.TodayReflectionStatus)</span>
+            <span class="sub">
+                @if (_statistics.LastGenerationAtUtc is { } last)
                 {
-                    <tr>
-                        <td><code>@probe.Name</code></td>
-                        <td>
-                            <span class="badge @(probe.Healthy ? "badge-ok" : "badge-err")">
-                                @(probe.Healthy ? "通过" : "失败")
-                            </span>
-                        </td>
-                        <td class="muted">@(probe.Detail ?? "—")</td>
-                    </tr>
+                    <text>上次生成 @AdminFormat.When(last)（本地时间）</text>
                 }
-            </tbody>
-        </table>
+                else
+                {
+                    <text>还没有生成过</text>
+                }
+            </span>
+        </div>
+        <div class="stat">
+            <span class="label">已发布博客</span>
+            <span class="value">@_statistics.PublishedCount</span>
+            <span class="sub">写出 draft: false 的 Markdown 文件</span>
+        </div>
+        <div class="stat">
+            <span class="label">草稿 / 待发布</span>
+            <span class="value">@_statistics.DraftReflectionCount / @_statistics.PendingPublicationCount</span>
+            <span class="sub">草稿 = 还没确认的稿件条数</span>
+        </div>
+        <div class="stat">
+            <span class="label">累计随想</span>
+            <span class="value">@_statistics.TotalInputCount</span>
+            <span class="sub">含已按保留策略清理内容的条目</span>
+        </div>
+        <div class="stat">
+            <span class="label">累计稿件</span>
+            <span class="value">@_statistics.TotalReflectionCount</span>
+            <span class="sub">其中已确认 @_statistics.ConfirmedReflectionCount 篇</span>
+        </div>
+        <div class="stat">
+            <span class="label">主题数</span>
+            <span class="value">@_statistics.TopicCount</span>
+            <span class="sub">主题管理在<a href="/content">内容管理</a>页下方</span>
+        </div>
+        <div class="stat">
+            <span class="label">设备</span>
+            <span class="value">@_statistics.ActiveDeviceCount</span>
+            <span class="sub">已撤销 @_statistics.RevokedDeviceCount 台</span>
+        </div>
+        <div class="stat">
+            <span class="label">队列：待执行 / 执行中</span>
+            <span class="value">@_statistics.QueuePending / @_statistics.QueueRunning</span>
+            <span class="sub">
+                失败 @_statistics.QueueFailed 条
+                @if (_statistics.QueueFailed > 0)
+                {
+                    <text>· 失败任务在「系统设置」的日志里查</text>
+                }
+            </span>
+        </div>
+        <div class="stat">
+            <span class="label">媒体占用</span>
+            <span class="value value-sm">@AdminFormat.Bytes(_statistics.MediaBytes)</span>
+            <span class="sub">录音等媒体文件</span>
+        </div>
+        <div class="stat">
+            <span class="label">数据库占用</span>
+            <span class="value value-sm">@AdminFormat.Bytes(_statistics.DatabaseBytes)</span>
+            <span class="sub">SQLite 主文件</span>
+        </div>
+    </div>
+
+    <div class="card-grid">
+        <div class="card">
+            <div class="card-head">
+                <h2>能力状态</h2>
+            </div>
+
+            <p class="hint">
+                这三项决定「实例现在能做到什么」，与基础健康检查分开：模型或 SMTP 不可用不会让实例显得不健康。
+            </p>
+
+            <div class="stack">
+                <div>
+                    <span class="badge @(_statistics.GenerationEnabled ? "badge-ok" : "badge-muted")">
+                        文章生成模型@(_statistics.GenerationEnabled ? "已启用" : "未启用")
+                    </span>
+                    <span class="hint">
+                        @if (_statistics.GenerationEnabled)
+                        {
+                            <text>生成时刻到了会往队列里放任务。</text>
+                        }
+                        else
+                        {
+                            <text>未启用时调度器不会生成任何稿件；在<a href="/models">模型管理</a>页配置并启用。</text>
+                        }
+                    </span>
+                </div>
+
+                <div>
+                    <span class="badge @(_statistics.SmtpConfigured ? "badge-ok" : "badge-muted")">
+                        SMTP@(_statistics.SmtpConfigured ? "已启用" : "未启用")
+                    </span>
+                    <span class="hint">
+                        @if (_statistics.SmtpConfigured)
+                        {
+                            <text>还需要在<a href="/notifications">通知管理</a>页填收件地址并打开至少一个事件开关才会发信。</text>
+                        }
+                        else
+                        {
+                            <text>未启用时不会发出任何邮件；在<a href="/notifications">通知管理</a>页配置。</text>
+                        }
+                    </span>
+                </div>
+
+                <div>
+                    <span class="badge @(_statistics.SemanticSearchAvailable ? "badge-ok" : "badge-warn")">
+                        语义检索@(_statistics.SemanticSearchAvailable ? "可用" : "不可用")
+                    </span>
+                    <span class="hint">
+                        @if (_statistics.SemanticSearchAvailable)
+                        {
+                            <text>Embedding 索引与当前配置指纹一致。</text>
+                        }
+                        else
+                        {
+                            <text>
+                                语义检索重建中（或未配置 Embedding）：历史检索降级为主题标签与全文匹配，
+                                重建入口在<a href="/system">系统设置</a>页的「语义索引」。
+                            </text>
+                        }
+                    </span>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-head">
+                <h2>内容与时间</h2>
+                <a class="btn btn-sm" href="/publishing">去发布设置</a>
+            </div>
+
+            @if (_content is null)
+            {
+                <p class="muted">正在读取…</p>
+            }
+            else
+            {
+                <dl class="kv">
+                    <dt>内容时区</dt>
+                    <dd><code>@_content.TimeZoneId</code></dd>
+
+                    <dt>生成时刻</dt>
+                    <dd>@ContentSettings.FormatTime(_content.GenerationLocalTime)（内容时区）</dd>
+
+                    <dt>导出（发布）时刻</dt>
+                    <dd>@ContentSettings.FormatTime(_content.PublishLocalTime)（次日的这个时刻）</dd>
+
+                    <dt>执行窗口</dt>
+                    <dd>@_content.PublishWindowMinutes 分钟，超窗转 Expired，不自动补做</dd>
+
+                    <dt>录音保留</dt>
+                    <dd>@RetentionText(_content.AudioRetentionDays)</dd>
+
+                    <dt>内容保留</dt>
+                    <dd>@RetentionText(_content.ContentRetentionDays)</dd>
+                </dl>
+            }
+        </div>
     </div>
 }
 
-<h2>设备配对</h2>
-
 <div class="card">
-    @if (_code is null)
+    <div class="card-head">
+        <h2>基础健康检查</h2>
+        @if (_health is not null)
+        {
+            <span class="badge @(_health.Healthy ? "badge-ok" : "badge-err")">
+                @(_health.Healthy ? "全部正常" : "存在失败项")
+            </span>
+        }
+    </div>
+
+    <p class="hint">
+        只覆盖本实例能控制的部分：数据库可写、媒体目录可写、后台任务执行器存活，外加已应用的迁移版本。
+    </p>
+
+    @if (_health is null)
     {
-        <p>
-            配对码十分钟有效、只能使用一次。在客户端里输入它即可完成配对，
-            之后这台设备就用自己独立的令牌访问实例。
-        </p>
-        <div class="actions">
-            <button class="btn-primary" @onclick="IssueCodeAsync" disabled="@_issuing">
-                @(_issuing ? "正在签发…" : "生成配对码")
-            </button>
-        </div>
+        <p class="muted">正在读取…</p>
     }
     else
     {
-        <p class="notice ok">
-            配对码
-            <br />
-            <code class="code">@_code.Code</code>
-            <br />
-            有效期至 @_code.ExpiresAtUtc.ToString("u")（UTC）。
-            <strong>此码只显示这一次</strong>，关闭页面后无法再次查看。
-        </p>
-        <div class="actions">
-            <button @onclick="IssueCodeAsync" disabled="@_issuing">再签一个</button>
-            <a class="btn" href="/devices">查看已配对设备</a>
+        <p class="hint">检查时间 @AdminFormat.When(_health.CheckedAtUtc)（本地时间）</p>
+
+        <div class="table-wrap">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>检查项</th>
+                        <th>结果</th>
+                        <th>说明</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var probe in _health.Probes)
+                    {
+                        <tr>
+                            <td><code>@probe.Name</code></td>
+                            <td>
+                                <span class="badge @(probe.Healthy ? "badge-ok" : "badge-err")">
+                                    @(probe.Healthy ? "通过" : "失败")
+                                </span>
+                            </td>
+                            <td class="muted">@(probe.Detail ?? "—")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
         </div>
     }
 </div>
 
 @code {
+    private InstanceStatistics? _statistics;
+    private ContentSettings? _content;
     private HealthReport? _health;
-    private IssuedPairingCode? _code;
-    private bool _issuing;
     private string? _error;
+    private bool _busy;
 
     private ILogger Logger => LoggerFactory.CreateLogger("DailyMusings.Admin.Dashboard");
 
     protected override async Task OnInitializedAsync()
     {
-        // Guarded as well: an unguarded first load left the page on "正在读取…" for ever, or took the circuit down
+        // Guarded as well: an unguarded first load left the page on「正在读取…」for ever, or took the circuit down
         // when the database was momentarily unavailable.
         _error = await AdminOperation.RunAsync(LoadAsync, Logger);
     }
 
-    private async Task LoadAsync()
+    private async Task RefreshAsync()
     {
-        // A fresh scope per data load: the circuit outlives a request, so resolving scoped services into the
-        // component would hold a database connection open for as long as the browser tab lives.
-        await using var scope = ScopeFactory.CreateAsyncScope();
-        _health = await scope.ServiceProvider
-            .GetRequiredService<SystemHealthUseCase>()
-            .ExecuteAsync(CancellationToken.None);
-    }
-
-    private async Task IssueCodeAsync()
-    {
-        _issuing = true;
+        _busy = true;
         _error = null;
 
         try
         {
-            // Every handler body goes through the guard. An exception escaping an @onclick handler terminates the
-            // circuit, and from then on every button on the page is dead — which an operator reports as
-            // "生成配对码 点不了", not as an error.
-            var failure = await AdminOperation.RunAsync(
-                async () =>
-                {
-                    await using var scope = ScopeFactory.CreateAsyncScope();
-                    _code = await scope.ServiceProvider
-                        .GetRequiredService<IssuePairingCodeUseCase>()
-                        .ExecuteAsync(CancellationToken.None);
-                },
-                Logger);
+            var failure = await AdminOperation.RunAsync(LoadAsync, Logger);
 
             if (failure is not null)
             {
@@ -137,7 +282,26 @@ else
         }
         finally
         {
-            _issuing = false;
+            _busy = false;
         }
     }
+
+    private async Task LoadAsync()
+    {
+        // A fresh scope per data load: the circuit outlives a request, so resolving scoped services into the
+        // component would hold a database connection open for as long as the browser tab lives.
+        await using var scope = ScopeFactory.CreateAsyncScope();
+        var services = scope.ServiceProvider;
+
+        _statistics = await services.GetRequiredService<IStatisticsReader>().ReadAsync(CancellationToken.None);
+        _content = await services.GetRequiredService<IContentSettingsProvider>().GetAsync(CancellationToken.None);
+        _health = await services.GetRequiredService<SystemHealthUseCase>().ExecuteAsync(CancellationToken.None);
+    }
+
+    private static string RetentionText(int days) => days switch
+    {
+        < 0 => "永久保留",
+        0 => "当天草稿确认后立即删除",
+        _ => $"确认后保留 {days} 天",
+    };
 }

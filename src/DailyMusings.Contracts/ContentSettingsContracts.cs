@@ -12,11 +12,18 @@ public sealed record ContentSettingsDto(
     string GenerationLocalTime,
     string PublishLocalTime,
     int PublishWindowMinutes,
-    int AudioRetentionDays);
+    int AudioRetentionDays,
+
+    /// <summary>
+    /// How long captured content is kept after the day is confirmed. <c>-1</c> means "keep everything", which
+    /// is the default: a fresh instance never deletes anything on its own.
+    /// </summary>
+    int ContentRetentionDays);
 
 public sealed record UpdateContentSettingsRequest(
     string? TimeZoneId,
     string? GenerationLocalTime,
     string? PublishLocalTime,
     int? PublishWindowMinutes,
-    int? AudioRetentionDays);
+    int? AudioRetentionDays,
+    int? ContentRetentionDays = null);

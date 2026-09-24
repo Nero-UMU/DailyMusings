@@ -26,7 +26,11 @@ public sealed record GenerationSettings(
         Model: "gpt-4o-mini",
         SecretName: "openai-api-key",
         Timeout: TimeSpan.FromMinutes(3),
-        PromptVersion: "generation-v1");
+
+        // v2 added the topic instruction: the model is now asked to pick the day's topics from the existing
+        // vocabulary, or to propose short new names when nothing fits. The version travels with every version
+        // row, so a draft written under the old instruction is still identifiable as such (§6.4).
+        PromptVersion: "generation-v2");
 }
 
 public interface IGenerationSettingsProvider
@@ -52,23 +56,41 @@ public sealed record GeneratedCitation(
     string Reason);
 
 /// <summary>Structured output of one generation call (§8.4: 要求输出结构化正文及来源映射).</summary>
+/// <param name="Topics">
+/// Topic names the model chose <em>from the list it was given</em>. Names rather than ids on purpose: the model
+/// is asked to echo a label it can see, and identifiers it cannot verify are identifiers it will invent.
+/// </param>
+/// <param name="NewTopics">
+/// Topic names the model proposes because the existing vocabulary had nothing that fitted (§6.2 as revised).
+/// Kept in a separate field rather than mixed into <paramref name="Topics"/> so that "this day is about a theme
+/// you already track" and "this day needs a new theme" stay distinguishable in the stored result — the second
+/// is a claim the user should be able to review.
+/// </param>
 public sealed record GeneratedDraft(
     string Title,
     string Summary,
     string Body,
     IReadOnlyList<string> Tags,
     IReadOnlyList<string> Categories,
-    IReadOnlyList<GeneratedCitation> Citations);
+    IReadOnlyList<GeneratedCitation> Citations,
+    IReadOnlyList<string> Topics,
+    IReadOnlyList<string> NewTopics);
 
 /// <summary>Everything a generation run is allowed to know.</summary>
 /// <param name="DayInputs">The day's own inputs, already in capture order.</param>
 /// <param name="HistoricalMaterial">Selected past material, oldest first, each flagged as historical.</param>
+/// <param name="KnownTopics">
+/// The topic vocabulary the model may pick from (§6.2 as revised). Supplied as names because that is what the
+/// prompt can carry; the mapping back to real topics happens afterwards, in the application layer, so a model
+/// that returns a name nobody has ever used cannot quietly create a topic that no rule approved.
+/// </param>
 public sealed record GenerationRequest(
     ContentDate ContentDate,
     IReadOnlyList<InputEntry> DayInputs,
     IReadOnlyList<RetrievedMaterial> HistoricalMaterial,
     WritingSettings Settings,
-    string PromptVersion);
+    string PromptVersion,
+    IReadOnlyList<string> KnownTopics);
 
 /// <summary>
 /// Writes a day's reflection against an OpenAI-compatible endpoint. Implementations must never log the prompt

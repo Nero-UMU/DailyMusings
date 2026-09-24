@@ -22,6 +22,16 @@ public enum JobType
 
     /// <summary>Retention sweep for audio blobs (decision A.1).</summary>
     AudioCleanup = 8,
+
+    /// <summary>
+    /// Retention sweep for the captured content itself: recordings gone and transcripts blanked once a day's
+    /// draft has been confirmed and the configured window has elapsed.
+    /// <para>
+    /// Appended rather than inserted: the value is what the database stores, so renumbering an existing member
+    /// would silently reinterpret every queued and historical job row.
+    /// </para>
+    /// </summary>
+    ContentCleanup = 9,
 }
 
 public enum JobStatus
@@ -250,13 +260,33 @@ public sealed class ProcessingJob
         StartedAtUtc = null;
     }
 
+    /// <summary>
+    /// Moves a pending job's due time without counting an attempt or recording a failure.
+    /// <para>
+    /// This exists for work that is being done <em>right now</em> outside the executor: the upload path runs the
+    /// transcription inline so the phone gets its text with the response, and while that is in flight the queue
+    /// must not start the same work a second time — two calls to the model for one recording is both a waste and
+    /// a chance for the two writers to disagree. Deferring says exactly that and nothing more: the job is still
+    /// pending, it has spent no attempt, and it becomes due again the moment the deferral expires.
+    /// </para>
+    /// </summary>
+    public void Defer(DateTimeOffset at)
+    {
+        if (Status != JobStatus.Pending)
+        {
+            throw new DomainException("job.bad_state", $"Only a pending job can be deferred (status is {Status}).");
+        }
+
+        ScheduledAtUtc = at;
+        NextAttemptAtUtc = at;
+    }
+
     public void Start(DateTimeOffset at)
     {
         if (IsTerminal)
         {
             throw new DomainException("job.already_terminal", $"A {Status} job cannot be started again.");
         }
-
         if (Status != JobStatus.Pending)
         {
             // Starting an already-running job would silently burn an attempt and lose the original

@@ -3,16 +3,29 @@
 @attribute [Authorize]
 @inject IServiceScopeFactory ScopeFactory
 @inject ILoggerFactory LoggerFactory
-@using DailyMusings.Application.Abstractions
-@using DailyMusings.Application.Configuration
 
-<h1>模型与邮件</h1>
+@* 模型管理分区：§8.1 的三块模型（转写 / 生成 / Embedding）。
+   SMTP 不在这里 —— 它属于「通知管理」。 *@
 
-<p class="hint">
-    §8.1 要求这三项在这里配置：OpenAI 兼容的转写、生成与可选的 Embedding 接口，每项含 Base URL、模型名、
-    Secret 引用、超时和启用状态。<strong>这里只保存 Secret 的名字</strong>，值仍然放在 Secrets 目录里（§10.4），
-    所以这个页面永远看不到密钥。留空的项沿用部署配置（环境变量），保存后<strong>下一次调用即生效</strong>，无需重启。
-</p>
+<PageHeader Title="模型管理"
+            Hint="§8.1 要求的三块：OpenAI 兼容的语音转写、文章生成与可选的 Embedding。留空的项沿用部署配置（环境变量），保存后下一次调用即生效，不需要重启。">
+    <Actions>
+        <button class="btn" @onclick="ProbeAllAsync" disabled="@_busy">测试全部连接</button>
+    </Actions>
+</PageHeader>
+
+<div class="notice info">
+    <strong>密钥只按名字引用，页面上读不回它的值。</strong>
+    <p>
+        密钥现在有两种给法，二选一即可：<strong>直接在这一页填写</strong>（加密后存放在实例根目录之外，
+        不进配置表、不进导出、也不进备份；源码里的解析顺序是「这里填的 → Secrets 目录里的文件 → 环境变量」），
+        或者把值放进部署的 Secrets 目录（例如 <code>deploy/secrets/openai-api-key</code>，文件权限记得
+        <code>chmod 644</code>），文件名就是下面填的「Secret 名」。
+    </p>
+    <p>
+        每个端点右上角的「密钥来源」会告诉你它当前用的是哪一个：后台填写 / Secret 文件 / 环境变量 / 未配置。
+    </p>
+</div>
 
 @if (_message is not null)
 {
@@ -24,27 +37,29 @@
     <p class="notice error">@_error</p>
 }
 
-@if (_endpoints.Count == 0 && _smtp is null)
+@if (_endpoints.Count == 0)
 {
     <p class="muted">正在读取…</p>
 }
 else
 {
-    @foreach (var service in new[] { "transcription", "generation", "embedding" })
+    @foreach (var service in Services)
     {
         var endpoint = _endpoints.FirstOrDefault(item => item.Service == service);
 
         <div class="card">
             <div class="card-head">
                 <h2>@Describe(service)</h2>
-                @if (endpoint is not null)
-                {
+                <span>
                     @* The badge reads the staged value, not the last saved row: an operator who has just unticked
                        启用 must not be told the service is still enabled. *@
                     <span class="badge @(_enabled.GetValueOrDefault(service) ? "badge-ok" : "badge-muted")">
                         @(_enabled.GetValueOrDefault(service) ? "已启用" : "已停用")
                     </span>
-                }
+                    <span class="badge @SecretSourceBadge(service)">
+                        密钥来源：@SecretSourceText(service)
+                    </span>
+                </span>
             </div>
 
             @if (endpoint is null)
@@ -55,207 +70,147 @@ else
             {
                 <div class="form-grid">
                     <label class="checkbox">
-                        <input type="checkbox" checked="@endpoint.Enabled" @onchange="e => SetEnabled(service, (bool)e.Value!)" />
+                        <input type="checkbox" checked="@_enabled.GetValueOrDefault(service)"
+                               @onchange="e => SetEnabled(service, e.Value is true)" />
                         启用
                     </label>
                     <label>
                         Base URL
-                        <input value="@endpoint.BaseUrl" @onchange="e => SetBaseUrl(service, (string?)e.Value)" />
+                        <input value="@_baseUrls.GetValueOrDefault(service)" @onchange="e => SetBaseUrl(service, (string?)e.Value)" />
                     </label>
                     <label>
                         模型名
-                        <input value="@endpoint.Model" @onchange="e => SetModel(service, (string?)e.Value)" />
+                        <input value="@_models.GetValueOrDefault(service)" @onchange="e => SetModel(service, (string?)e.Value)" />
                     </label>
                     <label>
                         Secret 名
-                        <input value="@endpoint.SecretName" @onchange="e => SetSecretName(service, (string?)e.Value)" />
+                        <input value="@_secretNames.GetValueOrDefault(service)" @onchange="e => SetSecretName(service, (string?)e.Value)" />
                     </label>
                     <label>
-                        超时（秒）
-                        <input type="number" value="@endpoint.TimeoutSeconds" @onchange="e => SetTimeout(service, (string?)e.Value)" />
+                        密钥（留空表示不改）
+                        <input type="password" autocomplete="new-password" placeholder="留空即保持现状"
+                               value="@_passwords.GetValueOrDefault(service)"
+                               @onchange="e => SetPassword(service, (string?)e.Value)" />
+                    </label>
+                    @if (_hasPassword.GetValueOrDefault(service))
+                    {
+                        <label class="checkbox">
+                            <input type="checkbox" checked="@_clearPassword.GetValueOrDefault(service)"
+                                   @onchange="e => SetClearPassword(service, e.Value is true)" />
+                            清除已保存的密钥
+                        </label>
+                    }
+                    <label>
+                        超时（秒，5–600）
+                        <input type="number" value="@_timeouts.GetValueOrDefault(service)" @onchange="e => SetTimeout(service, (string?)e.Value)" />
                     </label>
                     @if (service == "embedding")
                     {
                         <label>
-                            维度（可选）
-                            <input type="number" value="@endpoint.Dimensions" @onchange="e => SetDimensions((string?)e.Value)" />
+                            维度（可选，1–4096）
+                            <input type="number" value="@_dimensions" @onchange="e => SetDimensions((string?)e.Value)" />
                         </label>
                     }
                 </div>
 
                 <div class="actions">
                     <button class="btn-primary" @onclick="() => SaveEndpointAsync(service)" disabled="@_busy">保存</button>
-                    <button @onclick="() => ProbeAsync(service)" disabled="@_busy">测试连接</button>
+                    <button class="btn" @onclick="() => ProbeAsync(service)" disabled="@_busy">测试连接</button>
                 </div>
-            }
-        </div>
-    }
 
-    <div class="card">
-        <div class="card-head">
-            <h2>SMTP</h2>
-            @if (_smtp is not null)
-            {
-                <span class="badge @(_smtpEnabled ? "badge-ok" : "badge-muted")">
-                    @(_smtpEnabled ? "已启用" : "已停用")
-                </span>
-            }
-        </div>
+                @if (_probes.TryGetValue(service, out var probe))
+                {
+                    <p class="notice @(probe.Ok ? "ok" : "error")">
+                        <strong>@(probe.Ok ? "可达。" : "测试失败。")</strong>
+                        @probe.Detail（<code>@probe.Code</code>）
+                    </p>
+                }
 
-        @if (_smtp is null)
-        {
-            <p class="notice warn">未知的邮件配置。</p>
-        }
-        else
-        {
-            @* The fields below are bound to the staged values, not to the row that was loaded: a preset fills the
-               staged values, and a form that displayed the stored row would look as if the click did nothing. *@
-            <p class="hint">
-                常用邮箱：点一下就把主机、端口与安全方式填好，用户名与密码按下面的提示填。按钮按安全方式分成两组，
-                和别的软件对得上——别的软件写 STARTTLS 的选上面那组，写「SSL：是」的选下面那组。
-            </p>
-
-            @foreach (var group in SmtpPresetGroups)
-            {
-                <div class="actions">
-                    <span class="hint">@group.Title</span>
-                    @foreach (var preset in group.Presets)
+                <p class="hint">
+                    @if (service == "embedding")
                     {
-                        <button type="button" class="btn-sm" @onclick="() => ApplySmtpPreset(preset)" disabled="@_busy">
-                            @preset.Label
-                        </button>
+                        <text>
+                            关掉 Embedding 产品照常工作，历史检索退化为主题标签与全文匹配（§8.3）。
+                            更换模型或维度会让旧索引整体失效，语义检索进入「重建中」，重建入口在「系统设置」。
+                        </text>
                     }
-                </div>
-            }
-
-            <div class="form-grid">
-                <label class="checkbox">
-                    <input type="checkbox" checked="@_smtpEnabled" @onchange="e => _smtpEnabled = (bool)e.Value!" />
-                    启用发信
-                </label>
-                <label>
-                    主机
-                    <input value="@_smtpHost" @onchange="e => _smtpHost = (string?)e.Value" />
-                </label>
-                <label>
-                    端口
-                    <input type="number" value="@_smtpPort" @onchange="e => _smtpPort = (string?)e.Value" />
-                </label>
-                <label>
-                    安全方式
-                    <select value="@SmtpSecurityNames.ToToken(_smtpSecurity)" @onchange="e => SetSecurity((string?)e.Value)">
-                        @foreach (var (token, label) in SecurityChoices)
-                        {
-                            <option value="@token">@label</option>
-                        }
-                    </select>
-                </label>
-                <label>
-                    用户名（可留空）
-                    <input value="@_smtpUsername" @onchange="e => _smtpUsername = (string?)e.Value" />
-                </label>
-                <label>
-                    密码 Secret 名
-                    <input value="@_smtpSecretName" @onchange="e => _smtpSecretName = (string?)e.Value" />
-                </label>
-                <label>
-                    发件地址
-                    <input value="@_smtpFromAddress" @onchange="e => _smtpFromAddress = (string?)e.Value" />
-                </label>
-                <label>
-                    发件人名称
-                    <input value="@_smtpFromName" @onchange="e => _smtpFromName = (string?)e.Value" />
-                </label>
-                <label>
-                    超时（秒）
-                    <input type="number" value="@_smtpTimeout" @onchange="e => _smtpTimeout = (string?)e.Value" />
-                </label>
-            </div>
-
-            @if (_smtpPresetNote is not null)
-            {
-                <p class="notice info">@_smtpPresetNote</p>
-            }
-
-            <p class="hint">
-                三种安全方式与别的软件一一对应：<strong>STARTTLS</strong>（端口 587）先明文打招呼再升级加密，对应别的软件的
-                「STARTTLS：是」；<strong>SSL/TLS</strong>（端口 465）连上立刻握手，对应「SSL：是、STARTTLS：否」；
-                <strong>不加密</strong>只适合本机中继。端口与安全方式要对得上，否则会一直等到超时并报
-                「SMTP server could not be reached」——「测试连接」若只说 did not answer in time，十有八九就是这里不匹配。
-                配了用户名与密码时必须选加密方式，明文连接会被直接拒绝。发信还需要勾选「启用发信」、在「运维」页填好收件地址
-                并打开至少一个通知事件。
-            </p>
-
-            <div class="actions">
-                <button class="btn-primary" @onclick="SaveSmtpAsync" disabled="@_busy">保存</button>
-                <button @onclick="ProbeSmtpAsync" disabled="@_busy">测试连接</button>
-            </div>
-        }
-    </div>
-
-    @if (_probes.Count > 0)
-    {
-        <div class="table-wrap">
-            <table class="table">
-                <thead>
-                    <tr>
-                        <th>服务</th>
-                        <th>结果</th>
-                        <th>说明</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    @foreach (var probe in _probes)
+                    else if (service == "transcription")
                     {
-                        <tr>
-                            <td>@probe.Service</td>
-                            <td>
-                                <span class="badge @(probe.Ok ? "badge-ok" : "badge-err")">
-                                    @(probe.Ok ? "可达" : "失败")
-                                </span>
-                            </td>
-                            <td class="muted">@probe.Detail（@probe.Code）</td>
-                        </tr>
+                        <text>转写关掉后，录音仍会被完整保存，只是不会有文字。</text>
                     }
-                </tbody>
-            </table>
+                    else
+                    {
+                        <text>生成关掉时，调度器不会往队列里放生成任务，也就不会有新稿件。</text>
+                    }
+                </p>
+            }
         </div>
     }
 }
 
+@* 邮件的表单已经搬到「通知管理」，这里留一张指路的表。
+   放它的理由有两条：一是有人会先来这一页找邮件（上一版就在这一页），二是既有验收断言要求常用邮箱的预置值
+   在这一页可达。它只是把预置值抄了一遍，不是第二份表单——真正会写配置的仍然只有「通知管理」那一处。 *@
+<div class="card">
+    <div class="card-head">
+        <h2>邮件通知</h2>
+        <a class="btn btn-sm btn-primary" href="/notifications">去通知管理</a>
+    </div>
+
+    <p class="hint">
+        SMTP 的主机、端口、安全方式、用户名、密码、发件人、收件地址与「发送测试邮件」都在
+        <a href="/notifications">通知管理</a>页；<strong>这一页不写也不读邮件配置</strong>。
+        下面只是把「通知管理」里那排常用邮箱按钮会填进去的值抄出来，方便你对着别的软件的设置填。
+    </p>
+
+    <div class="table-wrap">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>邮箱</th>
+                    <th>主机</th>
+                    <th>端口</th>
+                    <th>安全方式</th>
+                    <th>密码怎么来</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var preset in SmtpPresets.All)
+                {
+                    <tr>
+                        <td><strong>@preset.Label</strong></td>
+                        <td><code>@preset.Host</code></td>
+                        <td>@preset.Port</td>
+                        <td>
+                            <span class="badge @(preset.Security == SmtpSecurity.StartTls ? "badge-ok" : "badge-warn")">
+                                @preset.SecurityLabel
+                            </span>
+                        </td>
+                        <td class="muted">@preset.Note</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+
+    <p class="hint">
+        三种安全方式与别的软件一一对应：<strong>STARTTLS</strong>（端口 587）先明文打招呼再升级加密；
+        <strong>SSL/TLS</strong>（端口 465）连上立刻握手；<strong>不加密</strong>只适合本机中继，
+        所以预置里没有它。端口与安全方式必须对得上，否则会一直等到超时。
+    </p>
+</div>
+
 @code {
+    /// <summary>The three endpoints §8.1 lists, in the order an operator meets them.</summary>
+    private static readonly string[] Services = ["transcription", "generation", "embedding"];
+
     private readonly List<ModelEndpointView> _endpoints = [];
-    /// <summary>One test-connection result, with the service it belongs to: the probe itself reports only the outcome.</summary>
-    private sealed record ProbeRow(string Service, bool Ok, string Code, string Detail);
 
-    private readonly List<ProbeRow> _probes = [];
+    /// <summary>One test-connection result per service, keyed by the service name this page uses.</summary>
+    private readonly Dictionary<string, ProbeResult> _probes = new(StringComparer.Ordinal);
 
-    private SmtpSettingsView? _smtp;
-    private bool _smtpEnabled;
-    private string? _smtpHost;
-    private string? _smtpPort;
-    private SmtpSecurity _smtpSecurity = SmtpSecurity.None;
-    private string? _smtpUsername;
-    private string? _smtpSecretName;
-    private string? _smtpFromAddress;
-    private string? _smtpFromName;
-    private string? _smtpTimeout;
-
-    /// <summary>
-    /// The three modes in the order an operator meets them: the one most relays want first, then the "SSL" one every
-    /// other mail form shows, then the unencrypted case that only a relay on localhost should ever need.
-    /// </summary>
-    private static readonly (string Token, string Label)[] SecurityChoices =
-    [
-        (SmtpSecurityNames.StartTls, "STARTTLS（587）"),
-        (SmtpSecurityNames.Ssl, "SSL/TLS（465）"),
-        (SmtpSecurityNames.None, "不加密（本机中继）"),
-    ];
-
-    private static readonly SmtpPresetGroup[] SmtpPresetGroups = SmtpPresets.Grouped();
-
-    /// <summary>What a preset filled, and the part of it only the operator can supply. Null until one is used.</summary>
-    private string? _smtpPresetNote;
+    /// <summary>Where each endpoint's secret resolves from, as the secret store reports it.</summary>
+    private readonly Dictionary<string, SecretSource> _secretSources = new(StringComparer.Ordinal);
 
     private string? _message;
     private string? _error;
@@ -269,6 +224,11 @@ else
     private readonly Dictionary<string, string?> _timeouts = [];
     private string? _dimensions;
 
+    // 密码只进不出：输入框永远从空开始，提交后立刻清空，页面上不保留也不回显任何已存的值。
+    private readonly Dictionary<string, string?> _passwords = [];
+    private readonly Dictionary<string, bool> _clearPassword = [];
+    private readonly Dictionary<string, bool> _hasPassword = [];
+
     private ILogger Logger => LoggerFactory.CreateLogger("DailyMusings.Admin.Models");
 
     protected override async Task OnInitializedAsync()
@@ -277,17 +237,6 @@ else
         // unavailable, and the page stayed on「正在读取…」for ever with no explanation.
         _error = await AdminOperation.RunAsync(LoadAsync, Logger);
     }
-
-    private static string Describe(string service) => service switch
-    {
-        "transcription" => "语音转写",
-        "generation" => "文章生成",
-        "embedding" => "Embedding（可选）",
-        "smtp" => "SMTP 邮件",
-        // Not a silent fallback to one of the above: this used to default to Embedding, so pressing "测试连接" on the
-        // SMTP block reported "已测试 Embedding（可选）".
-        _ => service,
-    };
 
     private async Task LoadAsync()
     {
@@ -298,6 +247,8 @@ else
             .GetRequiredService<ReadModelEndpointsUseCase>()
             .ExecuteAsync(CancellationToken.None);
 
+        var secrets = services.GetRequiredService<ISecretStore>();
+
         _endpoints.Clear();
         _endpoints.AddRange(endpoints);
 
@@ -307,23 +258,47 @@ else
             _baseUrls[endpoint.Service] = endpoint.BaseUrl;
             _models[endpoint.Service] = endpoint.Model;
             _secretNames[endpoint.Service] = endpoint.SecretName;
-            _timeouts[endpoint.Service] = endpoint.TimeoutSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            _timeouts[endpoint.Service] = endpoint.TimeoutSeconds.ToString(CultureInfo.InvariantCulture);
+
+            // Reading the source is not reading the value: names are not secrets (§10.4), and "which of the three
+            // places would this come from" is the question the form has to be able to answer.
+            _secretSources[endpoint.Service] = string.IsNullOrWhiteSpace(endpoint.SecretName)
+                ? SecretSource.None
+                : secrets.ResolveSource(endpoint.SecretName);
+
+            _hasPassword[endpoint.Service] = endpoint.HasPassword;
         }
 
-        _dimensions = endpoints.FirstOrDefault(endpoint => endpoint.Service == "embedding")?.Dimensions?.ToString(
-            System.Globalization.CultureInfo.InvariantCulture);
-
-        _smtp = await services.GetRequiredService<ReadSmtpSettingsUseCase>().ExecuteAsync(CancellationToken.None);
-        _smtpEnabled = _smtp.Enabled;
-        _smtpHost = _smtp.Host;
-        _smtpPort = _smtp.Port.ToString(System.Globalization.CultureInfo.InvariantCulture);
-        _smtpSecurity = _smtp.Security;
-        _smtpUsername = _smtp.Username;
-        _smtpSecretName = _smtp.SecretName;
-        _smtpFromAddress = _smtp.FromAddress;
-        _smtpFromName = _smtp.FromName;
-        _smtpTimeout = _smtp.TimeoutSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        _dimensions = endpoints
+            .FirstOrDefault(endpoint => endpoint.Service == "embedding")?
+            .Dimensions?
+            .ToString(CultureInfo.InvariantCulture);
     }
+
+    private static string Describe(string service) => service switch
+    {
+        "transcription" => "语音转写",
+        "generation" => "文章生成",
+        "embedding" => "Embedding（可选）",
+
+        // Not a silent fallback to one of the above: this used to default to Embedding, so pressing "测试连接" on
+        // the SMTP block reported "已测试 Embedding（可选）".
+        _ => service,
+    };
+
+    private string SecretSourceText(string service) => _secretSources.GetValueOrDefault(service) switch
+    {
+        SecretSource.Ui => "后台填写",
+        SecretSource.File => "Secret 文件",
+        SecretSource.Environment => "环境变量",
+        _ => "未配置",
+    };
+
+    private string SecretSourceBadge(string service) => _secretSources.GetValueOrDefault(service) switch
+    {
+        SecretSource.Ui or SecretSource.File or SecretSource.Environment => "badge-ok",
+        _ => "badge-warn",
+    };
 
     private void SetEnabled(string service, bool value) => _enabled[service] = value;
 
@@ -333,51 +308,27 @@ else
 
     private void SetSecretName(string service, string? value) => _secretNames[service] = value;
 
+    private void SetPassword(string service, string? value) => _passwords[service] = value;
+
+    private void SetClearPassword(string service, bool value) => _clearPassword[service] = value;
+
     private void SetTimeout(string service, string? value) => _timeouts[service] = value;
 
     private void SetDimensions(string? value) => _dimensions = value;
-
-    /// <summary>
-    /// Fills the fields that are the same for every user of a provider. It deliberately does not tick
-    /// 「启用发信」: sending mail is a decision, and a preset is only a convenience.
-    /// </summary>
-    private void ApplySmtpPreset(SmtpPreset preset)
-    {
-        ArgumentNullException.ThrowIfNull(preset);
-
-        _smtpHost = preset.Host;
-        _smtpPort = preset.Port.ToString(CultureInfo.InvariantCulture);
-        _smtpSecurity = preset.Security;
-        _smtpPresetNote = $"已填入 {preset.Label}（{preset.Host}:{preset.Port}，{preset.SecurityLabel}）。{preset.Note}"
-            + " 别忘了勾选「启用发信」再点保存。";
-    }
-
-    /// <summary>The dropdown only offers values this knows, so an unreadable one leaves the current choice alone.</summary>
-    private void SetSecurity(string? token)
-    {
-        if (SmtpSecurityNames.TryParse(token, out var security))
-        {
-            _smtpSecurity = security;
-        }
-    }
 
     private async Task SaveEndpointAsync(string service) => await RunAsync(async services =>
     {
         var timeout = int.TryParse(
             _timeouts.GetValueOrDefault(service),
-            System.Globalization.NumberStyles.Integer,
-            System.Globalization.CultureInfo.InvariantCulture,
+            NumberStyles.Integer,
+            CultureInfo.InvariantCulture,
             out var parsedTimeout)
                 ? parsedTimeout
                 : (int?)null;
 
         int? dimensions = null;
         if (service == "embedding" &&
-            int.TryParse(
-                _dimensions,
-                System.Globalization.NumberStyles.Integer,
-                System.Globalization.CultureInfo.InvariantCulture,
-                out var parsedDimensions))
+            int.TryParse(_dimensions, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedDimensions))
         {
             dimensions = parsedDimensions;
         }
@@ -392,49 +343,38 @@ else
                     _models.GetValueOrDefault(service),
                     _secretNames.GetValueOrDefault(service),
                     timeout,
-                    dimensions),
+                    dimensions,
+                    Password: string.IsNullOrEmpty(_passwords.GetValueOrDefault(service)) ? null : _passwords[service],
+                    ClearPassword: _clearPassword.GetValueOrDefault(service) ? true : null),
                 CancellationToken.None);
 
         await LoadAsync();
+        _passwords[service] = string.Empty;
+        _clearPassword[service] = false;
         _message = $"已保存{Describe(service)}的配置，下一次调用即生效。";
-    });
-
-    private async Task SaveSmtpAsync() => await RunAsync(async services =>
-    {
-        await services
-            .GetRequiredService<UpdateSmtpSettingsUseCase>()
-            .ExecuteAsync(
-                new SmtpSettingsUpdate(
-                    _smtpEnabled,
-                    _smtpHost,
-                    int.TryParse(_smtpPort, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var port) ? port : null,
-                    _smtpSecurity,
-                    _smtpUsername,
-                    _smtpSecretName,
-                    _smtpFromAddress,
-                    _smtpFromName,
-                    int.TryParse(_smtpTimeout, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var timeout) ? timeout : null),
-                CancellationToken.None);
-
-        await LoadAsync();
-        // The preset note says "not saved yet"; once it is saved it would be stale advice.
-        _smtpPresetNote = null;
-        _message = "已保存 SMTP 配置。密码仍然只按名字引用，值在 Secrets 目录里。";
     });
 
     private async Task ProbeAsync(string service) => await RunAsync(async services =>
     {
-        var probe = services.GetRequiredService<ProbeExternalServiceUseCase>();
+        var result = await services
+            .GetRequiredService<ProbeExternalServiceUseCase>()
+            .ExecuteAsync(ParseService(service), CancellationToken.None);
 
-        var result = await probe.ExecuteAsync(ParseService(service), CancellationToken.None);
-
-        _probes.RemoveAll(item => item.Service.Equals(service, StringComparison.OrdinalIgnoreCase));
-        _probes.Add(new ProbeRow(service, result.Ok, result.Code, result.Detail));
-
-        _message = $"已测试 {Describe(service)}。";
+        _probes[service] = result;
+        _message = $"已测试{Describe(service)}。";
     });
 
-    private Task ProbeSmtpAsync() => ProbeAsync("smtp");
+    private async Task ProbeAllAsync() => await RunAsync(async services =>
+    {
+        var probe = services.GetRequiredService<ProbeExternalServiceUseCase>();
+
+        foreach (var service in Services)
+        {
+            _probes[service] = await probe.ExecuteAsync(ParseService(service), CancellationToken.None);
+        }
+
+        _message = "三个端点都测过了，结果在各块里。";
+    });
 
     /// <summary>The three endpoints §8.1 lists, for the settings write path.</summary>
     private static ModelService ParseModelService(string service) => service switch
@@ -444,24 +384,22 @@ else
         _ => ModelService.Embedding,
     };
 
-    /// <summary>Every service the probe knows, which also covers SMTP.</summary>
+    /// <summary>Every service the probe knows, which also covers SMTP (used from the notifications page).</summary>
     private static ExternalService ParseService(string service) => service switch
     {
         "transcription" => ExternalService.Transcription,
         "generation" => ExternalService.Generation,
-        "embedding" => ExternalService.Embedding,
-        _ => ExternalService.Smtp,
+        _ => ExternalService.Embedding,
     };
 
     /// <summary>
     /// The single funnel every handler on this page goes through, so <c>_busy</c> and the message/error slots cannot
     /// drift apart per handler.
     /// <para>
-    /// The body runs inside <c>AdminOperation</c>, which is the only thing standing between a handler and the circuit:
-    /// an exception escaping an <c>@onclick</c> handler terminates the Blazor circuit, and from that moment every
-    /// button on the page is dead — which the operator reports as 「保存 点不了」, not as an error. <c>ErrorBoundary</c>
-    /// never sees handler exceptions. This page's own catch did stop the exception, but told nobody: nothing reached
-    /// the log (§16), so a genuine failure left a generic sentence on the page and no trace on the server.
+    /// The body runs inside <c>AdminOperation</c>, which is the only thing standing between a handler and the
+    /// circuit: an exception escaping an <c>@onclick</c> handler terminates the Blazor circuit, and from that moment
+    /// every button on the page is dead — which the operator reports as 「保存 点不了」. <c>ErrorBoundary</c> never
+    /// sees handler exceptions.
     /// </para>
     /// </summary>
     private async Task RunAsync(Func<IServiceProvider, Task> work)
@@ -491,3 +429,4 @@ else
         }
     }
 }
+

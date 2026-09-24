@@ -1,6 +1,7 @@
 @inherits LayoutComponentBase
 @inject IHttpContextAccessor HttpContextAccessor
 
+@* 八个功能分区的外壳。分区顺序就是用户要求的菜单顺序，图标与文字一起出现，选中项由 NavLink 自己标记。 *@
 <div class="app">
     @if (IsAuthenticated)
     {
@@ -15,14 +16,30 @@
 
             @* NavLink rather than <a>: it marks the current route, so the operator can see where they are. *@
             <nav class="nav">
-                <NavLink href="/" Match="NavLinkMatch.All">状态</NavLink>
-                <NavLink href="/devices">设备</NavLink>
-                <NavLink href="/inputs">采集</NavLink>
-                <NavLink href="/models">模型与邮件</NavLink>
-                <NavLink href="/publishing">发布</NavLink>
-                <NavLink href="/settings">实例设置</NavLink>
-                <NavLink href="/operations">运维</NavLink>
-                <NavLink href="/change-credentials">账号</NavLink>
+                <NavLink href="/" Match="NavLinkMatch.All">
+                    <span class="nav-icon" aria-hidden="true">📊</span>状态
+                </NavLink>
+                <NavLink href="/devices">
+                    <span class="nav-icon" aria-hidden="true">📱</span>设备
+                </NavLink>
+                <NavLink href="/data">
+                    <span class="nav-icon" aria-hidden="true">🗂️</span>数据管理
+                </NavLink>
+                <NavLink href="/models">
+                    <span class="nav-icon" aria-hidden="true">🧠</span>模型管理
+                </NavLink>
+                <NavLink href="/notifications">
+                    <span class="nav-icon" aria-hidden="true">✉️</span>通知管理
+                </NavLink>
+                <NavLink href="/publishing">
+                    <span class="nav-icon" aria-hidden="true">🚀</span>发布设置
+                </NavLink>
+                <NavLink href="/content">
+                    <span class="nav-icon" aria-hidden="true">📝</span>内容管理
+                </NavLink>
+                <NavLink href="/system">
+                    <span class="nav-icon" aria-hidden="true">⚙️</span>系统设置
+                </NavLink>
             </nav>
 
             @* A plain form post, not an interactive round trip: only an HTTP response can clear the cookie. *@
@@ -37,11 +54,12 @@
             @if (IsInsecure)
             {
                 @* §10.3: this must persist for as long as the insecure connection is in use, and must never imply
-                   that acknowledging the risk made the connection safe. *@
+                   that acknowledging the risk made the connection safe. Every signed-in page renders through this
+                   layout, so the warning cannot be missing from the page an operator sits on longest. *@
                 <p class="notice error">
                     <strong>当前连接未加密（HTTP）。</strong>
                     密码、设备令牌、录音与文章都可能被同一网络中的其他人截获。
-                    建议改用 HTTPS、局域网或 VPN 访问。本提示只说明风险，不提供任何保护。
+                    建议改用 HTTPS、局域网或 VPN 访问。本提示只说明风险，不提供任何保护——确认过风险也不等于连接是安全的。
                 </p>
             }
 
@@ -49,7 +67,7 @@
         </main>
 
         <footer class="footer">
-            单用户自托管实例 · 管理页不承担日常创作
+            单用户自托管实例 · 管理页负责配置与运维，不承担日常创作
         </footer>
     </div>
 </div>
@@ -63,9 +81,9 @@
     /// <summary>
     /// Whether the page was reached over plain HTTP.
     /// <para>
-    /// Only ever assigned from a real request. The layout is rendered inside interactive circuits as well, and there
-    /// <c>HttpContext</c> is null — reading that as "secure" used to drop the warning from every page that upgrades
-    /// to an interactive render mode, which is exactly the set of pages an operator sits on longest.
+    /// Only ever assigned from a real request. The layout is rendered inside interactive circuits as well, and
+    /// there <c>HttpContext</c> is null — reading that as "secure" used to drop the warning from every page that
+    /// upgrades to an interactive render mode, which is exactly the set of pages an operator sits on longest.
     /// </para>
     /// </summary>
     private bool IsInsecure { get; set; }

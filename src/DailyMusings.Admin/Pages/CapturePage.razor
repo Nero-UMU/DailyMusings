@@ -1,0 +1,308 @@
+@page "/inputs"
+@rendermode InteractiveServer
+@attribute [Authorize]
+@inject IServiceScopeFactory ScopeFactory
+@inject ILoggerFactory LoggerFactory
+
+@* 按日期看某一天的采集与当天草稿。
+   为什么它还在：八个分区的「数据管理」是从新到旧的归档视图（分页 + 筛选），它回答的是「最近录了什么」；
+   而「某一天到底录了什么、那天的草稿长什么样」是另一个问题，用日期问最自然。
+   既有集成测试（AdminContentAndDownloadsApiTests）也断言这个路由对管理员可见、对陌生人不可见，
+   所以这条路由留着，只把它重排成新样式，并在页面上指回八个分区。 *@
+
+@* 标题栏手写而不是用 PageHeader：这里的「采集」必须是模板里的字面文本。
+   页面组件绑定出来的中文会被写成数字字符引用（&#x…;），而既有验收断言是对未解码的 HTML 做 Contains，
+   所以这一页的这两个词必须是字面量。 *@
+<header class="page-head">
+    <div>
+        <h1 class="page-title">采集</h1>
+        <p class="page-hint">
+            按日期看某一天的随想与当天草稿。只读视图：日常的修订、确认与发布在客户端做，
+            批量浏览与删除在「数据管理」页。
+        </p>
+    </div>
+    <div class="page-actions">
+        <button class="btn" @onclick="LoadAsync" disabled="@_busy">读取这一天</button>
+        <button class="btn" @onclick="GoToTodayAsync" disabled="@_busy">回到今天</button>
+        <a class="btn btn-primary" href="/data">去数据管理</a>
+    </div>
+</header>
+
+@if (_error is not null)
+{
+    <p class="notice error">@_error</p>
+}
+
+<div class="toolbar">
+    <label>
+        日期（内容时区）
+        <input value="@_date" @onchange="e => _date = (string?)e.Value" placeholder="2026-09-17" />
+    </label>
+    <div class="actions">
+        <button class="btn" @onclick="LoadAsync" disabled="@_busy">读取这一天</button>
+    </div>
+</div>
+
+<h2>这一天的随想 · @_date</h2>
+
+@if (_inputs is null)
+{
+    <p class="muted">正在读取…</p>
+}
+else if (_inputs.Count == 0)
+{
+    <p class="notice info">这一天没有任何随想。</p>
+}
+else
+{
+    <div class="data-list">
+        <div class="data-head">
+            <span>时间</span>
+            <span>类型</span>
+            <span>状态</span>
+            <span>内容</span>
+            <span>音频</span>
+        </div>
+
+        @foreach (var item in _inputs)
+        {
+            var entry = item.Entry;
+            var isVoice = entry.SourceType == InputSourceType.Voice;
+
+            <div class="data-row @(isVoice ? "voice" : "text")">
+                <div class="data-cell when">
+                    @DeviceLocalTime(entry)
+                    <span class="player-meta">@AdminFormat.Utc(entry.CreatedAtUtc)</span>
+                </div>
+
+                <div class="data-cell type">
+                    @(isVoice ? "录音" : "手写")
+                </div>
+
+                <div class="data-cell status">
+                    <span class="badge @AdminLabels.TranscriptionBadge(entry.TranscriptionStatus)">
+                        @AdminLabels.TranscriptionText(entry.TranscriptionStatus)
+                    </span>
+                    @if (item.FailureCode is { Length: > 0 } failureCode)
+                    {
+                        <span class="player-meta"><code>@failureCode</code></span>
+                    }
+
+                    @if (entry.IsDeleted)
+                    {
+                        <span class="badge badge-muted">内容已清理</span>
+                    }
+                </div>
+
+                <div class="data-cell">
+                    @if (entry.TranscriptForGeneration is { Length: > 0 } transcript)
+                    {
+                        @if (entry.RevisedTranscript is { Length: > 0 })
+                        {
+                            <span class="player-meta">已修订（原稿仍保留）</span>
+                        }
+
+                        <div class="transcript">@transcript</div>
+                    }
+                    else
+                    {
+                        <span class="muted">还没有文字。</span>
+                    }
+                </div>
+
+                <div class="data-cell">
+                    @if (entry.HasAudio)
+                    {
+                        @* 与数据管理页同一个来源：GET /api/inputs/{id}/audio，管理员 Cookie 已认证，
+                           支持 Range，所以进度条可以拖动。 *@
+                        <audio class="player" controls preload="none" src="@($"/api/inputs/{entry.Id}/audio")"></audio>
+                        <span class="player-meta">
+                            @(entry.AudioDuration is { } duration ? $"{duration.TotalSeconds:0.0} 秒" : "时长未知")
+                            @if (entry.AudioContentType is { Length: > 0 } contentType)
+                            {
+                                <text> · @contentType</text>
+                            }
+                        </span>
+                    }
+                    else
+                    {
+                        <span class="muted">已清理</span>
+                        <span class="player-meta">保留策略到期后只删音频，文字与记录保留。</span>
+                    }
+                </div>
+            </div>
+        }
+    </div>
+
+    <p class="hint">
+        共 @_inputs.Count 条。删除某一条、重试转写这些操作在<a href="/data">数据管理</a>页；
+        音频的保留天数在<a href="/system">系统设置</a>的「保留策略」里配置。
+    </p>
+}
+
+<h2>当天的草稿</h2>
+
+@if (_reflection is null)
+{
+    <p class="notice info">
+        这一天还没有草稿。生成需要当天至少有一条可用的素材（§7 不允许创建空文章）；
+        生成时刻与「哪些日子够格」由<a href="/publishing">发布设置</a>里的时间设置和调度器决定。
+    </p>
+}
+else
+{
+    <div class="card">
+        <div class="card-head">
+            <h3>@(_reflection.WorkingVersion?.Title is { Length: > 0 } title ? title : "（无标题）")</h3>
+            <span class="badge @AdminLabels.ReflectionBadge(_reflection.Status)">@AdminLabels.ReflectionText(_reflection.Status)</span>
+        </div>
+
+        <p class="hint">
+            版本 <code>@_reflection.WorkingVersionId</code>
+            @if (_reflection.WorkingVersion is { } version)
+            {
+                <text> · 生成于 @AdminFormat.When(version.CreatedAtUtc)</text>
+                @if (version.ModelName is { Length: > 0 } model)
+                {
+                    <text> · 模型 @model</text>
+                }
+                <text> · 来源引用 @version.Sources.Count 条 · 无来源陈述 @version.UnsourcedClaims.Count 条</text>
+                @if (version.HasManualEdits)
+                {
+                    <text> · 含手工修改</text>
+                }
+            }
+        </p>
+
+        @if (_reflection.Status == ReflectionStatus.StaleByLateInput)
+        {
+            <p class="notice warn">这一天在成稿之后又有新的随想，稿子可能已经过时（客户端会提示重新生成）。</p>
+        }
+
+        @if (_reflection.ConfirmedVersionIsNotWorking)
+        {
+            <p class="hint">已确认的版本与当前工作版本不是同一个 —— 工作版本改过但还没重新确认。</p>
+        }
+
+        @if (_reflection.WorkingVersion?.Body is { Length: > 0 } body)
+        {
+            <div class="transcript">@body</div>
+        }
+        else
+        {
+            <p class="muted">这个版本还没有正文。</p>
+        }
+
+        <div class="actions">
+            <a class="btn btn-sm" href="/content">去内容管理看正文与主题</a>
+        </div>
+    </div>
+}
+
+@code {
+    private string? _date;
+    private IReadOnlyList<InputStatusView>? _inputs;
+    private ReflectionView? _reflection;
+    private string? _error;
+    private bool _busy;
+
+    private ILogger Logger => LoggerFactory.CreateLogger("DailyMusings.Admin.Capture");
+
+    protected override async Task OnInitializedAsync()
+    {
+        _error = await AdminOperation.RunAsync(
+            async () =>
+            {
+                await using var scope = ScopeFactory.CreateAsyncScope();
+                await SetTodayAsync(scope.ServiceProvider);
+                await LoadAsync();
+            },
+            Logger);
+    }
+
+    private async Task LoadAsync()
+    {
+        _busy = true;
+        _error = null;
+
+        try
+        {
+            var failure = await AdminOperation.RunAsync(
+                async () =>
+                {
+                    if (!ContentDate.TryParse(_date, out var day))
+                    {
+                        throw new UseCaseException("input.date.invalid", "日期需要写成 YYYY-MM-DD。");
+                    }
+
+                    await using var scope = ScopeFactory.CreateAsyncScope();
+                    var services = scope.ServiceProvider;
+
+                    _inputs = await services
+                        .GetRequiredService<ListInputsUseCase>()
+                        .ExecuteAsync(day, recentLimit: 1, CancellationToken.None);
+
+                    _reflection = await services
+                        .GetRequiredService<GetReflectionUseCase>()
+                        .ExecuteAsync(day, CancellationToken.None);
+                },
+                Logger);
+
+            if (failure is not null)
+            {
+                _error = failure;
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task GoToTodayAsync()
+    {
+        _busy = true;
+        _error = null;
+
+        try
+        {
+            var failure = await AdminOperation.RunAsync(
+                async () =>
+                {
+                    await using var scope = ScopeFactory.CreateAsyncScope();
+                    await SetTodayAsync(scope.ServiceProvider);
+                    await LoadAsync();
+                },
+                Logger);
+
+            if (failure is not null)
+            {
+                _error = failure;
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    /// <summary>Reads the instance's own notion of today: the content day, which is the instance's time zone's.</summary>
+    private async Task SetTodayAsync(IServiceProvider services)
+    {
+        var calendar = await services
+            .GetRequiredService<IContentCalendarProvider>()
+            .GetCalendarAsync(CancellationToken.None);
+
+        var clock = services.GetRequiredService<IClock>();
+        _date = calendar.ContentDateOf(clock.UtcNow).ToString();
+    }
+
+    /// <summary>
+    /// The moment the device saw, using the offset it recorded. A capture's time is a property of the capture, not
+    /// of the server's clock — that is why the entry carries its own offset.
+    /// </summary>
+    private static string DeviceLocalTime(InputEntry entry) =>
+        entry.CreatedAtUtc
+            .ToOffset(TimeSpan.FromMinutes(entry.CreatedOffsetMinutes))
+            .ToString("yyyy-MM-dd HH:mm:ss");
+}

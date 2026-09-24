@@ -1,0 +1,155 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage
+    x:Class="DailyMusings.Client.Pages.CapturePage"
+    xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+    Shell.NavBarIsVisible="False">
+
+    <!--
+        §3.2 of the phone spec: date and a keyboard toggle, one big circle, the controls for the recording just made,
+        and one button that actually sends it. Nothing is uploaded until that button is pressed — the local archive
+        is the source of truth, and the server is told only when the user says so.
+    -->
+    <ScrollView>
+        <VerticalStackLayout
+            Padding="20,24,20,36"
+            Spacing="18"
+            HorizontalOptions="Center"
+            MaximumWidthRequest="560">
+
+            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                <VerticalStackLayout Spacing="2" VerticalOptions="Center">
+                    <Label x:Name="TodayLabel" Style="{StaticResource TitleLabel}" />
+                    <Label x:Name="TodayHintLabel" Style="{StaticResource CaptionLabel}" />
+                </VerticalStackLayout>
+                <Button
+                    x:Name="ModeButton"
+                    Grid.Column="1"
+                    Style="{StaticResource GhostButton}"
+                    Text="⌨ 手动输入"
+                    VerticalOptions="Center"
+                    Clicked="OnToggleModeClicked" />
+            </Grid>
+
+            <!-- §10.3: an unencrypted address is stated on the screens that use it, and never as "accepted". -->
+            <Border x:Name="InsecureBanner" Style="{StaticResource WarnBanner}" IsVisible="False">
+                <Label
+                    TextColor="{StaticResource Danger}"
+                    FontSize="12"
+                    Text="当前使用未加密的 HTTP 连接。密码、设备令牌、录音与文章都可能被截获。请改用 HTTPS、局域网或 VPN。确认过风险提示并不等于连接变安全了。" />
+            </Border>
+
+            <!-- Recording mode: the circle is the whole interaction. -->
+            <VerticalStackLayout x:Name="RecordPanel" Spacing="14">
+                <Border
+                    x:Name="RecordCircle"
+                    BackgroundColor="{StaticResource Surface}"
+                    Stroke="{StaticResource Accent}"
+                    StrokeThickness="2"
+                    HorizontalOptions="Center">
+                    <Border.StrokeShape>
+                        <RoundRectangle CornerRadius="120" />
+                    </Border.StrokeShape>
+                    <Border.GestureRecognizers>
+                        <TapGestureRecognizer Tapped="OnRecordTapped" />
+                    </Border.GestureRecognizers>
+                    <Label
+                        x:Name="CircleLabel"
+                        Text="记录随想"
+                        FontSize="19"
+                        FontFamily="OpenSansSemibold"
+                        HorizontalOptions="Center"
+                        VerticalOptions="Center"
+                        HorizontalTextAlignment="Center" />
+                </Border>
+                <Label
+                    x:Name="RecordStatus"
+                    Style="{StaticResource CaptionLabel}"
+                    HorizontalTextAlignment="Center" />
+            </VerticalStackLayout>
+
+            <!-- Manual mode: the same slot, an editor instead of a circle. -->
+            <VerticalStackLayout x:Name="ManualPanel" Spacing="12" IsVisible="False">
+                <Editor
+                    x:Name="TextEditor"
+                    Placeholder="写下一句随想…"
+                    HeightRequest="150" />
+                <Button
+                    x:Name="SaveTextButton"
+                    Text="保存到本机"
+                    Clicked="OnSaveTextClicked" />
+                <Label
+                    x:Name="ManualStatus"
+                    Style="{StaticResource CaptionLabel}"
+                    HorizontalTextAlignment="Center" />
+            </VerticalStackLayout>
+
+            <!-- The thought just made: what it is, how far it has got, and how to hear it again. -->
+            <Border x:Name="CurrentCard" Style="{StaticResource Card}" IsVisible="False">
+                <VerticalStackLayout Spacing="12">
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
+                        <Label
+                            x:Name="CurrentHeadline"
+                            FontFamily="OpenSansSemibold"
+                            FontSize="15"
+                            VerticalOptions="Center" />
+                        <Label
+                            x:Name="CurrentState"
+                            Grid.Column="1"
+                            Style="{StaticResource CaptionLabel}"
+                            VerticalOptions="Center" />
+                    </Grid>
+
+                    <VerticalStackLayout x:Name="PlaybackPanel" Spacing="6" IsVisible="False">
+                        <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10">
+                            <Button
+                                x:Name="PlayPauseButton"
+                                Text="▶"
+                                Style="{StaticResource GhostButton}"
+                                WidthRequest="58"
+                                Clicked="OnPlayPauseClicked" />
+                            <Slider
+                                x:Name="ProgressSlider"
+                                Grid.Column="1"
+                                Minimum="0"
+                                Maximum="1"
+                                Value="0"
+                                VerticalOptions="Center"
+                                DragStarted="OnSeekStarted"
+                                DragCompleted="OnSeekCompleted"
+                                ValueChanged="OnSliderValueChanged" />
+                            <Label
+                                x:Name="PositionLabel"
+                                Grid.Column="2"
+                                Style="{StaticResource CaptionLabel}"
+                                VerticalOptions="Center" />
+                        </Grid>
+                    </VerticalStackLayout>
+
+                    <ScrollView x:Name="TranscriptScroll" HeightRequest="132" IsVisible="False">
+                        <Label x:Name="TranscriptLabel" Style="{StaticResource TranscriptLabel}" />
+                    </ScrollView>
+
+                    <Button
+                        x:Name="DeleteButton"
+                        Style="{StaticResource DangerButton}"
+                        Clicked="OnDeleteClicked" />
+                </VerticalStackLayout>
+            </Border>
+
+            <Button
+                x:Name="UploadButton"
+                Style="{StaticResource SuccessButton}"
+                Text="上传本录音"
+                Clicked="OnUploadClicked" />
+
+            <ActivityIndicator x:Name="Busy" IsRunning="False" IsVisible="False" HorizontalOptions="Center" />
+
+            <Label
+                x:Name="UploadStatus"
+                Style="{StaticResource CaptionLabel}"
+                HorizontalTextAlignment="Center" />
+        </VerticalStackLayout>
+    </ScrollView>
+
+</ContentPage>

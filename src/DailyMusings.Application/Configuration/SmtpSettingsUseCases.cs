@@ -6,9 +6,11 @@ namespace DailyMusings.Application.Configuration;
 /// <summary>
 /// The SMTP server as the admin page shows it (docs/开发指导.md §12, §8.1).
 /// <para>
-/// Same rule as the model endpoints: only the password's <em>name</em> is stored, never its value (§10.4). The
-/// password itself stays a file under the secrets directory, which is why this form is safe to serve over plain HTTP
-/// on a LAN — the one thing it could leak is where mail is sent from.
+/// Same rule as the model endpoints: the password's <em>value</em> is never returned. What changed with this
+/// feature is that a password can now be <em>written</em> from here — so the form additionally has to say where
+/// the effective password would come from and whether there is one at all, because "saved and switched on" and
+/// "will actually send" stopped being the same statement. It still never leaves the instance: the encrypted
+/// store lives outside the instance root, so no export or backup can carry it (§10.4).
 /// </para>
 /// </summary>
 public sealed record SmtpSettingsView(
@@ -20,7 +22,14 @@ public sealed record SmtpSettingsView(
     string SecretName,
     string FromAddress,
     string FromName,
-    int TimeoutSeconds);
+    int TimeoutSeconds,
+    string ToAddress,
+    SecretSource PasswordSource,
+    bool HasPassword)
+{
+    /// <summary>True when mailing is switched on and a password resolves — what "it will send" means.</summary>
+    public bool Ready => Enabled && PasswordSource != SecretSource.None;
+}
 
 public sealed record SmtpSettingsUpdate(
     bool? Enabled,
@@ -31,7 +40,17 @@ public sealed record SmtpSettingsUpdate(
     string? SecretName,
     string? FromAddress,
     string? FromName,
-    int? TimeoutSeconds);
+    int? TimeoutSeconds,
+
+    /// <summary>Write-only. Non-empty means "encrypt this and use it from now on".</summary>
+    string? Password = null,
+
+    /// <summary>Removes the stored password so the secret file or environment variable takes over again.</summary>
+    bool? ClearPassword = null,
+
+    /// <summary>Notification recipient, stored as <c>notification.to</c> (§12).</summary>
+    string? ToAddress = null);
+
 
 public static class SmtpSettingKeys
 {
@@ -121,12 +140,28 @@ public static class SmtpSecurityNames
 public sealed class ReadSmtpSettingsUseCase
 {
     private readonly ISmtpSettingsProvider _smtp;
+    private readonly ISecretStore _secrets;
+    private readonly INotificationSettingsProvider _notifications;
 
-    public ReadSmtpSettingsUseCase(ISmtpSettingsProvider smtp) => _smtp = smtp;
+    public ReadSmtpSettingsUseCase(
+        ISmtpSettingsProvider smtp,
+        ISecretStore secrets,
+        INotificationSettingsProvider notifications)
+    {
+        _smtp = smtp;
+        _secrets = secrets;
+        _notifications = notifications;
+    }
 
     public async Task<SmtpSettingsView> ExecuteAsync(CancellationToken cancellationToken)
     {
         var settings = await _smtp.GetAsync(cancellationToken).ConfigureAwait(false);
+
+        // The recipient lives with the notification preferences, so it is read from there rather than duplicated
+        // into the SMTP settings: two copies of "where does mail go" is one copy too many.
+        var notifications = await _notifications.GetAsync(cancellationToken).ConfigureAwait(false);
+
+        var source = _secrets.ResolveSource(settings.SecretName);
 
         return new SmtpSettingsView(
             settings.Enabled,
@@ -137,7 +172,10 @@ public sealed class ReadSmtpSettingsUseCase
             settings.SecretName,
             settings.FromAddress,
             settings.FromName,
-            (int)settings.Timeout.TotalSeconds);
+            (int)settings.Timeout.TotalSeconds,
+            notifications.ToAddress,
+            source,
+            source != SecretSource.None);
     }
 }
 
@@ -150,9 +188,17 @@ public sealed class UpdateSmtpSettingsUseCase
     private const int MinimumTimeoutSeconds = 5;
     private const int MaximumTimeoutSeconds = 300;
 
-    private readonly IAppSettingStore _settings;
+    /// <summary>Matches <see cref="Abstractions.SmtpSettings.Default"/>'s secret name.</summary>
+    private const string DefaultSecretName = "smtp-password";
 
-    public UpdateSmtpSettingsUseCase(IAppSettingStore settings) => _settings = settings;
+    private readonly IAppSettingStore _settings;
+    private readonly IUiSecretStore _uiSecrets;
+
+    public UpdateSmtpSettingsUseCase(IAppSettingStore settings, IUiSecretStore uiSecrets)
+    {
+        _settings = settings;
+        _uiSecrets = uiSecrets;
+    }
 
     public async Task ExecuteAsync(SmtpSettingsUpdate update, CancellationToken cancellationToken)
     {
@@ -215,6 +261,45 @@ public sealed class UpdateSmtpSettingsUseCase
         {
             await SetAsync(SmtpSettingKeys.Enabled, enabled ? "true" : "false", cancellationToken).ConfigureAwait(false);
         }
+
+        // §12: the recipient is part of the mail configuration as far as the operator is concerned, so it is
+        // accepted here — but it is stored under the key the notifier already reads, so there is still exactly
+        // one place that decides where a message goes. A blank value clears it.
+        if (update.ToAddress is { } toAddress)
+        {
+            var trimmed = toAddress.Trim();
+
+            await SetAsync(
+                NotificationSettingKeys.ToAddress,
+                trimmed.Length == 0 ? string.Empty : ValidateAddress(trimmed),
+                cancellationToken).ConfigureAwait(false);
+        }
+
+        // The password itself. This is the one write in the product that puts a credential in a place the admin
+        // page can reach, so it is stored through the encrypted store (outside the instance root, and therefore
+        // outside every export and backup) rather than in the settings table.
+        var target = await EffectiveSecretNameAsync(cancellationToken).ConfigureAwait(false);
+
+        if (update.ClearPassword == true)
+        {
+            await _uiSecrets.DeleteAsync(target, cancellationToken).ConfigureAwait(false);
+        }
+
+        if (!string.IsNullOrEmpty(update.Password))
+        {
+            await _uiSecrets.SetAsync(target, update.Password, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// The name the password is filed under, read back after the other fields were written: an operator who
+    /// changes the secret's name and types a password in the same save expects the two to belong together.
+    /// </summary>
+    private async Task<string> EffectiveSecretNameAsync(CancellationToken cancellationToken)
+    {
+        var stored = await _settings.GetAsync(SmtpSettingKeys.SecretName, cancellationToken).ConfigureAwait(false);
+
+        return string.IsNullOrWhiteSpace(stored) ? DefaultSecretName : stored.Trim();
     }
 
     private Task SetAsync(string key, string value, CancellationToken cancellationToken) =>

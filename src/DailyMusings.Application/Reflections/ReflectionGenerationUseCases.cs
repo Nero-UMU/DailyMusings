@@ -7,6 +7,7 @@ using DailyMusings.Domain.Jobs;
 using DailyMusings.Domain.Reflections;
 using DailyMusings.Domain.Reflections.Sources;
 using DailyMusings.Domain.Time;
+using DailyMusings.Domain.Topics;
 
 namespace DailyMusings.Application.Reflections;
 
@@ -200,6 +201,8 @@ public sealed class GenerateReflectionUseCase
     private readonly HistoryRetrievalUseCase _retrieval;
     private readonly JobEnqueuer _jobs;
     private readonly Notifications.QueueNotificationUseCase _notifications;
+    private readonly ITopicRepository _topics;
+    private readonly Topics.ResolveArticleTopicsUseCase _resolveTopics;
 
     public GenerateReflectionUseCase(
         IInputEntryRepository inputs,
@@ -211,7 +214,9 @@ public sealed class GenerateReflectionUseCase
         IClock clock,
         HistoryRetrievalUseCase retrieval,
         JobEnqueuer jobs,
-        Notifications.QueueNotificationUseCase notifications)
+        Notifications.QueueNotificationUseCase notifications,
+        ITopicRepository topics,
+        Topics.ResolveArticleTopicsUseCase resolveTopics)
     {
         _inputs = inputs;
         _reflections = reflections;
@@ -223,6 +228,8 @@ public sealed class GenerateReflectionUseCase
         _retrieval = retrieval;
         _jobs = jobs;
         _notifications = notifications;
+        _topics = topics;
+        _resolveTopics = resolveTopics;
     }
 
     public async Task<ReflectionGenerationResult> ExecuteAsync(
@@ -295,6 +302,12 @@ public sealed class GenerateReflectionUseCase
 
         var writing = payload.Settings ?? WritingSettings.Default;
 
+        // The vocabulary the model may choose from. Only active topics: a merged one is a tombstone and must
+        // never attract new material (A.9), and offering it would invite exactly that.
+        var knownTopics = (await _topics.ListAsync(includeMerged: false, cancellationToken).ConfigureAwait(false))
+            .Select(topic => topic.Name)
+            .ToArray();
+
         var draft = await _client
             .GenerateAsync(
                 new GenerationRequest(
@@ -302,9 +315,26 @@ public sealed class GenerateReflectionUseCase
                     material,
                     retrieval.Materials,
                     writing,
-                    settings.PromptVersion),
+                    settings.PromptVersion,
+                    knownTopics),
                 cancellationToken)
             .ConfigureAwait(false);
+
+        // §6.2 as revised: the article's topics come from the model's answer, resolved against the real
+        // vocabulary. Failures here are swallowed on purpose — a topic that could not be filed is a missing
+        // label, whereas a failed generation is a day with no draft at all, and the second is far worse than
+        // the first. This mirrors the input side, where topic recognition is likewise a convenience.
+        var (primaryTopic, secondaryTopics) = await ResolveDraftTopicsAsync(draft, cancellationToken)
+            .ConfigureAwait(false);
+
+        var draftTopics = new List<TopicId>();
+
+        if (primaryTopic is { } primary)
+        {
+            draftTopics.Add(primary);
+        }
+
+        draftTopics.AddRange(secondaryTopics);
 
         var version = ReflectionVersion.CreateGenerated(
             ReflectionVersionId.New(),
@@ -317,7 +347,8 @@ public sealed class GenerateReflectionUseCase
             settings.PromptVersion,
             now,
             draft.Tags,
-            draft.Categories);
+            draft.Categories,
+            draftTopics);
 
         var (sources, unresolved) = BuildSources(version, draft.Citations, dayInputs, retrieval.Materials, contentDate);
 
@@ -337,6 +368,16 @@ public sealed class GenerateReflectionUseCase
             await _reflections.UpdateAsync(reflection, cancellationToken).ConfigureAwait(false);
             await _reflections.AddVersionAsync(version, cancellationToken).ConfigureAwait(false);
             await _reflections.ReplaceSourcesAsync(version.Id, sources, cancellationToken).ConfigureAwait(false);
+
+            // The version's topics are written with the version itself: a draft whose topics arrive later would
+            // be a draft the admin list shows as unfiled for a moment, and the merge guard could let a topic be
+            // deleted in that window.
+            if (version.TopicIds.Count > 0)
+            {
+                await _reflections
+                    .SetVersionTopicsAsync(version.Id, version.TopicIds, cancellationToken)
+                    .ConfigureAwait(false);
+            }
 
             // §8.4's second stage is its own persisted job, enqueued in the same transaction as the version it
             // checks: a draft must never exist without the check that belongs to it having been scheduled.
@@ -363,6 +404,38 @@ public sealed class GenerateReflectionUseCase
             version,
             unresolved,
             checkJob);
+    }
+
+    /// <summary>
+    /// Turns the model's topic answer into real topics (docs/开发指导.md §6.2 as revised).
+    /// <para>
+    /// Failure is reported as "no topics", never as a failed generation. The draft is the point; the filing is
+    /// a convenience, and losing a day's writing because a label could not be stored would be an absurd trade —
+    /// the same reasoning the input side already applies to topic recognition.
+    /// </para>
+    /// </summary>
+    private async Task<(TopicId? Primary, IReadOnlyList<TopicId> Secondary)> ResolveDraftTopicsAsync(
+        GeneratedDraft draft,
+        CancellationToken cancellationToken)
+    {
+        // Reused names first: a day is about an existing theme far more often than it needs a new one, and the
+        // order decides which one becomes the primary topic.
+        var names = draft.Topics.Concat(draft.NewTopics).ToArray();
+
+        if (names.Length == 0)
+        {
+            return (null, []);
+        }
+
+        try
+        {
+            return await _resolveTopics.ExecuteAsync(names, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            _ = exception;
+            return (null, []);
+        }
     }
 
     private async Task SaveReflectionAsync(

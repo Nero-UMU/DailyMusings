@@ -83,6 +83,18 @@ def parse_materials(prompt):
     return day, historical
 
 
+def parse_known_topics(prompt):
+    """The generation prompt lists the instance's existing topics so the model can reuse them.
+
+    The stub picks the first one it was shown, which is exactly what "复用已有主题" means; when the list is
+    empty it proposes a new one, so a run exercises both branches without the harness having to know which.
+    """
+    match = re.search(r"已有主题（优先从这里挑选[^）]*）：\s*(.+)", prompt)
+    if not match:
+        return []
+    return [name.strip() for name in match.group(1).split("、") if name.strip()]
+
+
 def build_generation(prompt):
     day, historical = parse_materials(prompt)
     date_match = re.search(r"内容日期：(\d{4}-\d{2}-\d{2})", prompt)
@@ -119,6 +131,8 @@ def build_generation(prompt):
     first = day[0][2] if day else (historical[0][2] if historical else "")
     body = "\n\n".join(paragraphs)
 
+    known = parse_known_topics(prompt)
+
     return {
         "title": "随想（" + content_date + "）",
         "summary": first[:40],
@@ -126,6 +140,8 @@ def build_generation(prompt):
         "tags": ["随想", "记录"],
         "categories": ["日记"],
         "citations": citations,
+        "topics": known[:1],
+        "newTopics": [] if known else ["随想"],
     }
 
 
@@ -239,8 +255,14 @@ def _find_digest(body):
 
 if __name__ == "__main__":
     port = int(os.environ.get("STUB_PORT", "8077"))
+
+    # Loopback by default (the acceptance driver runs it on the same host as the instance). A container that has
+    # to be reachable by the instance's own container sets STUB_HOST=0.0.0.0, which is what tools/deploy's test
+    # doubles do.
+    host = os.environ.get("STUB_HOST", "127.0.0.1")
+
     load_map()
-    server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
-    sys.stderr.write("stub listening on %d, %d transcripts loaded\n" % (port, len(_transcripts)))
+    server = ThreadingHTTPServer((host, port), Handler)
+    sys.stderr.write("stub listening on %s:%d, %d transcripts loaded\n" % (host, port, len(_transcripts)))
     sys.stderr.flush()
     server.serve_forever()

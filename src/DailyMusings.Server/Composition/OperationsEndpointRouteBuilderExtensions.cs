@@ -1,6 +1,7 @@
 using System.Globalization;
 using DailyMusings.Application.Abstractions;
 using DailyMusings.Application.Configuration;
+using DailyMusings.Application.Notifications;
 using DailyMusings.Application.Operations;
 using DailyMusings.Contracts;
 using DailyMusings.Domain.Jobs;
@@ -22,6 +23,12 @@ namespace DailyMusings.Server.Composition;
 /// </summary>
 public static class OperationsEndpointRouteBuilderExtensions
 {
+    /// <summary>How many log lines the console-style page asks for when it does not say.</summary>
+    private const int DefaultLogLines = 200;
+
+    /// <summary>An upper bound on the request, because the answer is serialised into one response.</summary>
+    private const int MaxLogLines = 2000;
+
     public static IEndpointRouteBuilder MapOperationsEndpoints(this IEndpointRouteBuilder endpoints)
     {
         ArgumentNullException.ThrowIfNull(endpoints);
@@ -50,6 +57,7 @@ public static class OperationsEndpointRouteBuilderExtensions
 
         maintenance.MapPost("/backup/run", RunBackupAsync).DisableAntiforgery();
         maintenance.MapPost("/audio-cleanup/run", RunAudioCleanupAsync).DisableAntiforgery();
+        maintenance.MapPost("/content-cleanup/run", RunContentCleanupAsync).DisableAntiforgery();
 
         var system = endpoints
             .MapGroup("/api/system")
@@ -62,10 +70,15 @@ public static class OperationsEndpointRouteBuilderExtensions
             .RequireAuthorization(ServerAuthenticationPolicies.DeviceOrAdmin);
 
         system.MapGet("/index", GetIndexAsync);
+        system.MapGet("/statistics", GetStatisticsAsync);
+        system.MapGet("/logs", GetLogsAsync);
         system.MapGet("/model-endpoints", GetModelEndpointsAsync);
         system.MapPatch("/model-endpoints/{service}", UpdateModelEndpointAsync);
         system.MapGet("/smtp-settings", GetSmtpSettingsAsync);
         system.MapPatch("/smtp-settings", UpdateSmtpSettingsAsync);
+
+        // §12: one real message, so "the relay accepted our greeting" is not mistaken for "mail works".
+        system.MapPost("/smtp-settings/test", SendTestEmailAsync).DisableAntiforgery();
         system.MapPost("/index/rebuild", RebuildIndexAsync).DisableAntiforgery();
         system.MapGet("/diagnostic-mode", GetDiagnosticModeAsync);
         system.MapPost("/diagnostic-mode", EnableDiagnosticModeAsync).DisableAntiforgery();
@@ -193,6 +206,109 @@ public static class OperationsEndpointRouteBuilderExtensions
             result.ReleasedBytes));
     }
 
+    /// <summary>
+    /// Runs the content retention sweep now, for the operator who would rather not wait for the nightly slot.
+    /// Enqueued like every other maintenance action, so the queue is the single place that decides when it runs.
+    /// </summary>
+    private static async Task<IResult> RunContentCleanupAsync(
+        RunMaintenanceJobUseCase run,
+        CancellationToken cancellationToken)
+    {
+        var job = await run.ExecuteAsync(JobType.ContentCleanup, cancellationToken).ConfigureAwait(false);
+        return Results.Ok(ToDto(job));
+    }
+
+    private static async Task<IResult> GetStatisticsAsync(
+        IStatisticsReader statistics,
+        CancellationToken cancellationToken)
+    {
+        var read = await statistics.ReadAsync(cancellationToken).ConfigureAwait(false);
+
+        return Results.Ok(new StatisticsResponse(
+            read.Today,
+            read.TodayInputCount,
+            read.TodayVoiceCount,
+            read.TodayTextCount,
+
+            // The reader reports the domain enum's name (or "none"); the API's own vocabulary is applied here,
+            // at the one boundary that owns wire spellings.
+            ToWireName(read.TodayReflectionStatus),
+            read.TotalInputCount,
+            read.TotalReflectionCount,
+            read.ConfirmedReflectionCount,
+            read.DraftReflectionCount,
+            read.PublishedCount,
+            read.PendingPublicationCount,
+            read.ActiveDeviceCount,
+            read.RevokedDeviceCount,
+            read.TopicCount,
+            read.LastGenerationAtUtc?.ToString("o", CultureInfo.InvariantCulture),
+            read.QueuePending,
+            read.QueueRunning,
+            read.QueueFailed,
+            read.AudioRetentionDays,
+            read.ContentRetentionDays,
+            read.SemanticSearchAvailable,
+            read.GenerationEnabled,
+            read.SmtpConfigured,
+            read.MediaBytes,
+            read.DatabaseBytes));
+    }
+
+    /// <summary>
+    /// The instance's own recent log lines (§16). Bounded by the buffer, and the requested count is bounded too:
+    /// this reads an in-memory ring, and an unbounded count would be a way to ask the server to serialise
+    /// everything it has.
+    /// </summary>
+    private static IResult GetLogsAsync(
+        [FromQuery] int? lines,
+        IRecentLogReader logs)
+    {
+        var requested = Math.Clamp(lines ?? DefaultLogLines, 1, MaxLogLines);
+        var entries = logs.Read(requested);
+
+        return Results.Ok(new LogResponse(
+            entries
+                .Select(entry => new LogEntryDto(
+                    entry.TimestampUtc.ToString("o", CultureInfo.InvariantCulture),
+                    entry.Level,
+                    entry.Category,
+                    entry.Message))
+                .ToArray(),
+            logs.MinimumLevel));
+    }
+
+    /// <summary>
+    /// Sends one real test message (§12). A failure is answered as 200 with <c>sent: false</c> and a code rather
+    /// than as an HTTP error: the operator pressed a button and needs a sentence, and "the relay refused us" is
+    /// a result of the test, not a failure of the request.
+    /// </summary>
+    private static async Task<IResult> SendTestEmailAsync(
+        [FromBody] SmtpTestRequest? request,
+        SendTestEmailUseCase send,
+        CancellationToken cancellationToken)
+    {
+        var result = await send.ExecuteAsync(request?.ToAddress, cancellationToken).ConfigureAwait(false);
+
+        return Results.Ok(new SmtpTestResponse(result.Sent, result.Code, result.Detail));
+    }
+
+    /// <summary>Maps the reader's domain status name onto the API's wire spelling.</summary>
+    private static string ToWireName(string domainStatus) => domainStatus switch
+    {
+        "PendingInputs" => ReflectionStatusNames.PendingInputs,
+        "Ready" => ReflectionStatusNames.Ready,
+        "Generating" => ReflectionStatusNames.Generating,
+        "ReviewRequired" => ReflectionStatusNames.ReviewRequired,
+        "Confirmed" => ReflectionStatusNames.Confirmed,
+        "StaleByLateInput" => ReflectionStatusNames.StaleByLateInput,
+        "Failed" => ReflectionStatusNames.Failed,
+
+        // InstanceStatistics.NoReflection, and any status this mapping has not learned about: passed through
+        // rather than guessed at, so a new state shows up as itself instead of as "failed".
+        _ => domainStatus,
+    };
+
     private static async Task<IResult> GetModelNamesAsync(
         ReadModelEndpointsUseCase read,
         CancellationToken cancellationToken)
@@ -240,7 +356,9 @@ public static class OperationsEndpointRouteBuilderExtensions
                         request.Model,
                         request.SecretName,
                         request.TimeoutSeconds,
-                        request.Dimensions),
+                        request.Dimensions,
+                        request.Password,
+                        request.ClearPassword),
                     cancellationToken)
                 .ConfigureAwait(false);
         }
@@ -287,7 +405,10 @@ public static class OperationsEndpointRouteBuilderExtensions
                         request.SecretName,
                         request.FromAddress,
                         request.FromName,
-                        request.TimeoutSeconds),
+                        request.TimeoutSeconds,
+                        request.Password,
+                        request.ClearPassword,
+                        request.ToAddress),
                     cancellationToken)
                 .ConfigureAwait(false);
         }
@@ -325,7 +446,9 @@ public static class OperationsEndpointRouteBuilderExtensions
         endpoint.Model,
         endpoint.SecretName,
         endpoint.TimeoutSeconds,
-        endpoint.Dimensions);
+        endpoint.Dimensions,
+        ToWireName(endpoint.PasswordSource),
+        endpoint.HasPassword);
 
     private static SmtpSettingsDto ToDto(SmtpSettingsView settings) => new(
         settings.Enabled,
@@ -336,7 +459,22 @@ public static class OperationsEndpointRouteBuilderExtensions
         settings.SecretName,
         settings.FromAddress,
         settings.FromName,
-        settings.TimeoutSeconds);
+        settings.TimeoutSeconds,
+        settings.ToAddress,
+        ToWireName(settings.PasswordSource),
+        settings.HasPassword);
+
+    /// <summary>
+    /// The password's origin, in the API's own vocabulary. <c>SecretSource</c> is an application-level enum, and
+    /// the wire spelling is decided here like every other contract value.
+    /// </summary>
+    private static string ToWireName(SecretSource source) => source switch
+    {
+        SecretSource.Ui => SecretSourceNames.Ui,
+        SecretSource.File => SecretSourceNames.SecretFile,
+        SecretSource.Environment => SecretSourceNames.Environment,
+        _ => SecretSourceNames.None,
+    };
 
     private static async Task<IResult> GetIndexAsync(
         GetIndexStatusUseCase get,
@@ -519,9 +657,10 @@ public static class OperationsEndpointRouteBuilderExtensions
         // Parsed here so a typo is reported against the field that has it; every other bound is checked by the use
         // case, which validates the whole set before writing any of it.
         if (!TryParseLocalTime(request.BackupLocalTime, out var backupTime) ||
-            !TryParseLocalTime(request.AudioCleanupLocalTime, out var cleanupTime))
+            !TryParseLocalTime(request.AudioCleanupLocalTime, out var cleanupTime) ||
+            !TryParseLocalTime(request.ContentCleanupLocalTime, out var contentCleanupTime))
         {
-            return Invalid("备份时刻与清理时刻需要写成 HH:mm，例如 03:30。");
+            return Invalid("备份时刻、录音清理时刻与内容清理时刻需要写成 HH:mm，例如 03:30。");
         }
 
         try
@@ -539,7 +678,9 @@ public static class OperationsEndpointRouteBuilderExtensions
                         request.RetrievalMaxMaterials,
                         request.RetrievalCandidateScanLimit,
                         request.RetrievalMinimumRelevance,
-                        request.RetrievalMinimumLexicalScore),
+                        request.RetrievalMinimumLexicalScore,
+                        contentCleanupTime,
+                        request.InlineTranscriptionTimeoutSeconds),
                     cancellationToken)
                 .ConfigureAwait(false);
         }
@@ -633,11 +774,13 @@ public static class OperationsEndpointRouteBuilderExtensions
         settings.BackupEnabled,
         ContentSettings.FormatTime(settings.BackupLocalTime),
         ContentSettings.FormatTime(settings.AudioCleanupLocalTime),
+        ContentSettings.FormatTime(settings.ContentCleanupLocalTime),
         settings.BackupKeepCount,
         settings.RetrievalMaxMaterials,
         settings.RetrievalCandidateScanLimit,
         settings.RetrievalMinimumRelevance,
-        settings.RetrievalMinimumLexicalScore);
+        settings.RetrievalMinimumLexicalScore,
+        settings.InlineTranscriptionTimeoutSeconds);
 
     private static ListeningPortDto ToDto(
         RuntimeOverrides current,

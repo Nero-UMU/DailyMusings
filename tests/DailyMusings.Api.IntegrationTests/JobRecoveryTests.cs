@@ -175,6 +175,12 @@ public class JobRecoveryTests
             { new StringContent("480"), VoiceUploadFields.CreatedOffsetMinutes },
             { new StringContent("3520"), VoiceUploadFields.DurationMilliseconds },
             { new StringContent(idempotencyKey), VoiceUploadFields.IdempotencyKey },
+
+            // The queue does the work in this test, on purpose: what it is about is a process that dies while a
+            // *job* is running, so it asks the upload not to hold the transcription itself. With the inline
+            // attempt left on, the hanging endpoint would keep the upload request open for the whole inline
+            // window before the job was even reachable.
+            { new StringContent("false"), VoiceUploadFields.TranscribeNow },
         };
 
         return await client.PostAsync("/api/inputs/voice", form);

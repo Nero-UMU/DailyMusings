@@ -94,6 +94,8 @@ public class SmtpProbeTests
         public bool Exists(string name) => throw new NotSupportedException(nameof(UnusedSecretStore));
 
         public IReadOnlyList<string> ListNames() => throw new NotSupportedException(nameof(UnusedSecretStore));
+
+        public SecretSource ResolveSource(string name) => throw new NotSupportedException(nameof(UnusedSecretStore));
     }
 
     private sealed class UnusedTranscriptionSettings : ITranscriptionSettingsProvider

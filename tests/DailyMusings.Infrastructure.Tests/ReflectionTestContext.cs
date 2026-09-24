@@ -118,7 +118,12 @@ internal sealed class FakeGenerationClient : IReflectionGenerationClient, IUnsou
             body,
             ["记录"],
             ["随想"],
-            citations));
+            citations,
+
+            // No topics by default: a test that cares about the article's filing sets them explicitly, and the
+            // rest of these tests are about the text, its sources and its rotation.
+            [],
+            []));
     }
 
     public Task<IReadOnlyList<UnsourcedFinding>> CheckAsync(
@@ -209,6 +214,8 @@ internal sealed class ReflectionTestContext : IAsyncDisposable
             clock,
             Enqueuer);
 
+        ResolveArticleTopics = new Application.Topics.ResolveArticleTopicsUseCase(Topics, clock);
+
         Generate = new GenerateReflectionUseCase(
             Inputs,
             Reflections,
@@ -227,10 +234,12 @@ internal sealed class ReflectionTestContext : IAsyncDisposable
                     Settings = new NotificationSettings("owner@example.test", null),
                 },
                 new TestSmtpSettings { Settings = SmtpSettings.Default },
-                Enqueuer));
+                Enqueuer),
+            Topics,
+            ResolveArticleTopics);
 
         Check = new RunUnsourcedStatementCheckUseCase(Reflections, Inputs, client, clock);
-        GetReflection = new GetReflectionUseCase(Reflections, ThisRetrieval);
+        GetReflection = new GetReflectionUseCase(Reflections, ThisRetrieval, Topics);
         Confirm = new ConfirmReflectionUseCase(Reflections, clock, GetReflection);
         SwitchVersion = new SwitchReflectionVersionUseCase(Reflections, clock, GetReflection);
         EditVersion = new EditReflectionVersionUseCase(Reflections, UnitOfWork, clock, GetReflection);
@@ -319,6 +328,8 @@ internal sealed class ReflectionTestContext : IAsyncDisposable
     public Application.Topics.CreateTopicUseCase CreateTopic { get; }
 
     public Application.Topics.AssignTopicsAutomaticallyUseCase AssignTopicsAutomatically { get; }
+
+    public Application.Topics.ResolveArticleTopicsUseCase ResolveArticleTopics { get; }
 
     public Application.Embeddings.EmbedInputUseCase EmbedInput { get; }
 

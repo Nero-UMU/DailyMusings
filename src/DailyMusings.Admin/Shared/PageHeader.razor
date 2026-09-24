@@ -1,0 +1,29 @@
+@* 分区的标题栏：页面名 + 一句话说明 + 右侧主操作按钮。
+   八个分区都用它，标题栏的样子就不会一个页面一个样。 *@
+<header class="page-head">
+    <div>
+        <h1 class="page-title">@Title</h1>
+        @if (!string.IsNullOrWhiteSpace(Hint))
+        {
+            <p class="page-hint">@Hint</p>
+        }
+    </div>
+    @if (Actions is not null)
+    {
+        <div class="page-actions">@Actions</div>
+    }
+</header>
+
+@code {
+    /// <summary>菜单上的那个名字，一字不差。</summary>
+    [Parameter, EditorRequired]
+    public string Title { get; set; } = string.Empty;
+
+    /// <summary>这个分区管什么，一到两句。</summary>
+    [Parameter]
+    public string? Hint { get; set; }
+
+    /// <summary>右侧的主操作按钮，通常一两个。</summary>
+    [Parameter]
+    public RenderFragment? Actions { get; set; }
+}

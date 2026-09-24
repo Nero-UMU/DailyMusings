@@ -4,6 +4,7 @@ using DailyMusings.Domain.Common;
 using DailyMusings.Domain.Reflections;
 using DailyMusings.Domain.Reflections.Sources;
 using DailyMusings.Domain.Time;
+using DailyMusings.Domain.Topics;
 using Microsoft.Data.Sqlite;
 
 namespace DailyMusings.Infrastructure.Persistence.Repositories;
@@ -68,6 +69,17 @@ public sealed class SqliteReflectionRepository : IReflectionRepository
             MapReflection,
             cancellationToken,
             ("$limit", limit)).ConfigureAwait(false);
+
+    public async Task<int> CountByDateRangeAsync(
+        ContentDate fromInclusive,
+        ContentDate toInclusive,
+        CancellationToken cancellationToken) =>
+        await _accessor.QuerySingleAsync(
+            "SELECT COUNT(*) FROM reflection WHERE content_date >= $from AND content_date <= $to;",
+            reader => reader.GetInt32(0),
+            cancellationToken,
+            ("$from", SqliteValues.ContentDay(fromInclusive)),
+            ("$to", SqliteValues.ContentDay(toInclusive))).ConfigureAwait(false);
 
     public async Task<IReadOnlyList<Reflection>> ListAllAsync(int limit, CancellationToken cancellationToken) =>
         await _accessor.QueryAsync(
@@ -180,6 +192,13 @@ public sealed class SqliteReflectionRepository : IReflectionRepository
             ("$version", id.ToString())).ConfigureAwait(false);
 
         version.AttachSources(sources);
+
+        // The version's topics travel with it for the same reason its sources do: they are a judgement about
+        // this exact text, and a caller that got the body without them would have to go and ask again.
+        var topics = await ListVersionTopicsAsync([id], cancellationToken).ConfigureAwait(false);
+        version.AttachTopics(
+            topics.TryGetValue(id, out var attached) && attached.Count > 0 ? attached[0] : null,
+            topics.TryGetValue(id, out var rest) ? rest.Skip(1).ToArray() : []);
 
         var claims = await _accessor.QueryAsync(
             """
@@ -356,6 +375,111 @@ public sealed class SqliteReflectionRepository : IReflectionRepository
             cancellationToken,
             ("$at", SqliteValues.Instant(checkedAtUtc)),
             ("$id", versionId.ToString())).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Replaces a version's topics. Primary first, and the order is persisted because it is the only place the
+    /// primary/secondary distinction lives — a separate flag could disagree with the sequence, an ordered list
+    /// cannot.
+    /// </summary>
+    public async Task SetVersionTopicsAsync(
+        ReflectionVersionId versionId,
+        IReadOnlyList<TopicId> topicIds,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(topicIds);
+
+        await _accessor.ExecuteAsync(
+            "DELETE FROM reflection_version_topic WHERE reflection_version_id = $version;",
+            cancellationToken,
+            ("$version", versionId.ToString())).ConfigureAwait(false);
+
+        var createdAt = SqliteValues.Instant(DateTimeOffset.UtcNow);
+
+        for (var index = 0; index < topicIds.Count; index++)
+        {
+            if (topicIds[index].IsEmpty)
+            {
+                continue;
+            }
+
+            // INSERT OR IGNORE rather than a plain insert: the primary key is (version, topic), and a caller
+            // that passed the same topic twice should get one row rather than a constraint failure that aborts
+            // the whole re-filing.
+            await _accessor.ExecuteAsync(
+                """
+                INSERT OR IGNORE INTO reflection_version_topic
+                    (reflection_version_id, topic_id, is_primary, created_at_utc)
+                VALUES ($version, $topic, $isPrimary, $createdAt);
+                """,
+                cancellationToken,
+                ("$version", versionId.ToString()),
+                ("$topic", topicIds[index].ToString()),
+                ("$isPrimary", index == 0 ? 1 : 0),
+                ("$createdAt", createdAt)).ConfigureAwait(false);
+        }
+    }
+
+    public async Task<IReadOnlyDictionary<ReflectionVersionId, IReadOnlyList<TopicId>>> ListVersionTopicsAsync(
+        IReadOnlyList<ReflectionVersionId> versionIds,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(versionIds);
+
+        var result = new Dictionary<ReflectionVersionId, IReadOnlyList<TopicId>>();
+
+        if (versionIds.Count == 0)
+        {
+            return result;
+        }
+
+        var parameters = new (string, object?)[versionIds.Count];
+        var builder = new System.Text.StringBuilder(
+            "SELECT reflection_version_id, topic_id FROM reflection_version_topic WHERE reflection_version_id IN (");
+
+        for (var i = 0; i < versionIds.Count; i++)
+        {
+            if (i > 0)
+            {
+                builder.Append(", ");
+            }
+
+            var name = string.Create(System.Globalization.CultureInfo.InvariantCulture, $"$v{i}");
+            builder.Append(name);
+            parameters[i] = (name, versionIds[i].ToString());
+        }
+
+        // is_primary first, then insertion order: the primary topic is what the day was mainly about, and a
+        // reader that takes the first entry has to get the right one.
+        builder.Append(") ORDER BY reflection_version_id, is_primary DESC, created_at_utc, topic_id;");
+
+        var rows = await _accessor.QueryAsync(
+            builder.ToString(),
+            reader => (
+                Version: new ReflectionVersionId(SqliteIds.Parse(reader.GetString(0))),
+                Topic: SqliteIds.Topic(reader.GetString(1))),
+            cancellationToken,
+            parameters).ConfigureAwait(false);
+
+        var grouped = new Dictionary<ReflectionVersionId, List<TopicId>>();
+
+        foreach (var (version, topic) in rows)
+        {
+            if (!grouped.TryGetValue(version, out var list))
+            {
+                list = [];
+                grouped[version] = list;
+            }
+
+            list.Add(topic);
+        }
+
+        foreach (var (version, list) in grouped)
+        {
+            result[version] = list;
+        }
+
+        return result;
     }
 
     private static Reflection MapReflection(SqliteDataReader reader) =>

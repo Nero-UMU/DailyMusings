@@ -12,10 +12,11 @@ public interface IClientClock
 }
 
 /// <summary>
-/// Durable local storage for captures that have not been confirmed by the server yet.
+/// Durable local storage for the device's own archive of thoughts.
 /// <para>
 /// Everything here must survive the process being killed: §9.2 requires the client to write to safe storage
-/// <em>before</em> it tells the user the recording is done.
+/// <em>before</em> it tells the user the recording is done. The store is the archive, not a queue that empties
+/// itself — a capture the server has confirmed stays on the device until the user deletes it.
 /// </para>
 /// </summary>
 public interface IOfflineCaptureStore
@@ -32,12 +33,14 @@ public interface IOfflineCaptureStore
 
     Task<PendingCapture?> FindAsync(string captureId, CancellationToken cancellationToken);
 
+    /// <summary>Every record on the device, newest first.</summary>
     Task<IReadOnlyList<PendingCapture>> ListAsync(CancellationToken cancellationToken);
 
     /// <summary>Inserts or replaces the record.</summary>
     Task UpsertAsync(PendingCapture capture, CancellationToken cancellationToken);
 
-    /// <summary>Removes the record and its local audio. Called only after the server confirmed the capture.</summary>
+    /// <summary>Removes the record and its local audio. Called when the user deletes a capture, never as a side
+    /// effect of a successful upload.</summary>
     Task DeleteAsync(string captureId, CancellationToken cancellationToken);
 }
 
@@ -64,41 +67,28 @@ public interface IDeviceTokenProvider
     Task<string?> GetTokenAsync(CancellationToken cancellationToken);
 }
 
-/// <summary>The server-facing operations the queue needs. Returns the server's own response type verbatim.</summary>
+/// <summary>The server-facing operations the phone needs. Returns the server's own response type verbatim.</summary>
 public interface ICaptureApiClient
 {
     Task<IngestResponse> UploadVoiceAsync(VoiceUpload upload, CancellationToken cancellationToken);
 
     Task<IngestResponse> UploadTextAsync(TextUpload upload, CancellationToken cancellationToken);
 
-    /// <summary>Reads an entry back, so the UI can show transcription progress after the upload.</summary>
+    /// <summary>
+    /// Reads one entry back, so the phone can fill in a transcript that was still being produced when the upload
+    /// answered (docs/开发指导.md §8.2, and the phone spec's 0.1: the voice upload transcribes inline by default,
+    /// and a pending answer is completed by a few reads of this route).
+    /// </summary>
     Task<InputDto?> GetInputAsync(string serverInputId, CancellationToken cancellationToken);
 
     /// <summary>
-    /// Reads entries. Returns a result rather than throwing, so the screen can say "连不上服务器" instead of showing
-    /// an empty day: an empty list and an unreachable server look identical to a user, and §9.2's whole premise is
-    /// that the client works with the server gone.
+    /// Reads recent entries, newest first. The calendar itself reads the <em>device's</em> records — this is here so
+    /// a recording whose transcription had not finished can have its text filled in without one request per entry.
+    /// Returns a result rather than throwing, so a screen can say "连不上服务器" instead of showing an empty list:
+    /// an empty list and an unreachable server look identical to a user, and §9.2's whole premise is that the
+    /// client works with the server gone.
     /// </summary>
-    /// <param name="contentDate">
-    /// One day, or <c>null</c> for the most recent entries across days — which is what a month view needs, so that
-    /// drawing it costs one request instead of one per day.
-    /// </param>
     Task<ApiResult<IReadOnlyList<InputDto>>> GetInputsAsync(string? contentDate, CancellationToken cancellationToken);
-
-    /// <summary>
-    /// Stores the user's correction to a transcript (§4.1 修订转写). The original is kept beside it — §6.1 keeps both,
-    /// because a correction is a decision the user may want to revisit.
-    /// </summary>
-    Task<ApiResult<InputDto>> ReviseTranscriptAsync(
-        string inputId,
-        string? revisedTranscript,
-        CancellationToken cancellationToken);
-
-    /// <summary>
-    /// Asks the server to transcribe an entry again (§9.2's manual retry, for the transcription rather than the
-    /// upload). Only useful when the first attempt failed — the server refuses otherwise.
-    /// </summary>
-    Task<ApiResult<InputDto>> RetryTranscriptionAsync(string inputId, CancellationToken cancellationToken);
 }
 
 
