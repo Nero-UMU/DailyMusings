@@ -438,7 +438,7 @@ public static class OperationsEndpointRouteBuilderExtensions
     {
         if (!TryParseService(service, out var parsed))
         {
-            return Invalid("The service must be one of transcription, generation, embedding, smtp or wordpress.");
+            return Invalid("The service must be one of transcription, generation, embedding or smtp.");
         }
 
         var result = await probe.ExecuteAsync(parsed, cancellationToken).ConfigureAwait(false);
@@ -466,9 +466,6 @@ public static class OperationsEndpointRouteBuilderExtensions
                 return true;
             case "smtp":
                 service = ExternalService.Smtp;
-                return true;
-            case "wordpress":
-                service = ExternalService.WordPress;
                 return true;
             default:
                 return false;

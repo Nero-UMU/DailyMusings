@@ -37,8 +37,7 @@ public partial class SettingsPage : ContentPage
 
         ServerUrlEntry.Text = _settings.ServerBaseUrl ?? string.Empty;
 
-        // The platform and its version, in that order: the label used to read "Android <windows version>" on Windows,
-        // which is exactly the sort of small lie that makes a screenshot untrustworthy.
+        // The platform and its version, in that order.
         DeviceInfoLabel.Text =
             $"{DeviceInfo.Current.Manufacturer} {DeviceInfo.Current.Model} · " +
             $"{DeviceInfo.Current.Platform} {DeviceInfo.Current.VersionString}";
@@ -213,8 +212,8 @@ public partial class SettingsPage : ContentPage
             PairingStatus.Text = $"配对成功：{result.DeviceName}。录音与文字现在会自动上传。";
 
             // Both sections only become readable once the device has a token, so pairing is exactly when they
-            // have to be read. Without this the page kept telling a freshly paired device to go and pair —
-            // found by pairing the packaged Windows client, where the stale hint sat right below the success line.
+            // have to be read. Without this the page kept telling a freshly paired device to go and pair — the
+            // stale hint sat right below the success line.
             await RefreshAsync();
             await RefreshInstanceInfoAsync();
             return;

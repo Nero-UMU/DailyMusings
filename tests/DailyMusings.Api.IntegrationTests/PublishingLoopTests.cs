@@ -138,7 +138,7 @@ public class PublishingLoopTests
 
         using var created = await instance.Client.PostAsJsonAsync(
             "/api/publish-targets",
-            new CreatePublishTargetRequest("blog", PublishTargetTypeNames.WordPress, "blog"));
+            new CreatePublishTargetRequest("blog", PublishTargetTypeNames.Markdown, "drafts"));
 
         var target = (await created.Content.ReadFromJsonAsync<PublishTargetDto>())!;
 

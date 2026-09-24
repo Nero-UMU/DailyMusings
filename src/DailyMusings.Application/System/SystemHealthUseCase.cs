@@ -10,7 +10,7 @@ public sealed record HealthReport(
 /// <summary>
 /// Aggregates the basic health probes (docs/开发指导.md §16).
 /// <para>
-/// Only instance-local probes participate. Model, SMTP and WordPress reachability are answered by their own
+/// Only instance-local probes participate. Model and SMTP reachability are answered by their own
 /// "test connection" actions: §16 is explicit that an unhealthy third party must not make this instance
 /// report itself as broken.
 /// </para>

@@ -2,14 +2,13 @@
 """Phase-5 end-to-end acceptance driver (docs/开发指导.md §17.3, §15, §16).
 
 Runs against a real instance started from deploy/compose.yaml with real external services:
-a real WordPress 6.7, a real SMTP server (Mailpit), and an OpenAI-compatible stub on
-127.0.0.1:8077 that stands in for the model provider.
+a real SMTP server (Mailpit), the instance's real Markdown export directory, and an
+OpenAI-compatible stub on 127.0.0.1:8077 that stands in for the model provider.
 
 Every check prints PASS/FAIL with the evidence it used. Exit code is non-zero if any check
 failed, so the caller cannot mistake a partial run for a green one.
 """
 
-import base64
 import hashlib
 import http.cookiejar
 import io
@@ -21,8 +20,6 @@ import sqlite3
 import struct
 import sys
 import time
-import urllib.error
-import urllib.parse
 import urllib.request
 import wave
 import zipfile
@@ -31,9 +28,6 @@ from zoneinfo import ZoneInfo
 
 BASE = os.environ.get("DM_BASE", "http://127.0.0.1:18321")
 MAILPIT = os.environ.get("DM_MAILPIT", "http://127.0.0.1:8025")
-WP = os.environ.get("DM_WP", "http://127.0.0.1:8090")
-WP_USER = os.environ.get("DM_WP_USER", "owner")
-WP_PASSWORD = os.environ.get("DM_WP_APP_PASSWORD", "")
 STATE = os.environ.get("DM_STATE", "")
 WORK = os.environ.get("DM_WORK", "")
 ADMIN_INITIAL_PASSWORD = os.environ.get("DM_ADMIN_INITIAL_PASSWORD", "")
@@ -90,39 +84,6 @@ def mailpit_message(message_id):
         return json.loads(response.read().decode("utf-8"))
 
 
-def wp_request(path, method="GET", payload=None):
-    url = WP.rstrip("/") + path
-    data = json.dumps(payload).encode("utf-8") if payload is not None else None
-    request = urllib.request.Request(url, data=data, method=method)
-    credential = base64.b64encode(("%s:%s" % (WP_USER, WP_PASSWORD)).encode("utf-8")).decode("ascii")
-    request.add_header("Authorization", "Basic " + credential)
-    if data:
-        request.add_header("Content-Type", "application/json")
-    try:
-        with urllib.request.urlopen(request, timeout=60) as response:
-            return response.status, json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as error:
-        return error.code, error.read().decode("utf-8", "replace")
-
-
-def wp_reset():
-    """Empties the throwaway blog, so 'the post really exists' cannot be satisfied by last run's post."""
-    removed = []
-    while True:
-        code, posts = wp_request("/wp-json/wp/v2/posts?per_page=100&status=any")
-        if code != 200 or not isinstance(posts, list) or not posts:
-            break
-        for post in posts:
-            wp_request("/wp-json/wp/v2/posts/%s?force=true" % post["id"], method="DELETE")
-            removed.append(post["id"])
-    return removed
-
-
-def wp_posts():
-    code, posts = wp_request("/wp-json/wp/v2/posts?per_page=100&status=any")
-    return posts if code == 200 and isinstance(posts, list) else []
-
-
 def slice_claim(body, block_index, char_start, char_end):
     blocks = body.replace("\r\n", "\n").replace("\r", "\n").split("\n\n")
     if block_index >= len(blocks):
@@ -151,10 +112,6 @@ def main():
         health.status == 200 and payload.get("healthy") is True,
         "status=%s probes=%s" % (health.status, json.dumps(payload.get("probes"), ensure_ascii=False)),
     )
-
-    removed = wp_reset()
-    check("the throwaway WordPress starts empty, so what is found later was published by this run",
-          wp_posts() == [], "deleted posts from earlier runs=%s" % removed)
 
     initial = admin.get("/api/devices")
     check("admin endpoints refuse a caller with no session",
@@ -224,13 +181,17 @@ def main():
     # Switched back off, so failure mails cannot add noise to the mailbox checks later in the run.
     admin.patch_json("/api/notification-settings", {"jobFailed": False})
 
-    wp_target = admin.post_json("/api/publish-targets", {"name": "测试博客", "type": "wordPress", "destinationReference": None})
     hexo_target = admin.post_json("/api/publish-targets", {"name": "Hexo 输出", "type": "markdown", "destinationReference": "hexo"})
-    check("publish targets can be created (WordPress + Markdown)",
-          wp_target.status in (200, 201) and hexo_target.status in (200, 201),
-          "wp=%s hexo=%s" % (wp_target.status, hexo_target.status))
-    wp_target_id = (wp_target.json() or {}).get("id")
+    check("a Markdown (Hexo) publish target can be created", hexo_target.status in (200, 201),
+          "hexo=%s body=%s" % (hexo_target.status, hexo_target.text()[:200]))
     hexo_target_id = (hexo_target.json() or {}).get("id")
+
+    # The product has exactly one target kind now, so a client still asking for the removed one has to be told so
+    # rather than quietly given a Markdown directory.
+    removed_kind = admin.post_json("/api/publish-targets", {"name": "旧目标", "type": "wordPress", "destinationReference": None})
+    check("the removed WordPress target kind is refused rather than silently accepted",
+          removed_kind.status == 400,
+          "status=%s body=%s" % (removed_kind.status, removed_kind.text()[:200]))
 
     topic = admin.post_json("/api/topics", {"name": TOPIC_NAME})
     topic_body = topic.json() or {}
@@ -540,14 +501,33 @@ def main():
               "body length=%d, contains draft text=%s" % (len(mail_body), MARKER in mail_body))
 
     # ------------------------------------------------------------- publishing
-    step("S5 (§17.3 6) WordPress draft, manual publish, Hexo Markdown")
+    step("S5 (§17.3 6) Hexo Markdown: export as a draft, then as a published post")
 
+    def markdown_files():
+        """Every file the instance has written under its markdown root, in walk order."""
+        root = os.path.join(STATE, "markdown", "hexo")
+        found = []
+        for directory, _dirs, names in os.walk(root):
+            for name in names:
+                found.append(os.path.join(directory, name))
+        return found
+
+    def read_first_markdown():
+        found = markdown_files()
+        if not found:
+            return None, ""
+        with open(found[0], "r", encoding="utf-8") as handle:
+            return found, handle.read()
+
+    # The only destination kind left is a directory the user mounted, and the only thing visibility can mean for a
+    # file is the front matter's `draft` flag — which is exactly what Hexo reads when it decides whether to
+    # generate the post. So the whole of §17.3 step 6 is asserted against the file on disk.
     publish = device.post_json(
-        "/api/reflections/%s/publish/%s" % (today, wp_target_id),
-        {"visibility": "draft", "replaceExistingFile": False},
+        "/api/reflections/%s/publish/%s" % (today, hexo_target_id),
+        {"visibility": "draft", "replaceExistingFile": True},
     )
     publish_body = publish.json() or {}
-    check("uploading to WordPress as a draft is queued", publish_body.get("queued") is True,
+    check("exporting the confirmed draft as Hexo Markdown is queued", publish_body.get("queued") is True,
           "status=%s code=%s detail=%s" % (publish.status, publish_body.get("code"), publish_body.get("detail")))
     publication_id = (publish_body.get("publication") or {}).get("id")
 
@@ -556,33 +536,30 @@ def main():
         lambda item: item.get("status") in ("draftUploaded", "published", "failed", "expired"),
         240,
         3.0,
-        "wordpress draft upload",
+        "markdown draft export",
     )
-    check("the publication reaches draftUploaded against the real WordPress",
-          publication.get("status") == "draftUploaded" and publication.get("remoteId"),
-          "status=%s remoteId=%s errorCode=%s" % (publication.get("status"), publication.get("remoteId"), publication.get("errorCode")))
+    check("the export finishes as draftUploaded and names the file it wrote",
+          publication.get("status") == "draftUploaded" and (publication.get("remoteId") or "").endswith(".md"),
+          "status=%s remoteId=%s errorCode=%s" % (
+              publication.get("status"), publication.get("remoteId"), publication.get("errorCode")))
 
-    remote_id = publication.get("remoteId")
-    if remote_id:
-        status_code, post = wp_request("/wp-json/wp/v2/posts/%s" % remote_id)
-        title = (post.get("title") or {}).get("rendered") if isinstance(post, dict) else None
-        content = (post.get("content") or {}).get("rendered") if isinstance(post, dict) else ""
-        first_paragraph = confirmed_body.split("\n\n")[0].strip()
-        check("the post really exists on the blog, as a draft, with the draft's own first paragraph",
-              status_code == 200 and post.get("status") == "draft" and first_paragraph and first_paragraph in (content or ""),
-              "status=%s wpStatus=%s title=%s firstParagraphInContent=%s" % (
-                  status_code, post.get("status") if isinstance(post, dict) else None, title,
-                  first_paragraph in (content or "")))
+    files, written = read_first_markdown()
+    check("a Markdown file lands under the instance's markdown root with front matter and the body",
+          files is not None and len(files) == 1 and "title:" in written and confirmed_body[:20] in written,
+          "files=%s head=%r" % ([os.path.relpath(path, STATE) for path in (files or [])], written[:200]))
+
+    check("the draft export tells Hexo the post is still a draft (draft: true)",
+          "draft: true" in written, "head=%r" % written[:200])
 
     # §11.1: publishing the same version to the same target again is the next round of one publication, not a
-    # second publication — the audit trail is "this draft went to this blog twice", with `exportRound` counting.
+    # second one — the audit trail is "this draft went to this target twice", with `exportRound` counting.
     public = device.post_json(
-        "/api/reflections/%s/publish/%s" % (today, wp_target_id),
-        {"visibility": "public", "replaceExistingFile": False},
+        "/api/reflections/%s/publish/%s" % (today, hexo_target_id),
+        {"visibility": "public", "replaceExistingFile": True},
     )
     public_body = public.json() or {}
     public_id = (public_body.get("publication") or {}).get("id")
-    check("a manual publish to the public is accepted as the next round of the same publication",
+    check("a manual public export is accepted as the next round of the same publication",
           public_body.get("queued") is True and public_id == publication_id
           and (public_body.get("publication") or {}).get("exportRound") == 1,
           "queued=%s publicationId=%s exportRound=%s" % (
@@ -593,56 +570,44 @@ def main():
         lambda item: item.get("status") in ("published", "failed", "expired"),
         240,
         3.0,
-        "manual public publish",
+        "manual public export",
     )
-    check("the manual publish puts the post live", public_state.get("status") == "published",
+    check("the manual public export reaches published", public_state.get("status") == "published",
           "status=%s errorCode=%s" % (public_state.get("status"), public_state.get("errorCode")))
+
+    files_after, written_after = read_first_markdown()
+    check("the public export rewrites the same file as a post Hexo will generate (draft: false)",
+          "draft: false" in written_after and files_after is not None and len(files_after) == 1,
+          "files=%s head=%r" % ([os.path.relpath(path, STATE) for path in (files_after or [])], written_after[:200]))
 
     check_remote = device.post_json("/api/publications/%s/check-remote" % publication_id, {})
     check_body = check_remote.json() or {}
-    check("reading the remote back reports it as in sync",
+    check("reading the exported file back reports it as in sync",
           check_remote.status == 200 and check_body.get("remoteChecked") is True
           and check_body.get("localChanged") is False and check_body.get("remoteChanged") is False,
-          "status=%s remoteStatus=%s local=%s remote=%s" % (check_remote.status, check_body.get("remoteStatus"), check_body.get("localChanged"), check_body.get("remoteChanged")))
+          "status=%s local=%s remote=%s" % (
+              check_remote.status, check_body.get("localChanged"), check_body.get("remoteChanged")))
 
-    posts = wp_posts()
-    check("the blog holds exactly the one post this run published, and it is live",
-          len(posts) == 1 and posts[0].get("status") == "publish",
-          "posts=%s" % json.dumps([{"id": post.get("id"), "status": post.get("status"), "title": (post.get("title") or {}).get("rendered")} for post in posts], ensure_ascii=False)[:300])
+    # Editing the exported file by hand is the divergence the user is offered a decision about (§11.1).
+    if files_after:
+        with open(files_after[0], "w", encoding="utf-8") as handle:
+            handle.write("我在编辑器里改过这个文件了。\n")
 
-    markdown = device.post_json(
-        "/api/reflections/%s/publish/%s" % (today, hexo_target_id),
-        {"visibility": "draft", "replaceExistingFile": True},
-    )
-    markdown_body = markdown.json() or {}
-    check("exporting Hexo Markdown is queued", markdown_body.get("queued") is True,
-          "status=%s code=%s" % (markdown.status, markdown_body.get("code")))
-    markdown_id = (markdown_body.get("publication") or {}).get("id")
-    markdown_state = poll(
-        lambda: device.get("/api/publications/" + markdown_id).json() or {},
-        lambda item: item.get("status") in ("draftUploaded", "published", "failed", "expired"),
-        180,
-        3.0,
-        "markdown export",
-    )
-    # A Markdown export has no remote to publish to, so writing the file *is* the finished job: the terminal status
-    # is the one that matches the requested visibility, and the file on disk is the real evidence.
-    check("the Markdown export finishes and names the file it wrote",
-          markdown_state.get("status") in ("draftUploaded", "published") and (markdown_state.get("remoteId") or "").endswith(".md"),
-          "status=%s written=%s errorCode=%s" % (markdown_state.get("status"), markdown_state.get("remoteId"), markdown_state.get("errorCode")))
+        diverged = device.post_json("/api/publications/%s/check-remote" % publication_id, {})
+        diverged_body = diverged.json() or {}
+        check("a file edited outside the product is reported as diverged",
+              diverged.status == 200 and diverged_body.get("remoteChanged") is True,
+              "status=%s local=%s remote=%s" % (
+                  diverged.status, diverged_body.get("localChanged"), diverged_body.get("remoteChanged")))
 
-    markdown_root = os.path.join(STATE, "markdown", "hexo")
-    files = []
-    for root, _dirs, names in os.walk(markdown_root):
-        for name in names:
-            files.append(os.path.join(root, name))
-    written = ""
-    if files:
-        with open(files[0], "r", encoding="utf-8") as handle:
-            written = handle.read()
-    check("a Markdown file lands under the instance's markdown root with front matter and the body",
-          len(files) == 1 and "title:" in written and confirmed_body[:20] in written,
-          "files=%s head=%r" % ([os.path.relpath(path, STATE) for path in files], written[:160]))
+        kept = device.post_json("/api/publications/%s/resolve" % publication_id, {"action": "keepBoth"})
+        check("the user's answer to the difference is accepted and clears it",
+              kept.status == 200, "status=%s body=%s" % (kept.status, kept.text()[:200]))
+
+        # Put the file back exactly as the instance wrote it, so nothing later in the run is reading a hand-edited
+        # draft directory by accident.
+        with open(files_after[0], "w", encoding="utf-8") as handle:
+            handle.write(written_after)
 
     # -------------------------------------------------- phase-five operations
     step("S6 (§15.1) readable export")
@@ -811,7 +776,7 @@ def main():
           disabled.status == 200 and (disabled.json() or {}).get("enabled") is False,
           json.dumps(disabled.json() or {}, ensure_ascii=False))
 
-    for service in ("transcription", "generation", "embedding", "smtp", "wordpress"):
+    for service in ("transcription", "generation", "embedding", "smtp"):
         probe = admin.post_json("/api/system/test-connection/%s" % service, {})
         probe_body = probe.json() or {}
         check("test connection for %s reaches the real service" % service,
@@ -858,9 +823,7 @@ def main():
         "audioFixtureSha256": fixtures,
         "restoreSourceZip": restore_source,
         "restoreSourceSha256": hashlib.sha256(open(restore_source, "rb").read()).hexdigest(),
-        "wpTargetId": wp_target_id,
         "markdownTargetId": hexo_target_id,
-        "wpRemoteId": remote_id,
         "backupFileName": final_body.get("fileName"),
         "backupSha256": final_body.get("sha256"),
         "exportRoot": (export_after.json() or {}).get("relativeRoot"),

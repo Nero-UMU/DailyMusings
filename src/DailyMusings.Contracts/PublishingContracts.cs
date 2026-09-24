@@ -26,20 +26,19 @@ public static class PublicationVisibilityNames
 
 public static class PublishTargetTypeNames
 {
-    public const string WordPress = "wordPress";
     public const string Markdown = "markdown";
 }
 
 /// <summary>
-/// A destination the instance can publish to. Never carries a credential: the WordPress site's password lives in
-/// the secret store and is referenced by name (§10.4).
+/// A destination the instance can publish to. There is exactly one kind: a Markdown directory the user has
+/// mounted, which is what Hexo reads (§11.2). Nothing here carries a credential.
 /// </summary>
 public sealed record PublishTargetDto(
     string Id,
     string Name,
     string Type,
 
-    /// <summary>A configuration key for WordPress, or a directory relative to the markdown root.</summary>
+    /// <summary>A directory relative to the markdown root.</summary>
     string? DestinationReference,
     bool AutomaticPublishEnabled,
     string? AutomaticPublishEnabledBy,
@@ -99,14 +98,15 @@ public sealed record PublishResponse(bool Queued, string? Code, string? Detail, 
 /// <summary>What the user decided about a remote that has drifted from the draft.</summary>
 public sealed record ResolveRemoteRequest(string Action, bool AllowOverwriteOfManualEdits);
 
+/// <summary>
+/// What the difference check found. The remote here is a file, so there is no title, status or link to report —
+/// the exported name travels as the publication's <c>RemoteId</c> — only the two hashes that were compared.
+/// </summary>
 public sealed record RemoteCheckResponse(
     PublicationDto Publication,
     bool RemoteChecked,
     bool LocalChanged,
     bool RemoteChanged,
-    string? RemoteTitle,
-    string? RemoteStatus,
-    string? RemoteLink,
     string? RemoteContentHash,
     string? LocalContentHash);
 

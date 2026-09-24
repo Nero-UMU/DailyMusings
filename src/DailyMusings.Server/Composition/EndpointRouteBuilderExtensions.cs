@@ -30,7 +30,6 @@ public static class EndpointRouteBuilderExtensions
         endpoints.MapInputEndpoints();
         endpoints.MapReflectionEndpoints();
         endpoints.MapPublishingEndpoints();
-        endpoints.MapWordPressSiteEndpoints();
         endpoints.MapContentSettingsEndpoints();
         endpoints.MapOperationsEndpoints();
         endpoints.MapDownloadEndpoints();

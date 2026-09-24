@@ -110,13 +110,8 @@ public static class InfrastructureServiceCollectionExtensions
             provider.GetRequiredService<OpenAiCompatibleGenerationClient>());
         services.AddSingleton<IEmbeddingClient, OpenAiCompatibleEmbeddingClient>();
 
-        // Publishing and mail. Each is a singleton because they hold no per-call state: the site and the secret
-        // are parameters of every call, so two publications can run without sharing anything.
-        // The destination provider is scoped: it reads the per-target WordPress override from the settings table
-        // (§8.1), which is scoped state.
-        services.AddScoped<IWordPressSiteOverrideStore, AppSettingWordPressSiteStore>();
+        // Publishing and mail. Each is a singleton because they hold no per-call state.
         services.AddScoped<IPublishDestinationProvider, ConfigurationPublishDestinationProvider>();
-        services.AddSingleton<IRemotePublisher, WordPressRestPublisher>();
         services.AddSingleton<IMarkdownWriter, FileMarkdownWriter>();
         services.AddSingleton<ISmtpSettingsProvider, ConfigurationSmtpSettingsProvider>();
 
@@ -183,7 +178,6 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<Application.Publishing.CreatePublishTargetUseCase>();
         services.AddScoped<Application.Publishing.UpdatePublishTargetUseCase>();
         services.AddScoped<Application.Publishing.SetAutomaticPublishUseCase>();
-        services.AddScoped<Application.Publishing.UpdateWordPressSiteOverrideUseCase>();
         services.AddScoped<Application.Publishing.RequestPublicationUseCase>();
         services.AddScoped<Application.Publishing.RunPublicationUseCase>();
         services.AddScoped<Application.Publishing.RetryPublicationUseCase>();

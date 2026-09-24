@@ -58,7 +58,6 @@ services:
       - openai-api-key
       - embedding-api-key
       - smtp-password
-      - wordpress-application-password
 
     healthcheck:
       # The instance's port is admin-changeable, so the check reads the override file instead of assuming a
@@ -90,5 +89,3 @@ secrets:
     file: ./secrets/embedding-api-key
   smtp-password:
     file: ./secrets/smtp-password
-  wordpress-application-password:
-    file: ./secrets/wordpress-application-password

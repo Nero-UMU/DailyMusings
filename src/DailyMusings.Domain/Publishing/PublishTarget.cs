@@ -4,10 +4,8 @@ namespace DailyMusings.Domain.Publishing;
 
 public enum PublishTargetType
 {
-    WordPress = 0,
-
-    /// <summary>Hexo-style Markdown written into a mounted directory (§11.2).</summary>
-    Markdown = 1,
+    /// <summary>Markdown written into a mounted directory, which is what Hexo consumes (§11.2).</summary>
+    Markdown = 0,
 }
 
 /// <summary>

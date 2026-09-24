@@ -340,8 +340,7 @@ public partial class DraftPage : ContentPage, IQueryAttributable
         }
     }
 
-    private static string DescribeTargetType(string type) =>
-        type == PublishTargetTypeNames.Markdown ? "Hexo Markdown" : "WordPress";
+    private static string DescribeTargetType(string type) => "Hexo Markdown";
 
     private async Task LoadPublicationsAsync(string contentDate)
     {

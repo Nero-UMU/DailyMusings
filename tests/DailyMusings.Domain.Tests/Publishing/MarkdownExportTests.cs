@@ -159,18 +159,47 @@ public class MarkdownExportTests
     public void A_file_we_did_not_write_is_never_touched()
     {
         // Someone's own hand-written post may sit at exactly the name we would pick. Not overwriting it is the
-        // whole of §11.2's promise.
+        // whole of §11.2's promise — and no confirmation changes that, because the product cannot even identify
+        // what it would be destroying.
         Assert.AreEqual(
             MarkdownWritePlan.RefuseUnowned,
             MarkdownWritePolicy.Decide(fileExists: true, fileIsOurs: false, externallyModified: false, userConfirmedReplace: true));
     }
 
+    /// <summary>
+    /// The combination the writer actually produces for a hand-edited export: the recorded hash no longer
+    /// matches, so the file is both "not ours" and "modified outside the product". Reporting the first instead
+    /// of the second told the user the instance had never written that file, and made the
+    /// <c>RefuseExternallyModified</c> plan unreachable.
+    /// </summary>
     [TestMethod]
-    public void A_file_edited_outside_the_product_is_refused_even_after_confirmation()
+    public void A_file_edited_outside_the_product_is_reported_as_edited_not_as_unowned()
     {
         Assert.AreEqual(
             MarkdownWritePlan.RefuseExternallyModified,
-            MarkdownWritePolicy.Decide(fileExists: true, fileIsOurs: true, externallyModified: true, userConfirmedReplace: true));
+            MarkdownWritePolicy.Decide(fileExists: true, fileIsOurs: false, externallyModified: true, userConfirmedReplace: false));
+    }
+
+    /// <summary>
+    /// §17.3 step 7: after the divergence has been reported, the user's choice has to be carried out. 覆盖 is
+    /// only ever offered on a diverged export, so refusing it unconditionally made the action impossible to
+    /// complete — the user could pick it and it would always fail with "we never wrote that file".
+    /// </summary>
+    [TestMethod]
+    public void The_users_explicit_overwrite_carries_out_even_though_the_file_was_edited()
+    {
+        Assert.AreEqual(
+            MarkdownWritePlan.ReplaceExistingFile,
+            MarkdownWritePolicy.Decide(fileExists: true, fileIsOurs: false, externallyModified: true, userConfirmedReplace: true));
+    }
+
+    [TestMethod]
+    public void An_edited_file_is_kept_when_the_user_did_not_ask_to_replace_it()
+    {
+        // "保留两边" reaches the writer with the flag unset: the edited file stays and the export goes beside it.
+        Assert.AreEqual(
+            MarkdownWritePlan.RefuseExternallyModified,
+            MarkdownWritePolicy.Decide(fileExists: true, fileIsOurs: true, externallyModified: true, userConfirmedReplace: false));
     }
 
     [TestMethod]

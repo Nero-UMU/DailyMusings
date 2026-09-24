@@ -9,8 +9,8 @@ namespace DailyMusings.Infrastructure.Tests;
 
 /// <summary>
 /// §8.1's "everything configurable from the admin page": the operational settings that used to live only in the
-/// deployment configuration, and the two things that cannot — the listening port, which has to be known before the
-/// web host exists, and the per-target WordPress site, which is a credential reference.
+/// deployment configuration, and the one thing that cannot — the listening port, which has to be known before the
+/// web host exists.
 /// <para>
 /// The behaviours asserted here were each observed against a running instance before being written down, including
 /// the failure paths: a corrupt override file, an unbindable port, and a cleared override falling back to the
@@ -192,56 +192,6 @@ public class RuntimeAndInstanceSettingsTests
         {
             Directory.Delete(root, recursive: true);
         }
-    }
-
-    /// <summary>
-    /// Keyed by the target's id, not its name: renaming a target must not move one site's credentials onto another
-    /// site, and the keys have to stay safe to persist and to select in the settings table.
-    /// </summary>
-    [TestMethod]
-    public void WordPress_site_keys_are_per_target_and_free_of_path_characters()
-    {
-        var first = new PublishTargetId(Guid.CreateVersion7());
-        var second = new PublishTargetId(Guid.CreateVersion7());
-
-        var keys = new[]
-        {
-            WordPressSiteSettingKeys.BaseUrl(first),
-            WordPressSiteSettingKeys.Username(first),
-            WordPressSiteSettingKeys.SecretName(first),
-            WordPressSiteSettingKeys.TimeoutSeconds(first),
-        };
-
-        Assert.AreEqual(4, keys.Distinct(StringComparer.Ordinal).Count(), "Each field needs its own key.");
-
-        foreach (var key in keys)
-        {
-            StringAssert.Contains(key, first.Value.ToString("N"), "The key must carry the target's id.");
-            Assert.IsFalse(key.Contains('/', StringComparison.Ordinal), key);
-            Assert.IsFalse(key.Contains('\\', StringComparison.Ordinal), key);
-        }
-
-        Assert.AreNotEqual(
-            WordPressSiteSettingKeys.BaseUrl(first),
-            WordPressSiteSettingKeys.BaseUrl(second),
-            "Two targets must not share a site address.");
-    }
-
-    /// <summary>
-    /// A blank field means "stop overriding this one", so blankness has to be recognised as such — otherwise the
-    /// deployment configuration could never take over again.
-    /// </summary>
-    [TestMethod]
-    public void A_blank_wordpress_override_is_recognised_as_empty()
-    {
-        Assert.IsTrue(WordPressSiteOverride.None.IsEmpty);
-        Assert.IsTrue(new WordPressSiteOverride(null, null, null, null).IsEmpty);
-        Assert.IsTrue(new WordPressSiteOverride(string.Empty, "   ", null, null).IsEmpty);
-
-        Assert.IsFalse(new WordPressSiteOverride("https://blog.example.com", null, null, null).IsEmpty);
-        Assert.IsFalse(new WordPressSiteOverride(null, "owner", null, null).IsEmpty);
-        Assert.IsFalse(new WordPressSiteOverride(null, null, "wordpress-application-password", null).IsEmpty);
-        Assert.IsFalse(new WordPressSiteOverride(null, null, null, 45).IsEmpty);
     }
 
     private static string NewTempDirectory()

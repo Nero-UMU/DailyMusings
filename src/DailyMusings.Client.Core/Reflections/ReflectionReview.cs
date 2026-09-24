@@ -168,13 +168,13 @@ public static class ReflectionReview
         var state = publication.Status switch
         {
             PublicationStatusNames.Queued => "排队中",
-            PublicationStatusNames.InProgress => "正在发布",
-            PublicationStatusNames.DraftUploaded => publication.TargetType == PublishTargetTypeNames.Markdown
-                ? "已写入 Markdown 文件"
-                : "已上传为草稿",
-            PublicationStatusNames.Published => publication.TargetType == PublishTargetTypeNames.Markdown
-                ? "已写入 Markdown 文件"
-                : "已公开",
+            PublicationStatusNames.InProgress => "正在导出",
+
+            // One target kind remains, so both finished states say the same thing: a file was written. Whether
+            // that file is a published post or still a draft is the visibility half of the line below, and it is
+            // also exactly what the front matter's `draft` flag says.
+            PublicationStatusNames.DraftUploaded or PublicationStatusNames.Published => "已写入 Markdown 文件",
+
             PublicationStatusNames.Expired => "已超过执行窗口，未执行",
             PublicationStatusNames.Superseded => "已被新的发布取代",
             _ => $"失败（{publication.ErrorCode ?? "未知原因"}）",
@@ -205,7 +205,6 @@ public static class ReflectionReview
         "publication.window_expired" => "已超过执行窗口，自动发布不会再执行；可以手动发布。",
         "publication.slot_not_due" => "还没到发布时刻。",
         "publication.superseded" => "这次发布已被新的发布取代。",
-        "publish.wordpress_not_configured" => "WordPress 目标还没配置好。",
         "auth.forbidden" => "设备令牌没有发布权限，请重新配对。",
         "reflection.unconfirmed" => "这一天还没确认，确认后才能发布。",
         null => "服务器拒绝了这次发布。",

@@ -48,8 +48,7 @@ public interface ISecretGenerator
 
 /// <summary>
 /// Resolves secrets by <em>name</em>. Configuration stores only the name or path — never the value — so an
-/// exported config, a log line or a backup can never leak a model key, SMTP password or WordPress
-/// application password (§10.4).
+/// exported config, a log line or a backup can never leak a model key or SMTP password (§10.4).
 /// </summary>
 public interface ISecretStore
 {

@@ -2,8 +2,8 @@
 # Phase-5 acceptance: instance A on the test host.
 #
 # Everything here talks to real services: the model endpoint is a stub because there is no provider on this
-# host, but transcription, generation, embeddings, SMTP (Mailpit), WordPress and the Hexo Markdown output
-# are all exercised through their real interfaces.
+# host, but transcription, generation, embeddings, SMTP (Mailpit) and the Hexo Markdown output are all
+# exercised through their real interfaces.
 set -uo pipefail
 
 # The harness is self-locating: the instance directories, the work directory and the clean source checkout sit next
@@ -14,14 +14,6 @@ WORK="$ROOT/work"
 INSTANCE="$ROOT/inst-a"
 STATE="$INSTANCE/state"
 
-# Application password of the disposable WordPress site. It is a credential, so it comes from the environment
-# rather than from this file.
-WP_APP_PASSWORD="${DM_WP_APP_PASSWORD:-}"
-if [ -z "$WP_APP_PASSWORD" ]; then
-    echo "FATAL: set DM_WP_APP_PASSWORD to the throwaway WordPress site's application password"
-    exit 1
-fi
-
 mkdir -p "$WORK" "$STATE" "$INSTANCE/keys" "$INSTANCE/secrets"
 chmod 777 "$WORK" "$INSTANCE" "$STATE" "$INSTANCE/keys" "$INSTANCE/secrets"
 
@@ -29,12 +21,10 @@ chmod 777 "$WORK" "$INSTANCE" "$STATE" "$INSTANCE/keys" "$INSTANCE/secrets"
 # itself, so it is copied into the instance directory before it is used.
 cp "$VERIFY/compose.verify.yaml" "$INSTANCE/compose.verify.yaml"
 
-# Throwaway secret values for the model endpoints and SMTP; the WordPress one is the real application password of
-# the disposable blog, taken from the environment.
+# Throwaway secret values for the model endpoints and SMTP.
 cp "$VERIFY/secrets/openai-api-key" "$INSTANCE/secrets/openai-api-key"
 cp "$VERIFY/secrets/embedding-api-key" "$INSTANCE/secrets/embedding-api-key"
 cp "$VERIFY/secrets/smtp-password" "$INSTANCE/secrets/smtp-password"
-printf '%s' "$WP_APP_PASSWORD" > "$INSTANCE/secrets/wordpress-application-password"
 chmod 644 "$INSTANCE/secrets/"*
 
 echo "--- model stub ---"
@@ -92,9 +82,6 @@ fi
 cd "$VERIFY"
 DM_BASE=http://127.0.0.1:18321 \
 DM_MAILPIT=http://127.0.0.1:8025 \
-DM_WP=http://127.0.0.1:8090 \
-DM_WP_USER=owner \
-DM_WP_APP_PASSWORD="$WP_APP_PASSWORD" \
 DM_STATE="$STATE" \
 DM_WORK="$WORK" \
 DM_ADMIN_INITIAL_PASSWORD="$PW" \

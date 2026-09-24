@@ -10,7 +10,7 @@ public sealed record HealthProbeResult(string Name, bool Healthy, string? Detail
 /// <summary>
 /// One basic health probe. docs/开发指导.md §16 limits basic health to what the instance itself controls:
 /// database writability, media-directory writability and the background executor's state. External
-/// services (models, SMTP, WordPress) must never be probed here — they get their own "test connection"
+/// services (models, SMTP) must never be probed here — they get their own "test connection"
 /// action, so that a broken upstream cannot make the instance look unhealthy.
 /// </summary>
 public interface IHealthProbe
@@ -73,7 +73,6 @@ public enum ExternalService
     Generation = 1,
     Embedding = 2,
     Smtp = 3,
-    WordPress = 4,
 }
 
 /// <summary>

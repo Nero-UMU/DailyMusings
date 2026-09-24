@@ -77,8 +77,6 @@ public class SmtpProbeTests
             new UnusedGenerationSettings(),
             new UnusedEmbeddingSettings(),
             new TestSmtpSettings { Settings = settings },
-            new UnusedPublishTargets(),
-            new UnusedPublishDestinations(),
             NullLogger<ExternalServiceProbe>.Instance,
 
             // The probe validates certificates on purpose, so a throwaway one has to be trusted explicitly — which is
@@ -114,29 +112,5 @@ public class SmtpProbeTests
     {
         public Task<EmbeddingSettings> GetAsync(CancellationToken cancellationToken) =>
             throw new NotSupportedException(nameof(UnusedEmbeddingSettings));
-    }
-
-    private sealed class UnusedPublishTargets : IPublishTargetRepository
-    {
-        public Task<IReadOnlyList<PublishTarget>> ListAsync(CancellationToken cancellationToken) =>
-            throw new NotSupportedException(nameof(UnusedPublishTargets));
-
-        public Task<PublishTarget?> FindByIdAsync(PublishTargetId id, CancellationToken cancellationToken) =>
-            throw new NotSupportedException(nameof(UnusedPublishTargets));
-
-        public Task<PublishTarget?> FindByNameAsync(string name, CancellationToken cancellationToken) =>
-            throw new NotSupportedException(nameof(UnusedPublishTargets));
-
-        public Task AddAsync(PublishTarget target, CancellationToken cancellationToken) =>
-            throw new NotSupportedException(nameof(UnusedPublishTargets));
-
-        public Task UpdateAsync(PublishTarget target, CancellationToken cancellationToken) =>
-            throw new NotSupportedException(nameof(UnusedPublishTargets));
-    }
-
-    private sealed class UnusedPublishDestinations : IPublishDestinationProvider
-    {
-        public Task<PublishDestination> ResolveAsync(PublishTarget target, CancellationToken cancellationToken) =>
-            throw new NotSupportedException(nameof(UnusedPublishDestinations));
     }
 }

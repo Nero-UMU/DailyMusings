@@ -112,7 +112,7 @@ public static class PublishingEndpointRouteBuilderExtensions
 
         if (!TryParseTargetType(request.Type, out var type))
         {
-            return Invalid("The target type must be 'wordPress' or 'markdown'.");
+            return Invalid("The target type must be 'markdown'.");
         }
 
         try
@@ -461,18 +461,11 @@ public static class PublishingEndpointRouteBuilderExtensions
 
     private static bool TryParseTargetType(string? value, out PublishTargetType type)
     {
-        type = PublishTargetType.WordPress;
+        // One target type remains: a Markdown directory, which is what Hexo consumes. An unknown name is refused
+        // rather than silently defaulted, so a client asking for something this build does not have is told so.
+        type = PublishTargetType.Markdown;
 
-        switch (value?.Trim().ToLowerInvariant())
-        {
-            case "wordpress":
-                return true;
-            case "markdown":
-                type = PublishTargetType.Markdown;
-                return true;
-            default:
-                return false;
-        }
+        return value?.Trim().ToLowerInvariant() is "markdown";
     }
 
     private static bool TryParseVisibility(string? value, out PublicationVisibility visibility)
@@ -515,7 +508,7 @@ public static class PublishingEndpointRouteBuilderExtensions
     private static PublishTargetDto ToDto(PublishTarget target) => new(
         target.Id.ToString(),
         target.Name,
-        target.Type == PublishTargetType.Markdown ? PublishTargetTypeNames.Markdown : PublishTargetTypeNames.WordPress,
+        PublishTargetTypeNames.Markdown,
         target.DestinationReference,
         target.AutomaticPublishEnabled,
         target.AutomaticPublishEnabledBy,
@@ -531,7 +524,7 @@ public static class PublishingEndpointRouteBuilderExtensions
             publication.ReflectionVersionId.ToString(),
             publication.PublishTargetId.ToString(),
             view.TargetName,
-            view.TargetType == PublishTargetType.Markdown ? PublishTargetTypeNames.Markdown : PublishTargetTypeNames.WordPress,
+            PublishTargetTypeNames.Markdown,
             publication.Trigger == PublicationTrigger.Manual
                 ? PublicationTriggerNames.Manual
                 : PublicationTriggerNames.Automatic,
@@ -567,9 +560,6 @@ public static class PublishingEndpointRouteBuilderExtensions
             result.Comparison.RemoteChecked,
             result.Comparison.LocalChanged,
             result.Comparison.RemoteChanged,
-            result.Remote?.Title,
-            result.Remote?.Status,
-            result.Remote?.Link,
             result.RemoteContentHash,
             result.LocalContentHash);
 

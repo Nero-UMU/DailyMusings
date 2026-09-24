@@ -171,39 +171,6 @@ public class ReflectionReviewTests
             "reflection-1",
             "version-1",
             "target-1",
-            "测试博客",
-            PublishTargetTypeNames.WordPress,
-            PublicationTriggerNames.Manual,
-            PublicationStatusNames.DraftUploaded,
-            PublicationVisibilityNames.Draft,
-            "13",
-            1,
-            "2026-03-01T20:00:00Z",
-            "device:1",
-            "2026-03-01T20:00:01Z",
-            "2026-03-01T20:00:02Z",
-            null,
-            null,
-            false,
-            false,
-            false,
-            0);
-
-        var text = ReflectionReview.DescribePublication(publication);
-
-        StringAssert.Contains(text, "测试博客");
-        StringAssert.Contains(text, "手动草稿");
-        StringAssert.Contains(text, "已上传为草稿");
-    }
-
-    [TestMethod]
-    public void A_markdown_publication_is_not_described_as_a_remote_draft()
-    {
-        var publication = new PublicationDto(
-            "publication-1",
-            "reflection-1",
-            "version-1",
-            "target-2",
             "Hexo 输出",
             PublishTargetTypeNames.Markdown,
             PublicationTriggerNames.Manual,
@@ -222,7 +189,13 @@ public class ReflectionReviewTests
             false,
             0);
 
-        StringAssert.Contains(ReflectionReview.DescribePublication(publication), "已写入 Markdown 文件");
+        var text = ReflectionReview.DescribePublication(publication);
+
+        StringAssert.Contains(text, "Hexo 输出");
+        StringAssert.Contains(text, "手动草稿");
+
+        // The export is a file on disk, so calling it an upload would describe an action that never happened.
+        StringAssert.Contains(text, "已写入 Markdown 文件");
     }
 
     [TestMethod]

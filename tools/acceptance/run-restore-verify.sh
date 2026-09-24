@@ -15,7 +15,7 @@ mkdir -p "$FRESH/secrets"
 cp "$REPO/deploy/compose.yaml" "$FRESH/compose.yaml"
 
 # Freshly generated, and deliberately different from instance A's: nothing here may be a leftover.
-for name in openai-api-key embedding-api-key smtp-password wordpress-application-password; do
+for name in openai-api-key embedding-api-key smtp-password; do
     head -c 24 /dev/urandom | base64 | tr -d '\n=' > "$FRESH/secrets/$name"
     echo >> "$FRESH/secrets/$name"
 done

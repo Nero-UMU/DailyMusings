@@ -62,7 +62,7 @@ public static class InstanceDataManifest
             {
                 "设备令牌及其派生的会话状态（decision A.13）：恢复后设备必须重新配对。",
                 "DataProtection 密钥环（decision A.14）：它签发管理员登录 Cookie，属凭据等价物，不进备份。",
-                "任何 Secret（§10.4）：模型密钥、SMTP 密码与 WordPress Application Password 只按名引用。",
+                "任何 Secret（§10.4）：模型密钥与 SMTP 密码只按名引用。",
             },
         };
 
@@ -282,7 +282,7 @@ public sealed class BuildInstanceDataUseCase
                     publication.ReflectionId.ToString(),
                     publication.ReflectionVersionId.ToString(),
                     target?.Name ?? publication.PublishTargetId.ToString(),
-                    target?.Type == PublishTargetType.Markdown ? "markdown" : "wordPress",
+                    "markdown",
                     publication.Trigger == PublicationTrigger.Manual ? "manual" : "automatic",
                     publication.Status.ToString(),
                     publication.RemoteId,

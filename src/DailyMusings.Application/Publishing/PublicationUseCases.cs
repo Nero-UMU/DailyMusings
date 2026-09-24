@@ -1,8 +1,6 @@
-using System.Net;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using DailyMusings.Application.Abstractions;
 using DailyMusings.Application.Configuration;
 using DailyMusings.Application.Jobs;
@@ -13,20 +11,6 @@ using DailyMusings.Domain.Reflections;
 using DailyMusings.Domain.Time;
 
 namespace DailyMusings.Application.Publishing;
-
-/// <summary>
-/// A stable fingerprint of what would be sent to a remote.
-/// <para>
-/// The whole of §11.1's difference check rests on being able to compare three things: what we sent, what the
-/// draft says now, and what the remote holds. A hash is what makes those comparable without storing three copies
-/// of the article — and hashing the title alongside the body means a retitled post is a change, which it is.
-/// </para>
-/// </summary>
-public static class RemoteContentFingerprint
-{
-    public static string Of(string? title, string? content) =>
-        Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes($"{title ?? string.Empty}\n{content ?? string.Empty}")));
-}
 
 /// <summary>
 /// The hash of an exported file's contents.
@@ -318,7 +302,6 @@ public sealed class RunPublicationUseCase
     private readonly IPublishTargetRepository _targets;
     private readonly IReflectionRepository _reflections;
     private readonly IPublishDestinationProvider _destinations;
-    private readonly IRemotePublisher _wordPress;
     private readonly IMarkdownWriter _markdown;
     private readonly IContentSettingsProvider _settings;
     private readonly IClock _clock;
@@ -329,7 +312,6 @@ public sealed class RunPublicationUseCase
         IPublishTargetRepository targets,
         IReflectionRepository reflections,
         IPublishDestinationProvider destinations,
-        IRemotePublisher wordPress,
         IMarkdownWriter markdown,
         IContentSettingsProvider settings,
         IClock clock,
@@ -339,7 +321,6 @@ public sealed class RunPublicationUseCase
         _targets = targets;
         _reflections = reflections;
         _destinations = destinations;
-        _wordPress = wordPress;
         _markdown = markdown;
         _settings = settings;
         _clock = clock;
@@ -419,23 +400,14 @@ public sealed class RunPublicationUseCase
 
         try
         {
-            var outcome = destination.Type switch
-            {
-                PublishTargetType.Markdown => await PublishMarkdownAsync(
-                    publication,
-                    version,
-                    reflection.ContentDate,
-                    destination,
-                    payload,
-                    cancellationToken).ConfigureAwait(false),
-
-                _ => await PublishWordPressAsync(
-                    publication,
-                    version,
-                    destination.RequireWordPress(),
-                    publishPublicly,
-                    cancellationToken).ConfigureAwait(false),
-            };
+            var outcome = await PublishMarkdownAsync(
+                publication,
+                version,
+                reflection.ContentDate,
+                destination,
+                payload,
+                publishPublicly,
+                cancellationToken).ConfigureAwait(false);
 
             await _publications.UpdateAsync(publication, cancellationToken).ConfigureAwait(false);
             await NotifyAsync(publication, publication.Status, target.Name, publication.ErrorCode, cancellationToken)
@@ -465,49 +437,18 @@ public sealed class RunPublicationUseCase
         }
     }
 
-    private async Task<PublicationRunResult> PublishWordPressAsync(
-        Publication publication,
-        ReflectionVersion version,
-        WordPressSite site,
-        bool publishPublicly,
-        CancellationToken cancellationToken)
-    {
-        var draft = new RemoteArticleDraft(
-            version.Title,
-            WordPressBody.Render(version),
-            MarkdownSlug.From(version.Title),
-            IsDraft: !publishPublicly);
-
-        // The remote id recorded by an earlier attempt is what keeps a retry from creating a second article
-        // (§17.2: WordPress 重试不产生重复文章).
-        var article = publication.RemoteId is { } remoteId
-            ? await _wordPress.UpdateAsync(site, remoteId, draft, cancellationToken).ConfigureAwait(false)
-            : await _wordPress.CreateAsync(site, draft, cancellationToken).ConfigureAwait(false);
-
-        var hash = RemoteContentFingerprint.Of(draft.Title, draft.Content);
-
-        publication.CompleteAsDraft(article.RemoteId, hash, _clock.UtcNow);
-
-        if (publishPublicly)
-        {
-            publication.PromoteDraftToPublished(_clock.UtcNow);
-        }
-
-        return new PublicationRunResult(
-            publishPublicly ? PublicationRunOutcome.Published : PublicationRunOutcome.Uploaded,
-            publication,
-            article.RemoteId);
-    }
-
     private async Task<PublicationRunResult> PublishMarkdownAsync(
         Publication publication,
         ReflectionVersion version,
         ContentDate contentDate,
         PublishDestination destination,
         PublicationPayload payload,
+        bool publishPublicly,
         CancellationToken cancellationToken)
     {
-        var document = MarkdownDocument.From(version, contentDate);
+        // Visibility means one thing for a file: whether Hexo is told this post is still a draft. That is the
+        // front matter's `draft` field, and it is the whole of what "公开" can be for the only target kind left.
+        var document = MarkdownDocument.From(version, contentDate, isDraft: !publishPublicly);
         var content = MarkdownTemplate.DefaultTemplate.Render(document);
 
         var baseName = MarkdownFileName.BaseName(contentDate, document.Slug);
@@ -542,9 +483,19 @@ public sealed class RunPublicationUseCase
                     : "The exported file has been changed outside the product.");
         }
 
+        // Written as a draft first in both cases, then promoted: that is the state machine's only path to
+        // Published, and it keeps "the file was written" and "the post is public" as two separate facts.
         publication.CompleteAsDraft(write.FileName, write.ContentHash, _clock.UtcNow);
 
-        return new PublicationRunResult(PublicationRunOutcome.Uploaded, publication, write.FileName);
+        if (publishPublicly)
+        {
+            publication.PromoteDraftToPublished(_clock.UtcNow);
+        }
+
+        return new PublicationRunResult(
+            publishPublicly ? PublicationRunOutcome.Published : PublicationRunOutcome.Uploaded,
+            publication,
+            write.FileName);
     }
 
     /// <summary>
@@ -567,56 +518,4 @@ public sealed class RunPublicationUseCase
             .QueuePublicationAsync(publication.Id, status, targetName, publication.RemoteId, errorCode, cancellationToken)
             .ConfigureAwait(false);
     }
-}
-
-/// <summary>
-/// Renders a draft for a WordPress post body.
-/// <para>
-/// Plain paragraphs become HTML paragraphs, and nothing else is interpreted. The generator is instructed not to
-/// emit Markdown headings or lists (§8.4), so a full Markdown converter would be machinery for input the product
-/// does not produce; quoting the text and wrapping each paragraph is the faithful rendering of what the user
-/// wrote. Content is HTML-escaped, so a draft that mentions <c>&lt;div&gt;</c> cannot become markup.
-/// </para>
-/// </summary>
-public static class WordPressBody
-{
-    public static string Render(ReflectionVersion version)
-    {
-        ArgumentNullException.ThrowIfNull(version);
-
-        var paragraphs = Domain.Reflections.Sources.ParagraphSplitter.Split(version.Body)
-            .Where(paragraph => !string.IsNullOrWhiteSpace(paragraph));
-
-        return string.Join("\n", paragraphs.Select(paragraph => $"<p>{Escape(paragraph)}</p>"));
-    }
-
-    /// <summary>Turns the HTML back into plain paragraphs, for pulling a remote edit into the draft (§11.1).</summary>
-    public static string ToPlainText(string? html)
-    {
-        if (string.IsNullOrWhiteSpace(html))
-        {
-            return string.Empty;
-        }
-
-        var withBreaks = html
-            .Replace("</p>", "\n\n", StringComparison.OrdinalIgnoreCase)
-            .Replace("<br />", "\n", StringComparison.OrdinalIgnoreCase)
-            .Replace("<br/>", "\n", StringComparison.OrdinalIgnoreCase)
-            .Replace("<br>", "\n", StringComparison.OrdinalIgnoreCase);
-
-        var stripped = Regex.Replace(withBreaks, "<[^>]+>", string.Empty);
-
-        var decoded = WebUtility.HtmlDecode(stripped);
-
-        return string.Join(
-            "\n\n",
-            decoded
-                .Replace("\r\n", "\n", StringComparison.Ordinal)
-                .Split('\n', StringSplitOptions.RemoveEmptyEntries)
-                .Select(line => line.Trim())
-                .Where(line => line.Length > 0));
-    }
-
-    private static string Escape(string text) =>
-        WebUtility.HtmlEncode(text);
 }

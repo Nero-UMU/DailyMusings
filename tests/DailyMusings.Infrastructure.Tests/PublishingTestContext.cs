@@ -18,95 +18,6 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 namespace DailyMusings.Infrastructure.Tests;
 
-/// <summary>
-/// A remote site that records what it was asked to do.
-/// <para>
-/// It distinguishes create from update because that distinction is the whole of §17.2's "WordPress 重试不产生重复
-/// 文章": a retry that calls create twice is the bug, and only a double that counts both calls can catch it.
-/// </para>
-/// </summary>
-internal sealed class FakeRemotePublisher : IRemotePublisher
-{
-    private readonly Dictionary<string, RemoteArticle> _articles = new(StringComparer.Ordinal);
-    private int _nextId = 100;
-
-    public int CreateCalls { get; private set; }
-
-    public int UpdateCalls { get; private set; }
-
-    public List<string> WrittenContents { get; } = [];
-
-    public List<string> WrittenTitles { get; } = [];
-
-    public List<string> WrittenStatuses { get; } = [];
-
-    /// <summary>Set to make the next call fail the way a real site can.</summary>
-    public Exception? FailWith { get; set; }
-
-    /// <summary>Set to edit the remote behind the product's back, for the divergence tests.</summary>
-    public void EditRemotely(string remoteId, string title, string content)
-    {
-        if (_articles.TryGetValue(remoteId, out var article))
-        {
-            _articles[remoteId] = article with { Title = title, Content = content };
-        }
-    }
-
-    public Task<RemoteArticle> CreateAsync(
-        WordPressSite site,
-        RemoteArticleDraft draft,
-        CancellationToken cancellationToken)
-    {
-        CreateCalls++;
-        ThrowIfFailing();
-        Record(draft);
-
-        var id = (_nextId++).ToString(System.Globalization.CultureInfo.InvariantCulture);
-        var article = new RemoteArticle(id, draft.Title, draft.Content, draft.IsDraft ? "draft" : "publish", $"http://blog/{id}", null);
-        _articles[id] = article;
-
-        return Task.FromResult(article);
-    }
-
-    public Task<RemoteArticle> UpdateAsync(
-        WordPressSite site,
-        string remoteId,
-        RemoteArticleDraft draft,
-        CancellationToken cancellationToken)
-    {
-        UpdateCalls++;
-        ThrowIfFailing();
-        Record(draft);
-
-        var article = new RemoteArticle(remoteId, draft.Title, draft.Content, draft.IsDraft ? "draft" : "publish", $"http://blog/{remoteId}", null);
-        _articles[remoteId] = article;
-
-        return Task.FromResult(article);
-    }
-
-    public Task<RemoteArticle?> GetAsync(WordPressSite site, string remoteId, CancellationToken cancellationToken)
-    {
-        ThrowIfFailing();
-        return Task.FromResult(_articles.GetValueOrDefault(remoteId));
-    }
-
-    private void Record(RemoteArticleDraft draft)
-    {
-        WrittenTitles.Add(draft.Title);
-        WrittenContents.Add(draft.Content);
-        WrittenStatuses.Add(draft.IsDraft ? "draft" : "publish");
-    }
-
-    private void ThrowIfFailing()
-    {
-        if (FailWith is { } failure)
-        {
-            FailWith = null;
-            throw failure;
-        }
-    }
-}
-
 /// <summary>A mail transport that records messages, and can be told to fail.</summary>
 internal sealed class FakeEmailSender : IEmailSender
 {
@@ -161,7 +72,6 @@ internal sealed class PublishingTestContext : IAsyncDisposable
         TestContentProvider content,
         TestNotificationSettings notifications,
         TestSmtpSettings smtp,
-        FakeRemotePublisher remote,
         FakeEmailSender email,
         InstancePaths paths)
     {
@@ -170,7 +80,6 @@ internal sealed class PublishingTestContext : IAsyncDisposable
         Content = content;
         Notifications = notifications;
         Smtp = smtp;
-        Remote = remote;
         Email = email;
         Paths = paths;
 
@@ -184,18 +93,9 @@ internal sealed class PublishingTestContext : IAsyncDisposable
         Enqueuer = new Application.Jobs.JobEnqueuer(Jobs, clock);
         Markdown = new FileMarkdownWriter(paths, NullLogger<FileMarkdownWriter>.Instance);
 
-        // The destination provider needs the configuration surface; a Markdown target only needs the path, so an
-        // empty configuration is honest here — the WordPress path is exercised by the integration tests.
-        var configuration = new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build();
-
-        // It also reads the per-target WordPress override from the settings table (§8.1). These tests only exercise
-        // Markdown targets, so an empty store is the honest stand-in — the same construction the reflection context
-        // uses.
-        var appSettings = new DailyMusings.Infrastructure.Persistence.Repositories.SqliteAppSettingStore(accessor, clock);
-        Destinations = new ConfigurationPublishDestinationProvider(
-            configuration,
-            paths,
-            new DailyMusings.Infrastructure.Publishing.AppSettingWordPressSiteStore(appSettings));
+        // The only destination kind left is a directory under the instance's markdown root, so the provider needs
+        // nothing but the paths.
+        Destinations = new ConfigurationPublishDestinationProvider(paths);
 
         QueueNotifications = new QueueNotificationUseCase(notifications, smtp, Enqueuer);
         SendNotifications = new SendNotificationUseCase(email);
@@ -207,25 +107,14 @@ internal sealed class PublishingTestContext : IAsyncDisposable
             Targets,
             Reflections,
             Destinations,
-            remote,
             Markdown,
             content,
             clock,
             QueueNotifications);
 
-        Check = new CheckRemoteUseCase(Publications, Targets, Reflections, Destinations, remote, Markdown, clock);
+        Check = new CheckRemoteUseCase(Publications, Targets, Reflections, Destinations, Markdown, clock);
 
-        Resolve = new ResolveRemoteDivergenceUseCase(
-            Publications,
-            Targets,
-            Reflections,
-            Destinations,
-            remote,
-            Markdown,
-            Check,
-            UnitOfWork,
-            clock,
-            Enqueuer);
+        Resolve = new ResolveRemoteDivergenceUseCase(Publications, Check, clock, Enqueuer);
 
         Retry = new RetryPublicationUseCase(Publications, clock, Enqueuer);
 
@@ -248,8 +137,6 @@ internal sealed class PublishingTestContext : IAsyncDisposable
     public TestNotificationSettings Notifications { get; }
 
     public TestSmtpSettings Smtp { get; }
-
-    public FakeRemotePublisher Remote { get; }
 
     public FakeEmailSender Email { get; }
 
@@ -314,15 +201,14 @@ internal sealed class PublishingTestContext : IAsyncDisposable
             new TestContentProvider(ContentSettings.Default),
             new TestNotificationSettings(),
             new TestSmtpSettings(),
-            new FakeRemotePublisher(),
             new FakeEmailSender(),
             paths);
     }
 
-    /// <summary>Creates a target of either kind.</summary>
+    /// <summary>Creates a target. There is one kind: a directory under the markdown root.</summary>
     public async Task<PublishTarget> AddTargetAsync(
         string name,
-        PublishTargetType type = PublishTargetType.WordPress,
+        PublishTargetType type = PublishTargetType.Markdown,
         string? destination = null,
         bool automatic = false)
     {

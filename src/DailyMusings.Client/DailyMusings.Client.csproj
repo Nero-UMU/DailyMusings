@@ -1,10 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
 	<PropertyGroup>
-		<!-- §18: Android in phase two, Windows in phase five. Everything shared lives in DailyMusings.Client.Core, so
-		     the second target added one line here plus a platform recorder — and nothing else in the project assumed
-		     Android. -->
-		<TargetFrameworks>net10.0-android;net10.0-windows10.0.19041.0</TargetFrameworks>
+		<!-- Android is the only target. The desktop client was dropped from the project's direction: everything
+		     shared lives in DailyMusings.Client.Core, and the platform layer is now a single implementation. -->
+		<TargetFrameworks>net10.0-android</TargetFrameworks>
 
 		<!-- Directory.Build.props applies a net10.0 default to every project. It is evaluated before this project
 		     body, so it cannot see TargetFrameworks and must be cleared here or the build would try a bare net10.0
@@ -33,17 +32,7 @@
 
 		<!-- Android 8.0 / API 26, per decision A.11: the runtime permission model is settled by then and it avoids
 		     the legacy storage-permission branches that older targets drag in. -->
-		<SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">26.0</SupportedOSPlatformVersion>
-
-		<!-- Windows 10 1809 is the floor for the Windows App SDK's WinUI 3, and it is old enough that no build
-		     machine or user machine in this product's life will be below it. -->
-		<SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">10.0.17763.0</SupportedOSPlatformVersion>
-		<TargetPlatformMinVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">10.0.17763.0</TargetPlatformMinVersion>
-
-		<!-- The Windows client is packaged as an MSIX so it can be installed like an application rather than run
-		     out of a folder; the server-side build does not touch this because it targets the Windows TFM only. -->
-		<RuntimeIdentifier Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">win-x64</RuntimeIdentifier>
-		<UseWinUI Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">true</UseWinUI>
+		<SupportedOSPlatformVersion>26.0</SupportedOSPlatformVersion>
 	</PropertyGroup>
 
 	<ItemGroup>

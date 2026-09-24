@@ -118,7 +118,7 @@ public class SecurityTests
         try
         {
             File.WriteAllText(Path.Combine(secretsDirectory, "smtp-password"), "s3cret-from-file\n");
-            Environment.SetEnvironmentVariable("DAILYMUSINGS_SECRET_WORDPRESS_APPLICATION_PASSWORD", "from-env");
+            Environment.SetEnvironmentVariable("DAILYMUSINGS_SECRET_EMBEDDING_API_KEY", "from-env");
 
             var store = new FileSecretStore(new InstancePaths(new StorageOptions
             {
@@ -128,14 +128,14 @@ public class SecurityTests
 
             // Docker writes a trailing newline; a secret carrying one would break an Authorization header.
             Assert.AreEqual("s3cret-from-file", store.TryGet("smtp-password"));
-            Assert.AreEqual("from-env", store.TryGet("wordpress.application-password"));
+            Assert.AreEqual("from-env", store.TryGet("embedding.api-key"));
             Assert.IsNull(store.TryGet("openai-api-key"));
             Assert.IsTrue(store.Exists("smtp-password"));
             CollectionAssert.Contains(store.ListNames().ToArray(), "smtp-password");
         }
         finally
         {
-            Environment.SetEnvironmentVariable("DAILYMUSINGS_SECRET_WORDPRESS_APPLICATION_PASSWORD", null);
+            Environment.SetEnvironmentVariable("DAILYMUSINGS_SECRET_EMBEDDING_API_KEY", null);
             Directory.Delete(root, recursive: true);
         }
     }

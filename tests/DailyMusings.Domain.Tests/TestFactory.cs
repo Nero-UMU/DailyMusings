@@ -129,7 +129,7 @@ internal static class TestFactory
 
     public static PublishTarget NewTarget(bool automatic = false, string? enabledBy = null)
     {
-        var target = PublishTarget.Create(PublishTargetId.New(), "blog", PublishTargetType.WordPress, "site-a");
+        var target = PublishTarget.Create(PublishTargetId.New(), "blog", PublishTargetType.Markdown, "drafts");
 
         if (automatic)
         {

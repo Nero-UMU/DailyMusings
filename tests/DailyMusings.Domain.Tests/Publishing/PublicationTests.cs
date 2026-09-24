@@ -128,9 +128,9 @@ public class PublicationTests
         var publication = TestFactory.NewPublication(target, PublicationTrigger.Automatic);
         publication.Begin("system:scheduler", TestFactory.Noon);
 
-        publication.Fail("wordpress.unreachable", "connection refused", TestFactory.Noon, Policy);
+        publication.Fail("markdown.directory_unwritable", "directory read-only", TestFactory.Noon, Policy);
         Assert.AreEqual(PublicationStatus.Failed, publication.Status);
-        Assert.AreEqual("wordpress.unreachable", publication.ErrorCode);
+        Assert.AreEqual("markdown.directory_unwritable", publication.ErrorCode);
 
         publication.RequeueForManualRetry("admin", TestFactory.Noon);
         Assert.AreEqual(PublicationStatus.Queued, publication.Status);

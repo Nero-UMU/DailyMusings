@@ -411,8 +411,7 @@ public sealed class Publication
     /// Queues an export of a version that is already on the remote as a draft (§11.2: 再次导出默认创建带版本号的新文件).
     /// <para>
     /// Only reachable from <see cref="PublicationStatus.DraftUploaded"/>, and <see cref="RemoteId"/> is kept on
-    /// purpose: re-running a WordPress upload must find the post it made before rather than create a second one,
-    /// and a Markdown re-export needs to know which file it wrote in order to tell "ours, untouched" from
+    /// purpose: a Markdown re-export needs to know which file it wrote in order to tell "ours, untouched" from
     /// "somebody edited this".
     /// </para>
     /// </summary>

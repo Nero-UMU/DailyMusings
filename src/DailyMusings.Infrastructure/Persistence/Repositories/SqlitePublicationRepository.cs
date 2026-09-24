@@ -8,8 +8,7 @@ namespace DailyMusings.Infrastructure.Persistence.Repositories;
 /// <summary>
 /// Named destinations (docs/开发指导.md §6.7).
 /// <para>
-/// The row holds a configuration key or a directory, never a credential: the WordPress password lives in the
-/// secret store and is referenced by name (§10.4), which is what lets a backup of this table travel safely.
+/// The row holds a directory, never a credential, which is what lets a backup of this table travel safely.
 /// </para>
 /// </summary>
 public sealed class SqlitePublishTargetRepository : IPublishTargetRepository

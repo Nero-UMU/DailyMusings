@@ -35,8 +35,7 @@ public sealed class PairingService
 
         using var http = new HttpClient { BaseAddress = baseUri, Timeout = TimeSpan.FromSeconds(30) };
 
-        // The platform is the one this client actually runs on. It used to be the literal "android", which put every
-        // Windows machine in the admin device list as an Android phone.
+        // The platform is the one this client actually runs on, rather than a hard-coded literal.
         var request = new RedeemPairingCodeRequest(
             code.Trim(),
             DeviceName(),

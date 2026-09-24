@@ -14,9 +14,9 @@ namespace DailyMusings.Infrastructure.Tests;
 /// <summary>
 /// Publishing and notifications over real storage (docs/开发指导.md §11, §12, §17.2).
 /// <para>
-/// These are the checks that decide whether something reaches the public internet, so they are asserted end to end
-/// rather than through a mock of our own interface: the remote is a double, but the queue, the records, the
-/// markdown directory and the settings are the real ones.
+/// These are the checks that decide what reaches the user's blog, so they are asserted end to end rather than
+/// through a mock of our own interface: the target is a real directory on disk, the queue, the records, the files
+/// and the settings are the real ones. The only thing doubled is the mail transport.
 /// </para>
 /// </summary>
 [TestClass]
@@ -24,11 +24,30 @@ public class PublishingTests
 {
     private static ContentDate Day(PublishingTestContext context) => ContentDate.From(context.Today);
 
+    /// <summary>Where an exported file lands. A null directory means the instance's markdown root.</summary>
+    private static string ExportedPath(PublishingTestContext context, string? directory, string fileName) =>
+        Path.Combine(context.Paths.MarkdownPath, directory ?? string.Empty, fileName);
+
+    private static async Task<string> ReadExportedAsync(
+        PublishingTestContext context,
+        string? directory,
+        string fileName) =>
+        await File.ReadAllTextAsync(ExportedPath(context, directory, fileName));
+
+    /// <summary>Every exported file under a directory, which is how "nothing was written" is asserted.</summary>
+    private static string[] ExportedFiles(PublishingTestContext context, string? directory = null)
+    {
+        var root = Path.Combine(context.Paths.MarkdownPath, directory ?? string.Empty);
+        return Directory.Exists(root)
+            ? Directory.GetFiles(root, "*.md", SearchOption.AllDirectories)
+            : [];
+    }
+
     [TestMethod]
     public async Task Only_a_confirmed_draft_can_be_published()
     {
         await using var context = await PublishingTestContext.CreateAsync();
-        var target = await context.AddTargetAsync("blog");
+        var target = await context.AddTargetAsync("hexo");
 
         var (reflection, _) = await context.SeedConfirmedDraftAsync(Day(context));
         reflection.MarkStaleByLateInput(context.Clock.UtcNow);
@@ -58,7 +77,7 @@ public class PublishingTests
     public async Task An_unattended_run_goes_public_when_the_target_opted_in()
     {
         await using var context = await PublishingTestContext.CreateAsync();
-        var target = await context.AddTargetAsync("blog");
+        var target = await context.AddTargetAsync("hexo");
 
         target.EnableAutomaticPublish("owner", context.Clock.UtcNow);
         await context.Targets.UpdateAsync(target, CancellationToken.None);
@@ -91,7 +110,7 @@ public class PublishingTests
     public async Task An_unattended_run_stays_a_draft_when_the_target_did_not_opt_in()
     {
         await using var context = await PublishingTestContext.CreateAsync();
-        var target = await context.AddTargetAsync("blog");
+        var target = await context.AddTargetAsync("hexo");
 
         var day = Day(context);
         await context.SeedConfirmedDraftAsync(day);
@@ -114,15 +133,15 @@ public class PublishingTests
     }
 
     /// <summary>
-    /// A person asking again for an already-uploaded draft decides for itself. That record was created by the
+    /// A person asking again for an already-exported draft decides for itself. That record was created by the
     /// scheduler, so without the requeue path marking it manual the planner kept applying the unattended gate and
-    /// answered "queued" while quietly uploading another draft.
+    /// answered "queued" while quietly exporting another draft.
     /// </summary>
     [TestMethod]
     public async Task Asking_again_by_hand_makes_an_unattended_record_manual()
     {
         await using var context = await PublishingTestContext.CreateAsync();
-        var target = await context.AddTargetAsync("blog");
+        var target = await context.AddTargetAsync("hexo", destination: "drafts");
 
         var day = Day(context);
         await context.SeedConfirmedDraftAsync(day);
@@ -130,11 +149,12 @@ public class PublishingTests
 
         await context.Schedule.ExecuteAsync(CancellationToken.None);
 
-        // The slot uploaded a private draft, as it must for a target that never opted in.
-        await context.QueueAndRunAsync(
-            (await context.Publications.ListOutstandingAsync(50, CancellationToken.None)).Single());
+        // The slot exported a private draft, as it must for a target that never opted in.
+        var first = (await context.Publications.ListOutstandingAsync(50, CancellationToken.None)).Single();
+        await context.QueueAndRunAsync(first);
 
-        Assert.AreEqual("draft", context.Remote.WrittenStatuses[^1]);
+        var firstRun = (await context.Publications.FindByIdAsync(first.Id, CancellationToken.None))!;
+        Assert.AreEqual("draft: true", DraftFlag(await ReadExportedAsync(context, "drafts", firstRun.RemoteId!)));
 
         // The user now asks for that day to be public.
         var again = await context.Request.ExecuteAsync(
@@ -163,17 +183,20 @@ public class PublishingTests
             PublicationRunOutcome.Published,
             run.Outcome,
             $"outcome={run.Outcome} status={stored!.Status} trigger={stored.Trigger} " +
-            $"visibility={stored.RequestedVisibility} round={stored.ExportRound} " +
-            $"writes=[{string.Join(",", context.Remote.WrittenStatuses)}]");
+            $"visibility={stored.RequestedVisibility} round={stored.ExportRound}");
 
+        // For a Markdown target the whole of "public" is the front matter's draft flag: Hexo will not generate a
+        // post that says it is a draft, so an explicit public request has to reach the file as draft: false.
         Assert.AreEqual(
-            "publish",
-            context.Remote.WrittenStatuses[^1],
-            $"The explicit public request has to reach the remote as public, not as another draft. " +
-            $"outcome={run.Outcome} writes=[{string.Join(",", context.Remote.WrittenStatuses)}] " +
-            $"createCalls={context.Remote.CreateCalls} updateCalls={context.Remote.UpdateCalls} " +
-            $"remoteId={stored.RemoteId} status={stored.Status}");
+            "draft: false",
+            DraftFlag(await ReadExportedAsync(context, "drafts", stored.RemoteId!)),
+            $"The explicit public request has to reach the file as a published post, not as another draft. " +
+            $"outcome={run.Outcome} fileName={stored.RemoteId} status={stored.Status}");
     }
+
+    /// <summary>Pulls the single <c>draft:</c> line out of a rendered file's front matter.</summary>
+    private static string DraftFlag(string content) =>
+        content.Split('\n').First(line => line.StartsWith("draft:", StringComparison.Ordinal)).Trim();
 
     /// <summary>Moves the clock to the moment the day's publish slot has just opened.</summary>
     private static void AdvanceToJustAfterThePublishSlot(PublishingTestContext context, ContentDate day)
@@ -185,10 +208,10 @@ public class PublishingTests
     }
 
     [TestMethod]
-    public async Task A_manual_publish_uploads_the_confirmed_version_and_records_what_it_sent()
+    public async Task A_manual_publish_exports_the_confirmed_version_and_records_what_it_wrote()
     {
         await using var context = await PublishingTestContext.CreateAsync();
-        var target = await context.AddTargetAsync("blog");
+        var target = await context.AddTargetAsync("hexo", destination: "drafts");
         var (reflection, version) = await context.SeedConfirmedDraftAsync(Day(context));
 
         var request = await context.Request.ExecuteAsync(
@@ -209,16 +232,17 @@ public class PublishingTests
         var stored = await context.Publications.FindByIdAsync(request.Publication.Id, CancellationToken.None);
         Assert.IsNotNull(stored);
         Assert.AreEqual(PublicationStatus.DraftUploaded, stored.Status);
-        Assert.IsNotNull(stored.RemoteId);
+        Assert.AreEqual("2026-03-11-今天的记录.md", stored.RemoteId);
 
         // §11.1: the audit trail is written when the attempt runs, so it names who caused it.
         Assert.AreEqual("device:abc", stored.TriggeredBy);
         Assert.IsNotNull(stored.TriggeredAtUtc);
         Assert.IsNotNull(stored.PublishedContentHash, "Without it a later difference check has nothing to compare.");
 
-        Assert.AreEqual(1, context.Remote.CreateCalls);
-        Assert.AreEqual("draft", context.Remote.WrittenStatuses[0], "The default outcome is a private draft.");
-        StringAssert.Contains(context.Remote.WrittenContents[0], "<p>第一段。</p>");
+        var content = await ReadExportedAsync(context, "drafts", stored.RemoteId!);
+        StringAssert.Contains(content, "title: \"今天的记录\"");
+        StringAssert.Contains(content, "第一段。");
+        Assert.AreEqual("draft: true", DraftFlag(content), "The default outcome is a private draft.");
         Assert.AreEqual(reflection.Id, stored.ReflectionId);
     }
 
@@ -226,7 +250,7 @@ public class PublishingTests
     public async Task Asking_twice_for_the_same_version_and_target_queues_one_publication()
     {
         await using var context = await PublishingTestContext.CreateAsync();
-        var target = await context.AddTargetAsync("blog");
+        var target = await context.AddTargetAsync("hexo");
         await context.SeedConfirmedDraftAsync(Day(context));
 
         var first = await context.Request.ExecuteAsync(
@@ -240,56 +264,63 @@ public class PublishingTests
     }
 
     /// <summary>
-    /// §17.2: WordPress 重试不产生重复文章. Once an upload has succeeded, every later attempt must address the
-    /// article it created rather than making another one.
+    /// §14: one version to one target happens once, and a failed attempt is visible while it is still being
+    /// retried. §11.2's refusal is the failure used here because it is the one a Markdown target really has:
+    /// somebody edited the exported file and nobody confirmed an overwrite, so the queue must not "try harder"
+    /// over their work — but the record has to say Failed rather than stay InProgress, and the very same attempt
+    /// must succeed once the file is ours again.
     /// </summary>
     [TestMethod]
-    public async Task A_retry_updates_the_article_instead_of_creating_a_second_one()
+    public async Task A_failed_attempt_is_recorded_and_the_same_attempt_can_succeed_later()
     {
         await using var context = await PublishingTestContext.CreateAsync();
-        var target = await context.AddTargetAsync("blog");
+        var target = await context.AddTargetAsync("hexo", destination: "drafts");
         await context.SeedConfirmedDraftAsync(Day(context));
 
         var request = await context.Request.ExecuteAsync(
             Day(context), target.Id, PublicationVisibility.Draft, "owner", false, true, CancellationToken.None);
 
-        // First attempt: the site is unreachable. The record says so, and one version to one target is still one row.
-        context.Remote.FailWith = new TransientExternalFailureException("publication.network", "offline");
-        await Assert.ThrowsExceptionAsync<TransientExternalFailureException>(async () =>
-            await context.Run.ExecuteAsync(request.Publication!.Id, new PublicationPayload(false), CancellationToken.None));
+        await context.QueueAndRunAsync(request.Publication!);
 
-        var failed = await context.Publications.FindByIdAsync(request.Publication!.Id, CancellationToken.None);
-        Assert.AreEqual(PublicationStatus.Failed, failed!.Status, "The record follows reality on every failed attempt.");
-        Assert.IsNull(failed.RemoteId, "Nothing was created, so there is no remote article yet.");
-        Assert.AreEqual(1, await context.Database.CountAsync("publication"), "One version, one target, one record.");
-
-        // The job retries the same attempt: the failure clears and the article is created.
-        await context.Run.ExecuteAsync(request.Publication.Id, new PublicationPayload(false), CancellationToken.None);
-
-        var uploaded = await context.Publications.FindByIdAsync(request.Publication.Id, CancellationToken.None);
+        var uploaded = await context.Publications.FindByIdAsync(request.Publication!.Id, CancellationToken.None);
         Assert.AreEqual(PublicationStatus.DraftUploaded, uploaded!.Status);
-        Assert.IsNotNull(uploaded.RemoteId);
+        var fileName = uploaded.RemoteId;
+        Assert.IsNotNull(fileName);
 
-        var createsAfterFirstUpload = context.Remote.CreateCalls;
-        var remoteId = uploaded.RemoteId;
+        // Somebody edits the exported file by hand, then a re-export is attempted without any explicit decision.
+        var path = ExportedPath(context, "drafts", fileName!);
+        var original = await File.ReadAllTextAsync(path);
+        await File.WriteAllTextAsync(path, "我在编辑器里改过这个文件了。");
 
-        // A re-export is a new round, and it must land on the same article.
         uploaded.RequeueForReExport(PublicationVisibility.Draft, "owner", context.Clock.UtcNow);
         await context.Publications.UpdateAsync(uploaded, CancellationToken.None);
-        await context.Run.ExecuteAsync(uploaded.Id, new PublicationPayload(false), CancellationToken.None);
 
-        Assert.AreEqual(createsAfterFirstUpload, context.Remote.CreateCalls, "A re-export must never create a second article.");
-        Assert.AreEqual(1, context.Remote.UpdateCalls);
+        await Assert.ThrowsExceptionAsync<PermanentExternalFailureException>(async () =>
+            await context.Run.ExecuteAsync(uploaded.Id, new PublicationPayload(ReplaceExistingFile: false), CancellationToken.None));
+
+        var failed = await context.Publications.FindByIdAsync(uploaded.Id, CancellationToken.None);
         Assert.AreEqual(
-            remoteId,
-            (await context.Publications.FindByIdAsync(uploaded.Id, CancellationToken.None))!.RemoteId,
-            "The remote id is what makes the next attempt an update.");
+            PublicationStatus.Failed,
+            failed!.Status,
+            "The record follows reality on every failed attempt, so the user can see it while the job retries.");
+        Assert.AreEqual(1, await context.Database.CountAsync("publication"), "One version, one target, one record.");
+        Assert.AreEqual("我在编辑器里改过这个文件了。", await File.ReadAllTextAsync(path));
+
+        // The user puts the file back the way it was; the same attempt now goes through and lands on the same file.
+        await File.WriteAllTextAsync(path, original);
+        await context.Run.ExecuteAsync(uploaded.Id, new PublicationPayload(ReplaceExistingFile: true), CancellationToken.None);
+
+        var recovered = await context.Publications.FindByIdAsync(uploaded.Id, CancellationToken.None);
+        Assert.AreEqual(PublicationStatus.DraftUploaded, recovered!.Status);
+        Assert.AreEqual(fileName, recovered.RemoteId, "A retry must land on the file it wrote, not make another one.");
+        Assert.AreEqual(1, ExportedFiles(context, "drafts").Length);
     }
+
     [TestMethod]
     public async Task A_window_that_elapsed_expires_and_publishes_nothing()
     {
         await using var context = await PublishingTestContext.CreateAsync();
-        var target = await context.AddTargetAsync("blog", automatic: true);
+        var target = await context.AddTargetAsync("hexo", destination: "drafts", automatic: true);
         var contentDate = Day(context);
         await context.SeedConfirmedDraftAsync(contentDate);
 
@@ -311,7 +342,7 @@ public class PublishingTests
 
         var expired = await context.Publications.FindByIdAsync(request.Publication.Id, CancellationToken.None);
         Assert.AreEqual(PublicationStatus.Expired, expired!.Status);
-        Assert.AreEqual(0, context.Remote.CreateCalls + context.Remote.UpdateCalls, "§14: 超窗不得静默补发.");
+        Assert.AreEqual(0, ExportedFiles(context, "drafts").Length, "§14: 超窗不得静默补发.");
 
         // §12: the user is told, because the whole point of the window is that a human finds out.
         var jobs = await context.Jobs.ListRecentAsync(20, CancellationToken.None);
@@ -324,7 +355,7 @@ public class PublishingTests
     public async Task An_unattended_run_is_not_queued_before_its_slot()
     {
         await using var context = await PublishingTestContext.CreateAsync();
-        var target = await context.AddTargetAsync("blog", automatic: true);
+        var target = await context.AddTargetAsync("hexo", automatic: true);
         var contentDate = Day(context);
         await context.SeedConfirmedDraftAsync(contentDate);
 
@@ -341,10 +372,10 @@ public class PublishingTests
     }
 
     [TestMethod]
-    public async Task An_unattended_run_without_the_opt_in_uploads_a_draft_even_when_public_was_asked_for()
+    public async Task An_unattended_run_without_the_opt_in_stays_a_draft_even_when_public_was_asked_for()
     {
         await using var context = await PublishingTestContext.CreateAsync();
-        var target = await context.AddTargetAsync("blog", automatic: false);
+        var target = await context.AddTargetAsync("hexo", destination: "drafts", automatic: false);
         var contentDate = Day(context);
         await context.SeedConfirmedDraftAsync(contentDate);
 
@@ -367,14 +398,17 @@ public class PublishingTests
 
         var stored = await context.Publications.FindByIdAsync(publication.Id, CancellationToken.None);
         Assert.AreEqual(PublicationStatus.DraftUploaded, stored!.Status, "No opt-in means a draft, never a public post.");
-        Assert.AreEqual("draft", context.Remote.WrittenStatuses[0]);
+        Assert.AreEqual(
+            "draft: true",
+            DraftFlag(await ReadExportedAsync(context, "drafts", stored.RemoteId!)),
+            "Without the opt-in the file must still tell Hexo it is a draft.");
     }
 
     [TestMethod]
     public async Task An_opted_in_target_publishes_publicly_when_the_slot_runs()
     {
         await using var context = await PublishingTestContext.CreateAsync();
-        var target = await context.AddTargetAsync("blog", automatic: true);
+        var target = await context.AddTargetAsync("hexo", destination: "drafts", automatic: true);
         var contentDate = Day(context);
         await context.SeedConfirmedDraftAsync(contentDate);
 
@@ -396,14 +430,17 @@ public class PublishingTests
 
         var stored = await context.Publications.FindByIdAsync(publication.Id, CancellationToken.None);
         Assert.AreEqual(PublicationStatus.Published, stored!.Status);
-        Assert.AreEqual("publish", context.Remote.WrittenStatuses[0]);
+        Assert.AreEqual(
+            "draft: false",
+            DraftFlag(await ReadExportedAsync(context, "drafts", stored.RemoteId!)),
+            "An opted-in unattended run has to produce a post Hexo will actually generate.");
     }
 
     [TestMethod]
     public async Task New_material_invalidates_a_pending_publication()
     {
         await using var context = await PublishingTestContext.CreateAsync();
-        var target = await context.AddTargetAsync("blog");
+        var target = await context.AddTargetAsync("hexo");
         var (reflection, _) = await context.SeedConfirmedDraftAsync(Day(context));
 
         var publication = Publication.Create(
@@ -428,11 +465,12 @@ public class PublishingTests
         Assert.AreEqual(PublicationStatus.Superseded, stored!.Status);
     }
 
+    /// <summary>§11.1: 用户可主动检查远程差异. For a file target "the remote" is the exported file itself.</summary>
     [TestMethod]
-    public async Task A_remote_edited_on_the_site_is_reported_as_diverged()
+    public async Task An_exported_file_edited_on_disk_is_reported_as_diverged()
     {
         await using var context = await PublishingTestContext.CreateAsync();
-        var target = await context.AddTargetAsync("blog");
+        var target = await context.AddTargetAsync("hexo", destination: "drafts");
         await context.SeedConfirmedDraftAsync(Day(context));
 
         var request = await context.Request.ExecuteAsync(
@@ -444,13 +482,14 @@ public class PublishingTests
         var inSync = await context.Check.ExecuteAsync(uploaded.Id, CancellationToken.None);
         Assert.IsTrue(inSync.Comparison.InSync, "Nothing has moved yet.");
 
-        context.Remote.EditRemotely(uploaded.RemoteId!, "改过的标题", "<p>在站点上改过</p>");
+        await File.WriteAllTextAsync(
+            ExportedPath(context, "drafts", uploaded.RemoteId!),
+            "我在编辑器里改过这个文件了。");
 
         var diverged = await context.Check.ExecuteAsync(uploaded.Id, CancellationToken.None);
         Assert.IsTrue(diverged.Comparison.RemoteChecked);
         Assert.IsTrue(diverged.Comparison.RemoteChanged);
         Assert.IsFalse(diverged.Comparison.LocalChanged);
-        Assert.AreEqual("改过的标题", diverged.Remote!.Title);
 
         // "Keep both" is a decision, so it stops being reported as news (§11.1).
         await context.Resolve.ExecuteAsync(uploaded.Id, RemoteDivergenceAction.KeepBoth, "owner", false, CancellationToken.None);
@@ -459,36 +498,41 @@ public class PublishingTests
         Assert.IsTrue(acknowledged.Comparison.InSync);
     }
 
+    /// <summary>
+    /// Pulling was one of the three answers to a difference. With the export being a file in a directory the user
+    /// owns, there is nothing to pull back: copying the file into the draft would make that directory a second
+    /// source of truth, which is the thing §11.2 exists to avoid. The action stays in the contract and refuses
+    /// explicitly rather than silently doing nothing.
+    /// </summary>
     [TestMethod]
-    public async Task Pulling_brings_the_remote_text_into_the_draft_as_a_protected_version()
+    public async Task Pulling_an_export_back_into_the_draft_is_refused()
     {
         await using var context = await PublishingTestContext.CreateAsync();
-        var target = await context.AddTargetAsync("blog");
+        var target = await context.AddTargetAsync("hexo", destination: "drafts");
         var (reflection, version) = await context.SeedConfirmedDraftAsync(Day(context));
 
         var request = await context.Request.ExecuteAsync(
             Day(context), target.Id, PublicationVisibility.Draft, "owner", false, true, CancellationToken.None);
 
         await context.QueueAndRunAsync(request.Publication!);
-        var uploaded = (await context.Publications.FindByIdAsync(request.Publication!.Id, CancellationToken.None))!;
 
-        context.Remote.EditRemotely(uploaded.RemoteId!, "站点上的标题", "<p>站点上写的第一段。</p><p>第二段。</p>");
+        var refusal = await Assert.ThrowsExceptionAsync<UseCaseException>(async () =>
+            await context.Resolve.ExecuteAsync(
+                request.Publication!.Id,
+                RemoteDivergenceAction.Pull,
+                "owner",
+                false,
+                CancellationToken.None));
 
-        await context.Resolve.ExecuteAsync(request.Publication.Id, RemoteDivergenceAction.Pull, "owner", false, CancellationToken.None);
+        Assert.AreEqual("publication.pull.not_supported", refusal.Code);
 
         var reloaded = await context.Reflections.FindByContentDateAsync(Day(context), CancellationToken.None);
-        Assert.AreNotEqual(version.Id, reloaded!.WorkingVersionId, "A pull installs a new version.");
-        Assert.AreEqual(version.Id, reloaded.InitialVersionId, "§6.4: the first version is still kept.");
-
-        var pulled = await context.Reflections.FindVersionAsync(reloaded.WorkingVersionId!.Value, CancellationToken.None);
-        Assert.AreEqual("站点上的标题", pulled!.Title);
-        Assert.AreEqual("站点上写的第一段。\n\n第二段。", pulled.Body, "The HTML is turned back into paragraphs.");
-        Assert.IsTrue(pulled.HasManualEdits, "Text a person typed on the site must not be rotated away silently.");
+        Assert.AreEqual(version.Id, reloaded!.WorkingVersionId, "A refused pull must not install a version.");
         Assert.AreEqual(reflection.Id, reloaded.Id);
     }
 
     [TestMethod]
-    public async Task A_markdown_target_writes_a_file_named_after_the_content_day()
+    public async Task An_export_is_named_after_the_content_day()
     {
         await using var context = await PublishingTestContext.CreateAsync();
         var target = await context.AddTargetAsync("hexo", PublishTargetType.Markdown, destination: "drafts");
@@ -503,10 +547,7 @@ public class PublishingTests
         Assert.AreEqual(PublicationStatus.DraftUploaded, stored!.Status);
         Assert.AreEqual("2026-03-11-今天的记录.md", stored.RemoteId);
 
-        var path = Path.Combine(context.Paths.MarkdownPath, "drafts", stored.RemoteId!);
-        Assert.IsTrue(File.Exists(path));
-
-        var content = await File.ReadAllTextAsync(path);
+        var content = await ReadExportedAsync(context, "drafts", stored.RemoteId!);
         StringAssert.Contains(content, "title: \"今天的记录\"");
         StringAssert.Contains(content, "date: 2026-03-11 00:00:00");
         StringAssert.Contains(content, "draft: true");
@@ -537,13 +578,16 @@ public class PublishingTests
 
         Assert.AreNotEqual(first, second);
         Assert.AreEqual("2026-03-11-今天的记录-2.md", second);
-        Assert.IsTrue(File.Exists(Path.Combine(context.Paths.MarkdownPath, "drafts", first!)));
-        Assert.IsTrue(File.Exists(Path.Combine(context.Paths.MarkdownPath, "drafts", second!)));
+        Assert.IsTrue(File.Exists(ExportedPath(context, "drafts", first!)));
+        Assert.IsTrue(File.Exists(ExportedPath(context, "drafts", second!)));
     }
 
-    /// <summary>§11.2: 不得静默覆盖…被外部修改的文件.</summary>
+    /// <summary>
+    /// §11.2 plus §17.3 step 7: a re-export nobody confirmed must not touch a file the user edited — but the
+    /// explicit 覆盖, which the client only offers after the divergence has been reported, has to be carried out.
+    /// </summary>
     [TestMethod]
-    public async Task A_file_edited_outside_the_product_is_never_overwritten()
+    public async Task A_hand_edited_file_is_refused_until_the_user_says_overwrite()
     {
         await using var context = await PublishingTestContext.CreateAsync();
         var target = await context.AddTargetAsync("hexo", PublishTargetType.Markdown, destination: "drafts");
@@ -555,22 +599,41 @@ public class PublishingTests
         await context.QueueAndRunAsync(request.Publication!);
         var stored = (await context.Publications.FindByIdAsync(request.Publication!.Id, CancellationToken.None))!;
 
-        var path = Path.Combine(context.Paths.MarkdownPath, "drafts", stored.RemoteId!);
+        var path = ExportedPath(context, "drafts", stored.RemoteId!);
+        var exported = await File.ReadAllTextAsync(path);
         await File.WriteAllTextAsync(path, "我在编辑器里改过这个文件了。");
 
+        // A re-export with no explicit decision refuses, and now names the right reason: this instance wrote the
+        // file and something changed it afterwards, which is not the same as "we never wrote it".
         var reexport = await context.Request.ExecuteAsync(
-            Day(context), target.Id, PublicationVisibility.Draft, "owner", replaceExistingFile: true, manual: true, CancellationToken.None);
+            Day(context), target.Id, PublicationVisibility.Draft, "owner", replaceExistingFile: false, manual: true, CancellationToken.None);
 
-        await Assert.ThrowsExceptionAsync<PermanentExternalFailureException>(async () =>
+        var refused = await Assert.ThrowsExceptionAsync<PermanentExternalFailureException>(async () =>
             await context.Run.ExecuteAsync(
                 reexport.Publication!.Id,
-                new PublicationPayload(ReplaceExistingFile: true),
+                new PublicationPayload(ReplaceExistingFile: false),
                 CancellationToken.None));
 
+        Assert.AreEqual("markdown.file.modified_externally", refused.Code);
         Assert.AreEqual(
             "我在编辑器里改过这个文件了。",
             await File.ReadAllTextAsync(path),
             "The hand-edited file must still be exactly as the user left it.");
+
+        // The user has now been shown the divergence and chooses 覆盖: the local version wins, in place.
+        await context.Run.ExecuteAsync(
+            reexport.Publication!.Id,
+            new PublicationPayload(ReplaceExistingFile: true),
+            CancellationToken.None);
+
+        var recovered = (await context.Publications.FindByIdAsync(reexport.Publication!.Id, CancellationToken.None))!;
+        Assert.AreEqual(PublicationStatus.DraftUploaded, recovered.Status);
+        Assert.AreEqual(
+            stored.RemoteId,
+            recovered.RemoteId,
+            "覆盖 rewrites the file this instance wrote; it does not make a second one.");
+        Assert.AreEqual(exported, await File.ReadAllTextAsync(path), "The file now holds what the instance wrote.");
+        Assert.AreEqual(1, ExportedFiles(context, "drafts").Length);
     }
 
     [TestMethod]
@@ -606,7 +669,7 @@ public class PublishingTests
     public async Task A_mail_failure_cannot_change_what_was_published()
     {
         await using var context = await PublishingTestContext.CreateAsync();
-        var target = await context.AddTargetAsync("blog", automatic: true);
+        var target = await context.AddTargetAsync("hexo", destination: "drafts", automatic: true);
         var contentDate = Day(context);
         await context.SeedConfirmedDraftAsync(contentDate);
 
@@ -627,8 +690,8 @@ public class PublishingTests
         await context.Publications.AddAsync(publication, CancellationToken.None);
         await context.Run.ExecuteAsync(publication.Id, new PublicationPayload(false), CancellationToken.None);
 
-        // The article went out, the publication records it, and the notification job is the only thing that failed.
-        Assert.AreEqual(1, context.Remote.CreateCalls);
+        // The file went out, the publication records it, and the notification job is the only thing that failed.
+        Assert.AreEqual(1, ExportedFiles(context, "drafts").Length);
         var stored = await context.Publications.FindByIdAsync(publication.Id, CancellationToken.None);
         Assert.AreEqual(PublicationStatus.Published, stored!.Status);
 
@@ -697,7 +760,7 @@ public class PublishingTests
     public async Task An_expired_publication_can_be_put_back_in_the_queue_by_hand()
     {
         await using var context = await PublishingTestContext.CreateAsync();
-        var target = await context.AddTargetAsync("blog");
+        var target = await context.AddTargetAsync("hexo", destination: "drafts");
         await context.SeedConfirmedDraftAsync(Day(context));
 
         var reflection = await context.Reflections.FindByContentDateAsync(Day(context), CancellationToken.None);

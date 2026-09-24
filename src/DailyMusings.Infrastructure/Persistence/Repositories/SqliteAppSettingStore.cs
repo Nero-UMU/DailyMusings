@@ -8,7 +8,7 @@ namespace DailyMusings.Infrastructure.Persistence.Repositories;
 /// Instance configuration as key/value rows (docs/开发指导.md §4.1: the admin page owns content time zone
 /// and schedule configuration).
 /// <para>
-/// Only non-secret settings live here. Model keys, SMTP passwords and WordPress application passwords are
+/// Only non-secret settings live here. Model keys and SMTP passwords are
 /// resolved by name from Docker secrets and never touch this table — which is what allows a backup to be
 /// handed around without carrying credentials (§10.4, decision A.13).
 /// </para>

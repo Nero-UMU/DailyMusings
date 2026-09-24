@@ -1,10 +1,10 @@
 # Phase-5 acceptance run: instance A.
 #
 # Deliberately NOT deploy/compose.yaml: the acceptance has to point the instance at test services that
-# listen on the host's loopback (a model stub, Mailpit, the throwaway WordPress), which needs host
-# networking, and it has to keep its state in a bind mount so the driver can read the Markdown and the
-# backup archives from the host. The shipped deploy/compose.yaml is exercised separately, unchanged and
-# from an empty directory, by the restore verification (§15.2 steps 1-2).
+# listen on the host's loopback (a model stub, Mailpit), which needs host networking, and it has to keep its
+# state in a bind mount so the driver can read the Markdown and the backup archives from the host. The
+# shipped deploy/compose.yaml is exercised separately, unchanged and from an empty directory, by the restore
+# verification (§15.2 steps 1-2).
 name: dailymusings-a
 
 services:
@@ -43,9 +43,6 @@ services:
       Smtp__FromAddress: dailymusings@example.test
       Smtp__FromName: 每日随想
       Smtp__SecretName: smtp-password
-      Publishing__WordPress__Defaults__BaseUrl: http://127.0.0.1:8090
-      Publishing__WordPress__Defaults__Username: owner
-      Publishing__WordPress__Defaults__SecretName: wordpress-application-password
     volumes:
       - ./state:/state
       - ./keys:/keys
@@ -53,7 +50,6 @@ services:
       - openai-api-key
       - embedding-api-key
       - smtp-password
-      - wordpress-application-password
 
 secrets:
   openai-api-key:
@@ -62,5 +58,3 @@ secrets:
     file: ./secrets/embedding-api-key
   smtp-password:
     file: ./secrets/smtp-password
-  wordpress-application-password:
-    file: ./secrets/wordpress-application-password

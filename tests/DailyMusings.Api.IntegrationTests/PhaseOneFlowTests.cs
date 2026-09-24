@@ -39,7 +39,6 @@ public class PhaseOneFlowTests
         // §16 keeps external services out of basic health; they get their own "test connection".
         Assert.IsFalse(names.Any(name => name.Contains("model", StringComparison.OrdinalIgnoreCase)));
         Assert.IsFalse(names.Any(name => name.Contains("smtp", StringComparison.OrdinalIgnoreCase)));
-        Assert.IsFalse(names.Any(name => name.Contains("wordpress", StringComparison.OrdinalIgnoreCase)));
 
         Assert.IsTrue(
             report.Probes.All(probe => probe.Detail is null),

@@ -71,7 +71,6 @@ public sealed record RemoteCheckResult(
     Publication Publication,
     PublishTarget Target,
     RemoteComparison Comparison,
-    RemoteArticle? Remote,
     string? RemoteContentHash,
     string? LocalContentHash);
 
@@ -126,7 +125,7 @@ public sealed class ListPublicationsUseCase
             .FindByIdAsync(publication.PublishTargetId, cancellationToken)
             .ConfigureAwait(false);
 
-        return new PublicationView(publication, target?.Name ?? publication.PublishTargetId.ToString(), target?.Type ?? PublishTargetType.WordPress);
+        return new PublicationView(publication, target?.Name ?? publication.PublishTargetId.ToString(), target?.Type ?? PublishTargetType.Markdown);
     }
 
     private async Task<IReadOnlyList<PublicationView>> ToViewsAsync(
@@ -149,7 +148,7 @@ public sealed class ListPublicationsUseCase
                 return new PublicationView(
                     publication,
                     target?.Name ?? publication.PublishTargetId.ToString(),
-                    target?.Type ?? PublishTargetType.WordPress);
+                    target?.Type ?? PublishTargetType.Markdown);
             })
             .ToArray();
     }
@@ -170,7 +169,6 @@ public sealed class CheckRemoteUseCase
     private readonly IPublishTargetRepository _targets;
     private readonly IReflectionRepository _reflections;
     private readonly IPublishDestinationProvider _destinations;
-    private readonly IRemotePublisher _wordPress;
     private readonly IMarkdownWriter _markdown;
     private readonly IClock _clock;
 
@@ -179,7 +177,6 @@ public sealed class CheckRemoteUseCase
         IPublishTargetRepository targets,
         IReflectionRepository reflections,
         IPublishDestinationProvider destinations,
-        IRemotePublisher wordPress,
         IMarkdownWriter markdown,
         IClock clock)
     {
@@ -187,7 +184,6 @@ public sealed class CheckRemoteUseCase
         _targets = targets;
         _reflections = reflections;
         _destinations = destinations;
-        _wordPress = wordPress;
         _markdown = markdown;
         _clock = clock;
     }
@@ -205,41 +201,27 @@ public sealed class CheckRemoteUseCase
             .FindVersionAsync(publication.ReflectionVersionId, cancellationToken)
             .ConfigureAwait(false);
 
-        var localHash = await LocalContentHashAsync(publication, version, destination, cancellationToken)
+        var localHash = await LocalContentHashAsync(publication, version, cancellationToken)
             .ConfigureAwait(false);
 
-        RemoteArticle? article = null;
         string? remoteHash = null;
 
-        if (destination.Type == PublishTargetType.Markdown)
+        // "The remote" is the exported file itself: its hash is the comparison.
+        if (publication.RemoteId is { } fileName && !string.IsNullOrEmpty(destination.MarkdownDirectory))
         {
-            // For a file, "the remote" is the file itself: its hash is the comparison.
-            if (publication.RemoteId is { } fileName && !string.IsNullOrEmpty(destination.MarkdownDirectory))
-            {
-                remoteHash = await _markdown
-                    .ReadHashAsync(destination.MarkdownDirectory, fileName, cancellationToken)
-                    .ConfigureAwait(false);
-            }
-        }
-        else if (publication.RemoteId is { } remoteId)
-        {
-            var site = destination.RequireWordPress();
-            article = await _wordPress.GetAsync(site, remoteId, cancellationToken).ConfigureAwait(false);
-
-            if (article is not null)
-            {
-                remoteHash = RemoteContentFingerprint.Of(article.Title, article.Content);
-            }
+            remoteHash = await _markdown
+                .ReadHashAsync(destination.MarkdownDirectory, fileName, cancellationToken)
+                .ConfigureAwait(false);
         }
 
         if (remoteHash is null)
         {
-            // The article is gone from the remote. Reported as unknown rather than as a difference: there is
+            // The file is gone from the export directory. Reported as unknown rather than as a difference: there is
             // nothing to compare against, and pretending otherwise would offer the user a choice about nothing.
             publication.RecordRemoteObservation(string.Empty, _clock.UtcNow);
             await _publications.UpdateAsync(publication, cancellationToken).ConfigureAwait(false);
 
-            return new RemoteCheckResult(publication, target, RemoteComparison.Unknown, article, null, localHash);
+            return new RemoteCheckResult(publication, target, RemoteComparison.Unknown, null, localHash);
         }
 
         publication.RecordRemoteObservation(remoteHash, _clock.UtcNow);
@@ -249,19 +231,17 @@ public sealed class CheckRemoteUseCase
             publication,
             target,
             publication.CompareWithRemote(localHash),
-            article,
             remoteHash,
             localHash);
     }
 
     /// <summary>
-    /// What the draft would send right now. Compared against the recorded publish to answer "has the draft moved
-    /// since we sent it", which is the local half of the difference.
+    /// What the draft would export right now. Compared against the recorded publish to answer "has the draft
+    /// moved since we wrote it", which is the local half of the difference.
     /// </summary>
     public async Task<string?> LocalContentHashAsync(
         Publication publication,
         ReflectionVersion? version,
-        PublishDestination destination,
         CancellationToken cancellationToken)
     {
         if (version is null)
@@ -269,21 +249,21 @@ public sealed class CheckRemoteUseCase
             return null;
         }
 
-        if (destination.Type == PublishTargetType.Markdown)
-        {
-            // The reflection lookup is what supplies the content day; a Markdown file's identity depends on it.
-            var reflection = await _reflections
-                .FindByIdAsync(publication.ReflectionId, cancellationToken)
-                .ConfigureAwait(false);
+        // The reflection lookup is what supplies the content day; a Markdown file's identity depends on it. The
+        // draft flag comes from the record rather than from the request, because the file on disk holds whatever
+        // the last successful run wrote — and that is what this hash is compared against.
+        var reflection = await _reflections
+            .FindByIdAsync(publication.ReflectionId, cancellationToken)
+            .ConfigureAwait(false);
 
-            return reflection is null
-                ? null
-                : MarkdownFileHash.Of(
-                    MarkdownTemplate.DefaultTemplate.Render(
-                        MarkdownDocument.From(version, reflection.ContentDate)));
-        }
-
-        return RemoteContentFingerprint.Of(version.Title, WordPressBody.Render(version));
+        return reflection is null
+            ? null
+            : MarkdownFileHash.Of(
+                MarkdownTemplate.DefaultTemplate.Render(
+                    MarkdownDocument.From(
+                        version,
+                        reflection.ContentDate,
+                        isDraft: publication.Status != PublicationStatus.Published)));
     }
 }
 
@@ -293,44 +273,26 @@ public sealed class CheckRemoteUseCase
 public sealed class ResolveRemoteDivergenceUseCase
 {
     private readonly IPublicationRepository _publications;
-    private readonly IPublishTargetRepository _targets;
-    private readonly IReflectionRepository _reflections;
-    private readonly IPublishDestinationProvider _destinations;
-    private readonly IRemotePublisher _wordPress;
-    private readonly IMarkdownWriter _markdown;
     private readonly CheckRemoteUseCase _check;
-    private readonly IUnitOfWork _unitOfWork;
     private readonly IClock _clock;
     private readonly JobEnqueuer _jobs;
 
     public ResolveRemoteDivergenceUseCase(
         IPublicationRepository publications,
-        IPublishTargetRepository targets,
-        IReflectionRepository reflections,
-        IPublishDestinationProvider destinations,
-        IRemotePublisher wordPress,
-        IMarkdownWriter markdown,
         CheckRemoteUseCase check,
-        IUnitOfWork unitOfWork,
         IClock clock,
         JobEnqueuer jobs)
     {
         _publications = publications;
-        _targets = targets;
-        _reflections = reflections;
-        _destinations = destinations;
-        _wordPress = wordPress;
-        _markdown = markdown;
         _check = check;
-        _unitOfWork = unitOfWork;
         _clock = clock;
         _jobs = jobs;
     }
 
     /// <param name="allowOverwriteOfManualEdits">
-    /// §6.4 again: pulling the remote's text installs a new working version, and if the one it displaces carries
-    /// hand edits the user has to have accepted that. Their having asked for a pull is not by itself consent to
-    /// lose a different edit, so the client warns first and passes this flag only if they agreed.
+    /// Unused by the only action left that needs a consent check — <c>Overwrite</c> is the user re-exporting the
+    /// version they are already looking at — but kept in the signature because the request contract carries it and
+    /// the API's refusal codes still name it.
     /// </param>
     public async Task<RemoteCheckResult> ExecuteAsync(
         PublicationId publicationId,
@@ -344,10 +306,7 @@ public sealed class ResolveRemoteDivergenceUseCase
         var publication = await _publications.FindByIdAsync(publicationId, cancellationToken).ConfigureAwait(false)
             ?? throw new UseCaseException("publication.unknown", $"No publication with id {publicationId}.");
 
-        var target = await _targets.FindByIdAsync(publication.PublishTargetId, cancellationToken).ConfigureAwait(false)
-            ?? throw new UseCaseException("publish.target.unknown", "The publish target no longer exists.");
-
-        var destination = await _destinations.ResolveAsync(target, cancellationToken).ConfigureAwait(false);
+        _ = allowOverwriteOfManualEdits;
 
         switch (action)
         {
@@ -388,9 +347,13 @@ public sealed class ResolveRemoteDivergenceUseCase
                 break;
 
             case RemoteDivergenceAction.Pull:
-                await PullAsync(publication, destination, allowOverwriteOfManualEdits, cancellationToken)
-                    .ConfigureAwait(false);
-                break;
+                // The one destination kind left is a Markdown file in a directory the user mounted. That file is
+                // theirs to edit in their own editor, and copying it back into the draft would make the export
+                // directory a second source of truth — which is exactly what §11.2 avoids. The action stays in the
+                // contract so a client that offers it gets a refusal that explains itself rather than a 404.
+                throw new UseCaseException(
+                    "publication.pull.not_supported",
+                    "A Markdown export cannot be pulled back; read the file instead.");
 
             default:
                 throw new UseCaseException("publication.divergence.unknown_action", $"Unknown action {action}.");
@@ -398,100 +361,5 @@ public sealed class ResolveRemoteDivergenceUseCase
 
         return await _check.ExecuteAsync(publicationId, cancellationToken).ConfigureAwait(false);
     }
-
-    /// <summary>
-    /// Brings the remote's text into the draft as a new version.
-    /// <para>
-    /// The new version is marked as hand-edited, because it is: the text came from a person typing in WordPress,
-    /// and §6.4's protection against silent regeneration exists precisely to keep that from being rotated away by
-    /// the next generation run.
-    /// </para>
-    /// </summary>
-    private async Task PullAsync(
-        Publication publication,
-        PublishDestination destination,
-        bool allowOverwriteOfManualEdits,
-        CancellationToken cancellationToken)
-    {
-        if (publication.RemoteId is not { } remoteId)
-        {
-            throw new UseCaseException("publication.remote_id_missing", "This publication has no remote article.");
-        }
-
-        if (destination.Type == PublishTargetType.Markdown)
-        {
-            // A file the user edits is theirs to edit in their own editor. Copying it back into the draft would
-            // make the export directory a second source of truth, which is exactly what §11.2 avoids.
-            throw new UseCaseException(
-                "publication.pull.not_supported",
-                "A Markdown export cannot be pulled back; read the file instead.");
-        }
-
-        var article = await _wordPress
-            .GetAsync(destination.RequireWordPress(), remoteId, cancellationToken)
-            .ConfigureAwait(false)
-            ?? throw new UseCaseException("publication.remote_missing", "The remote article no longer exists.");
-
-        var title = string.IsNullOrWhiteSpace(article.Title) ? "来自远端的修改" : article.Title;
-        var body = WordPressBody.ToPlainText(article.Content);
-
-        if (string.IsNullOrWhiteSpace(body))
-        {
-            throw new UseCaseException("publication.pull.empty", "The remote article has no text to pull.");
-        }
-
-        var reflection = await _reflections
-            .FindByIdAsync(publication.ReflectionId, cancellationToken)
-            .ConfigureAwait(false)
-            ?? throw new UseCaseException("reflection.unknown", "The draft no longer exists.");
-
-        var now = _clock.UtcNow;
-
-        var version = ReflectionVersion.CreateGenerated(
-            ReflectionVersionId.New(),
-            reflection.Id,
-            title,
-            string.Empty,
-            body,
-            WritingSettings.Default,
-            modelInfo: null,
-            promptVersion: null,
-            createdAtUtc: now);
-
-        // A pull is a human edit by another route, so it carries the same protection.
-        version.Edit(title, string.Empty, body, now);
-
-        if (reflection.Status == ReflectionStatus.PendingInputs)
-        {
-            reflection.MarkReady(now);
-        }
-
-        // §6.3 gives Confirmed exactly one outgoing edge, and this is the one it means. Pulling text a person
-        // typed on the site means the draft is no longer what was agreed, so the day goes stale first and the pull
-        // lands as a new version awaiting re-confirmation — which is what §7 says happens to a confirmed draft
-        // whose basis moved.
-        if (reflection.Status == ReflectionStatus.Confirmed)
-        {
-            reflection.MarkStaleByLateInput(now);
-        }
-
-        var working = reflection.WorkingVersionId is { } workingId
-            ? await _reflections.FindVersionAsync(workingId, cancellationToken).ConfigureAwait(false)
-            : null;
-
-        reflection.BeginGeneration(GenerationReason.Manual, now);
-        reflection.ApplyGeneratedVersion(
-            version.Id,
-            working?.HasManualEdits ?? false,
-            allowOverwriteOfManualEdits,
-            now);
-
-        await using (var transaction = await _unitOfWork.BeginAsync(cancellationToken).ConfigureAwait(false))
-        {
-            await _reflections.UpdateAsync(reflection, cancellationToken).ConfigureAwait(false);
-            await _reflections.AddVersionAsync(version, cancellationToken).ConfigureAwait(false);
-            await _reflections.ReplaceSourcesAsync(version.Id, [], cancellationToken).ConfigureAwait(false);
-            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
-        }
-    }
 }
+

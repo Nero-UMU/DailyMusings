@@ -153,7 +153,12 @@ public sealed record MarkdownDocument(
     /// day the day the material belongs to, and a blog whose dates drift from that would misreport when things
     /// happened — which is the same promise the recall boundary protects.
     /// </summary>
-    public static MarkdownDocument From(ReflectionVersion version, ContentDate contentDate)
+    /// <param name="isDraft">
+    /// What the front matter's <c>draft</c> field says, and the only thing visibility can mean for a file: Hexo
+    /// does not generate a post whose <c>draft</c> is true, so "publish publicly" for a Markdown target is exactly
+    /// this flag being false. Defaults to draft, which is §11.1's default outcome for anything unattended.
+    /// </param>
+    public static MarkdownDocument From(ReflectionVersion version, ContentDate contentDate, bool isDraft = true)
     {
         ArgumentNullException.ThrowIfNull(version);
 
@@ -165,7 +170,7 @@ public sealed record MarkdownDocument(
             version.Categories,
             contentDate,
             version.EditedAtUtc ?? version.CreatedAtUtc,
-            IsDraft: true,
+            IsDraft: isDraft,
             Slug: MarkdownSlug.From(version.Title));
     }
 }
@@ -309,16 +314,32 @@ public static class MarkdownWritePolicy
             return MarkdownWritePlan.CreateNewFile;
         }
 
-        if (!fileIsOurs)
-        {
-            return MarkdownWritePlan.RefuseUnowned;
-        }
-
+        // Order matters, and it used to be wrong here. An externally modified file also has fileIsOurs == false
+        // (the recorded hash no longer matches), so testing "not ours" first answered "this instance never wrote
+        // that file" — a different, false statement — and made RefuseExternallyModified unreachable. Found by
+        // editing an exported file on the deployed instance and reading what the product said about it: it
+        // reported markdown.file.not_ours for a file it had written itself hours earlier.
         if (externallyModified)
         {
-            // Refused even when the user asked to replace: the confirmation was given for a file whose contents
-            // nobody has seen, and what is on disk now may be their own writing.
-            return MarkdownWritePlan.RefuseExternallyModified;
+            // Without an explicit decision: refuse. That copy may be the only one of the user's own writing.
+            if (!userConfirmedReplace)
+            {
+                return MarkdownWritePlan.RefuseExternallyModified;
+            }
+
+            // With one: carry it out. The only producer of that confirmation is the 覆盖 action on a divergence
+            // the user has just been shown, so this is not a silent overwrite — and §17.3 step 7 requires the
+            // user's choice to be carried out rather than refused. ("保留两边" reaches here with the flag unset,
+            // and writes a versioned file instead.)
+            return MarkdownWritePlan.ReplaceExistingFile;
+        }
+
+        if (!fileIsOurs)
+        {
+            // No recorded hash at all: a file of that name that this instance never wrote. Never touched, even
+            // when the user asked to replace, because replacing it would destroy work the product cannot even
+            // identify.
+            return MarkdownWritePlan.RefuseUnowned;
         }
 
         return userConfirmedReplace

@@ -5,7 +5,6 @@ using System.Net.Sockets;
 using System.Security.Authentication;
 using System.Text;
 using DailyMusings.Application.Abstractions;
-using DailyMusings.Domain.Publishing;
 using Microsoft.Extensions.Logging;
 
 namespace DailyMusings.Infrastructure.Operations;
@@ -106,8 +105,6 @@ public sealed class ExternalServiceProbe : IExternalServiceProbe
     private readonly IGenerationSettingsProvider _generation;
     private readonly IEmbeddingSettingsProvider _embedding;
     private readonly ISmtpSettingsProvider _smtp;
-    private readonly IPublishTargetRepository _targets;
-    private readonly IPublishDestinationProvider _destinations;
     private readonly ILogger<ExternalServiceProbe> _logger;
     private readonly RemoteCertificateValidationCallback? _trustServer;
 
@@ -123,8 +120,6 @@ public sealed class ExternalServiceProbe : IExternalServiceProbe
         IGenerationSettingsProvider generation,
         IEmbeddingSettingsProvider embedding,
         ISmtpSettingsProvider smtp,
-        IPublishTargetRepository targets,
-        IPublishDestinationProvider destinations,
         ILogger<ExternalServiceProbe> logger,
         RemoteCertificateValidationCallback? trustServer = null)
     {
@@ -134,8 +129,6 @@ public sealed class ExternalServiceProbe : IExternalServiceProbe
         _generation = generation;
         _embedding = embedding;
         _smtp = smtp;
-        _targets = targets;
-        _destinations = destinations;
         _logger = logger;
         _trustServer = trustServer;
     }
@@ -160,7 +153,6 @@ public sealed class ExternalServiceProbe : IExternalServiceProbe
                 cancellationToken).ConfigureAwait(false),
 
             ExternalService.Smtp => await ProbeSmtpAsync(cancellationToken).ConfigureAwait(false),
-            ExternalService.WordPress => await ProbeWordPressAsync(cancellationToken).ConfigureAwait(false),
             _ => ProbeResult.Failure("probe.unknown_service", "That is not a service this instance talks to."),
         };
 
@@ -196,63 +188,6 @@ public sealed class ExternalServiceProbe : IExternalServiceProbe
             new AuthenticationHeaderValue("Bearer", secret),
             "The endpoint answered.",
             cancellationToken).ConfigureAwait(false);
-    }
-
-    private async Task<ProbeResult> ProbeWordPressAsync(CancellationToken cancellationToken)
-    {
-        var targets = (await _targets.ListAsync(cancellationToken).ConfigureAwait(false))
-            .Where(target => target.Type == PublishTargetType.WordPress)
-            .ToArray();
-
-        if (targets.Length == 0)
-        {
-            return ProbeResult.Failure("probe.wordpress.no_target", "No WordPress target is configured.");
-        }
-
-        foreach (var target in targets)
-        {
-            PublishDestination destination;
-
-            try
-            {
-                destination = await _destinations.ResolveAsync(target, cancellationToken).ConfigureAwait(false);
-            }
-            catch (Domain.Common.DomainException exception)
-            {
-                return ProbeResult.Failure($"probe.wordpress.{exception.Code}", $"Target '{target.Name}' is misconfigured.");
-            }
-
-            var site = destination.RequireWordPress();
-            var secret = _secrets.TryGet(site.SecretName);
-
-            if (secret is null)
-            {
-                return ProbeResult.Failure("probe.wordpress.secret_missing", $"The secret '{site.SecretName}' is not provisioned.");
-            }
-
-            // Reading the authenticated user is the smallest call that proves both parts of the credential: the site
-            // is there, and the application password is accepted.
-            var uri = new Uri($"{site.BaseUrl.TrimEnd('/')}/wp-json/wp/v2/users/me", UriKind.Absolute);
-
-            var credential = new AuthenticationHeaderValue(
-                "Basic",
-                Convert.ToBase64String(Encoding.UTF8.GetBytes($"{site.Username}:{secret}")));
-
-            var result = await SendAsync(
-                "wordpress",
-                HttpMethod.Get,
-                uri,
-                credential,
-                $"Target '{target.Name}' accepted the application password.",
-                cancellationToken).ConfigureAwait(false);
-
-            if (!result.Ok)
-            {
-                return result;
-            }
-        }
-
-        return ProbeResult.Success($"All {targets.Length} WordPress target(s) accepted their credentials.");
     }
 
     private async Task<ProbeResult> SendAsync(

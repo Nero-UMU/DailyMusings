@@ -7,8 +7,8 @@
 <h1>发布目标</h1>
 
 <p class="hint">
-    发布默认只把文章作为<strong>私人草稿</strong>上传，等你在客户端确认后才公开。
-    「自动公开」是唯一一种无人确认也会公开的路径，因此它只能在这里开启，且开启与关闭都要求重新输入管理员密码。
+    发布目标就是一个 <strong>Markdown 目录</strong>：确认过的草稿会被导出成 <code>.md</code> 文件写进这个目录，
+    由 Hexo 去读取。文件永远只写在实例的 markdown 目录之内。
 </p>
 
 @if (_error is not null)
@@ -19,15 +19,15 @@
 @if (_enabled is not null)
 {
     <p class="notice ok">
-        已为 <strong>@_enabled.Name</strong> 开启自动公开，开启人：@_enabled.AutomaticPublishEnabledBy。
+        已为 <strong>@_enabled.Name</strong> 开启自动发布，开启人：@_enabled.AutomaticPublishEnabledBy。
         <br />
-        此后该目标在每个发布时刻会<strong>无人确认地公开</strong>当天已确认的草稿。
+        此后该目标在每个发布时刻会<strong>无人确认地导出一份 Markdown</strong>。
     </p>
 }
 
 @if (_disabled is not null)
 {
-    <p class="notice ok">已为 <strong>@_disabled</strong> 关闭自动公开。</p>
+    <p class="notice ok">已为 <strong>@_disabled</strong> 关闭自动发布。</p>
 }
 
 @if (_targets is null)
@@ -36,7 +36,7 @@
 }
 else if (_targets.Count == 0)
 {
-    <p class="notice info">还没有发布目标。用下面的表单添加一个 WordPress 站点或一个 Markdown 目录。</p>
+    <p class="notice info">还没有发布目标。用下面的表单添加一个 Markdown 目录。</p>
 }
 else
 {
@@ -46,8 +46,8 @@ else
                 <tr>
                     <th>名称</th>
                     <th>类型</th>
-                    <th>目标</th>
-                    <th>自动公开</th>
+                    <th>目录</th>
+                    <th>自动发布</th>
                     <th>操作</th>
                 </tr>
             </thead>
@@ -56,7 +56,7 @@ else
                 {
                     <tr>
                         <td><strong>@target.Name</strong></td>
-                        <td>@(target.Type == PublishTargetType.Markdown ? "Markdown" : "WordPress")</td>
+                        <td>Markdown（Hexo）</td>
                         <td><code>@(target.DestinationReference ?? "（默认）")</code></td>
                         <td>
                             @if (target.AutomaticPublishEnabled)
@@ -70,7 +70,7 @@ else
                             else
                             {
                                 <span class="badge badge-muted">关闭</span>
-                                <div class="hint">只上传草稿</div>
+                                <div class="hint">只在你手动导出时写文件</div>
                             }
                         </td>
                         <td>
@@ -79,12 +79,12 @@ else
                                 <div class="risk">
                                     @if (_confirmActionIsEnable)
                                     {
-                                        <strong>开启后，@target.Name 会在无人确认的情况下公开文章。</strong>
-                                        <p>只有在你有意让这个目标自动公开时才继续。请重新输入管理员密码以确认：</p>
+                                        <strong>开启后，@target.Name 会在无人确认的情况下导出文章。</strong>
+                                        <p>只有在你有意让这个目标自动导出时才继续。请重新输入管理员密码以确认：</p>
                                     }
                                     else
                                     {
-                                        <strong>关闭后，@target.Name 只会收到私人草稿。</strong>
+                                        <strong>关闭后，@target.Name 只会在你手动导出时写文件。</strong>
                                         <p>服务端对开启和关闭都要求当前密码，所以要撤销它同样需要重新输入：</p>
                                     }
 
@@ -102,13 +102,13 @@ else
                             else if (target.AutomaticPublishEnabled)
                             {
                                 <button class="btn-sm" @onclick="() => BeginConfirm(target, enable: false)" disabled="@_busy">
-                                    关闭自动公开…
+                                    关闭自动发布…
                                 </button>
                             }
                             else
                             {
                                 <button class="btn-sm" @onclick="() => BeginConfirm(target, enable: true)" disabled="@_busy">
-                                    开启自动公开…
+                                    开启自动发布…
                                 </button>
                             }
                         </td>
@@ -117,72 +117,12 @@ else
             </tbody>
         </table>
     </div>
-}
-
-@if (_targets is not null && _targets.Any(target => target.Type == PublishTargetType.WordPress))
-{
-    <h2>WordPress 站点设置</h2>
 
     <p class="hint">
-        站点地址与应用密码的<strong>名字</strong>默认来自部署配置
-        （<code>Publishing:WordPress:Targets:&lt;配置键&gt;</code>）。下面可以为某一个目标单独覆盖，
-        <strong>留空的字段继续沿用配置</strong>；四个字段全空即清除覆盖。
-        密码的<strong>值</strong>永远只放在 Docker Secrets 里，这里只能填名字。
+        对 Markdown 目标来说，「公开」与「草稿」的差别就是导出文件里 <code>draft</code> 字段的真假：
+        <code>draft: true</code> 的文章 Hexo 不会生成到站点上，<code>draft: false</code> 才会。
+        开启自动发布后，每个发布时刻都会按目标当下的选择自动导出一次，不再需要有人在客户端点击。
     </p>
-
-    @if (_siteError is not null)
-    {
-        <p class="notice error">@_siteError</p>
-    }
-
-    @if (_siteSaved is not null)
-    {
-        <p class="notice ok">@_siteSaved</p>
-    }
-
-    <div class="form-grid">
-        <label>
-            目标
-            <select @bind="_siteTargetId" @bind:after="LoadSiteAsync">
-                @foreach (var target in _targets.Where(t => t.Type == PublishTargetType.WordPress))
-                {
-                    <option value="@target.Id.ToString()">@target.Name</option>
-                }
-            </select>
-        </label>
-        <label>
-            站点地址
-            <input @bind="_siteBaseUrl" placeholder="https://blog.example.com" />
-        </label>
-        <label>
-            用户名
-            <input @bind="_siteUsername" placeholder="wordpress 登录名" />
-        </label>
-        <label>
-            Secret 名
-            <input @bind="_siteSecretName" placeholder="wordpress-application-password" />
-        </label>
-        <label>
-            请求超时（秒）
-            <input type="number" @bind="_siteTimeoutSeconds" />
-        </label>
-    </div>
-
-    <div class="actions">
-        <button class="btn-primary" @onclick="SaveSiteAsync" disabled="@_siteBusy">保存站点设置</button>
-        <button @onclick="ClearSiteAsync" disabled="@_siteBusy">清除覆盖</button>
-    </div>
-
-    @if (_siteEffective is not null)
-    {
-        <p class="hint">
-            当前<strong>实际生效</strong>的组合：地址 <code>@_siteEffective.EffectiveBaseUrl</code>，
-            用户名 <code>@_siteEffective.EffectiveUsername</code>，
-            Secret <code>@_siteEffective.EffectiveSecretName</code>，
-            超时 @_siteEffective.EffectiveTimeoutSeconds 秒。
-            @(_siteEffective.Overridden ? "其中部分字段来自本页覆盖。" : "全部来自部署配置。")
-        </p>
-    }
 }
 
 <h2>添加目标</h2>
@@ -190,18 +130,11 @@ else
 <div class="form-grid">
     <label>
         名称
-        <input @bind="_newName" placeholder="blog" />
+        <input @bind="_newName" placeholder="hexo" />
     </label>
     <label>
-        类型
-        <select @bind="_newType">
-            <option value="wordPress">WordPress</option>
-            <option value="markdown">Markdown（Hexo）</option>
-        </select>
-    </label>
-    <label>
-        目标
-        <input @bind="_newDestination" placeholder="WordPress 用配置键，Markdown 用相对目录" />
+        目录
+        <input @bind="_newDestination" placeholder="例如 _drafts，留空即实例的 markdown 根目录" />
     </label>
 </div>
 
@@ -210,15 +143,14 @@ else
 </div>
 
 <p class="hint">
-    WordPress 目标填<strong>配置键</strong>（对应 <code>Publishing:WordPress:Targets:&lt;键&gt;</code>），
-    密码以 Docker Secrets 的名称引用，不写进数据库。Markdown 目标填<strong>相对目录</strong>，
-    相对于实例的 markdown 目录；导出永远只写这个目录之内。
+    目录填<strong>相对路径</strong>，相对于实例的 markdown 目录（例如 Hexo 的 <code>source/_drafts</code> 对应的挂载位置）。
+    绝对路径或试图跳出这个根目录的路径都会被拒绝。
 </p>
 
 <h2>内容与时间</h2>
 
 <p class="hint">
-    时间都是内容时区里的本地时刻。生成时刻决定当晚何时成稿；发布时刻决定次日何时进入发布队列，
+    时间都是内容时区里的本地时刻。生成时刻决定当晚何时成稿；发布时刻决定次日何时进入导出队列，
     而执行窗口决定「错过了多久就不许再自动执行」。
 </p>
 
@@ -277,7 +209,6 @@ else
     private bool _confirmActionIsEnable;
     private string _password = string.Empty;
     private string _newName = string.Empty;
-    private string _newType = "wordPress";
     private string _newDestination = string.Empty;
     private string? _error;
     private PublishTarget? _enabled;
@@ -293,18 +224,6 @@ else
     private string? _scheduleError;
     private string? _scheduleSaved;
 
-    // The WordPress site editor (§8.1). Kept as strings because that is what an <input> binds to; the use case turns
-    // blank into "stop overriding this field".
-    private string _siteTargetId = string.Empty;
-    private string _siteBaseUrl = string.Empty;
-    private string _siteUsername = string.Empty;
-    private string _siteSecretName = string.Empty;
-    private int? _siteTimeoutSeconds;
-    private WordPressSiteDto? _siteEffective;
-    private string? _siteError;
-    private string? _siteSaved;
-    private bool _siteBusy;
-
     private ILogger Logger => LoggerFactory.CreateLogger("DailyMusings.Admin.Publishing");
 
     protected override async Task OnInitializedAsync()
@@ -314,17 +233,6 @@ else
             {
                 await LoadAsync();
                 await LoadSettingsAsync();
-
-                // Default the site editor to the first WordPress target, so the section is useful on arrival rather
-                // than empty until the operator picks something.
-                _siteTargetId = _targets?
-                    .FirstOrDefault(target => target.Type == PublishTargetType.WordPress)?
-                    .Id.ToString() ?? string.Empty;
-
-                if (!string.IsNullOrEmpty(_siteTargetId))
-                {
-                    await LoadSiteAsync();
-                }
             },
             Logger);
     }
@@ -442,7 +350,6 @@ else
                 return;
             }
 
-            var type = _newType == "markdown" ? PublishTargetType.Markdown : PublishTargetType.WordPress;
             var name = _newName;
             var destination = string.IsNullOrWhiteSpace(_newDestination) ? null : _newDestination;
 
@@ -452,7 +359,7 @@ else
                     await using var scope = ScopeFactory.CreateAsyncScope();
                     await scope.ServiceProvider
                         .GetRequiredService<CreatePublishTargetUseCase>()
-                        .ExecuteAsync(name, type, destination, CancellationToken.None);
+                        .ExecuteAsync(name, PublishTargetType.Markdown, destination, CancellationToken.None);
                 },
                 Logger);
 
@@ -521,157 +428,6 @@ else
         finally
         {
             _busy = false;
-        }
-    }
-
-    /// <summary>
-    /// Loads the selected target's site settings: the stored override (to populate the fields) and the values that
-    /// will actually be used (to show what the operator is really getting, since a field can come from either layer).
-    /// </summary>
-    private async Task LoadSiteAsync()
-    {
-        _siteError = null;
-        _siteSaved = null;
-
-        if (_targets is null || !Guid.TryParse(_siteTargetId, out var parsed))
-        {
-            return;
-        }
-
-        var targetId = new PublishTargetId(parsed);
-
-        var failure = await AdminOperation.RunAsync(
-            async () =>
-            {
-                var target = _targets.FirstOrDefault(candidate => candidate.Id == targetId);
-                if (target is null)
-                {
-                    return;
-                }
-
-                await using var scope = ScopeFactory.CreateAsyncScope();
-                var services = scope.ServiceProvider;
-
-                var overrides = await services
-                    .GetRequiredService<IWordPressSiteOverrideStore>()
-                    .GetAsync(targetId, CancellationToken.None);
-
-                var destination = await services
-                    .GetRequiredService<IPublishDestinationProvider>()
-                    .ResolveAsync(target, CancellationToken.None);
-
-                var site = destination.RequireWordPress();
-
-                _siteBaseUrl = overrides.BaseUrl ?? string.Empty;
-                _siteUsername = overrides.Username ?? string.Empty;
-                _siteSecretName = overrides.SecretName ?? string.Empty;
-                _siteTimeoutSeconds = overrides.TimeoutSeconds;
-
-                _siteEffective = new WordPressSiteDto(
-                    !overrides.IsEmpty,
-                    overrides.BaseUrl,
-                    overrides.Username,
-                    overrides.SecretName,
-                    overrides.TimeoutSeconds,
-                    site.BaseUrl,
-                    site.Username,
-                    site.SecretName,
-                    (int)site.Timeout.TotalSeconds);
-            },
-            Logger);
-
-        if (failure is not null)
-        {
-            _siteError = failure;
-        }
-    }
-
-    private async Task SaveSiteAsync()
-    {
-        _siteBusy = true;
-        _siteError = null;
-        _siteSaved = null;
-
-        try
-        {
-            if (!Guid.TryParse(_siteTargetId, out var parsed))
-            {
-                _siteError = "请先选择一个 WordPress 目标。";
-                return;
-            }
-
-            var targetId = new PublishTargetId(parsed);
-
-            var failure = await AdminOperation.RunAsync(
-                async () =>
-                {
-                    await using var scope = ScopeFactory.CreateAsyncScope();
-                    await scope.ServiceProvider
-                        .GetRequiredService<UpdateWordPressSiteOverrideUseCase>()
-                        .ExecuteAsync(
-                            targetId,
-                            new WordPressSiteOverride(
-                                _siteBaseUrl,
-                                _siteUsername,
-                                _siteSecretName,
-                                _siteTimeoutSeconds),
-                            CancellationToken.None);
-                },
-                Logger);
-
-            if (failure is not null)
-            {
-                _siteError = failure;
-                return;
-            }
-
-            await LoadSiteAsync();
-            _siteSaved = "已保存。下一次发布与「测试连接」都会使用这些值。";
-        }
-        finally
-        {
-            _siteBusy = false;
-        }
-    }
-
-    private async Task ClearSiteAsync()
-    {
-        _siteBusy = true;
-        _siteError = null;
-        _siteSaved = null;
-
-        try
-        {
-            if (!Guid.TryParse(_siteTargetId, out var parsed))
-            {
-                _siteError = "请先选择一个 WordPress 目标。";
-                return;
-            }
-
-            var targetId = new PublishTargetId(parsed);
-
-            var failure = await AdminOperation.RunAsync(
-                async () =>
-                {
-                    await using var scope = ScopeFactory.CreateAsyncScope();
-                    await scope.ServiceProvider
-                        .GetRequiredService<UpdateWordPressSiteOverrideUseCase>()
-                        .ExecuteAsync(targetId, WordPressSiteOverride.None, CancellationToken.None);
-                },
-                Logger);
-
-            if (failure is not null)
-            {
-                _siteError = failure;
-                return;
-            }
-
-            await LoadSiteAsync();
-            _siteSaved = "已清除覆盖，该目标回到部署配置里的站点设置。";
-        }
-        finally
-        {
-            _siteBusy = false;
         }
     }
 }

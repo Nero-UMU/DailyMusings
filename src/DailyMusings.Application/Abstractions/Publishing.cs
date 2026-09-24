@@ -51,88 +51,23 @@ public interface IPublicationRepository
     Task UpdateAsync(Publication publication, CancellationToken cancellationToken);
 }
 
-/// <summary>Where a WordPress target lives. The secret is a <em>name</em>; its value is resolved at call time (§10.4).</summary>
-public sealed record WordPressSite(string BaseUrl, string Username, string SecretName, TimeSpan Timeout)
-{
-    public static WordPressSite Default { get; } = new(
-        BaseUrl: "http://127.0.0.1:8090",
-        Username: "owner",
-        SecretName: "wordpress-application-password",
-        Timeout: TimeSpan.FromSeconds(30));
-}
-
 /// <summary>
-/// Everything needed to reach one destination, resolved from configuration.
+/// Where a target writes, resolved from configuration (docs/开发指导.md §11.2).
 /// <para>
-/// A WordPress target stores a configuration key in its <c>destination_reference</c>; a Markdown target stores a
-/// directory. Resolving them is the application's business, but <em>how</em> they are configured is not — which
-/// is why this is a port.
+/// There is exactly one kind of destination left — a Markdown directory — so this record is the resolved
+/// directory and nothing else. Resolving it is the application's business; <em>how</em> it is configured is not,
+/// which is why this is a port.
 /// </para>
 /// </summary>
-public sealed record PublishDestination(
-    PublishTargetType Type,
-    WordPressSite? WordPress,
-    string? MarkdownDirectory)
-{
-    public static PublishDestination ForWordPress(WordPressSite site) => new(PublishTargetType.WordPress, site, null);
-
-    public static PublishDestination ForMarkdown(string directory) => new(PublishTargetType.Markdown, null, directory);
-
-    /// <summary>
-    /// The site, or a failure. Never a silent fallback: a WordPress target whose site is not configured must not
-    /// quietly export a file instead, because the user asked for their blog.
-    /// </summary>
-    public WordPressSite RequireWordPress() =>
-        WordPress ?? throw new UseCaseException(
-            "publish.wordpress_not_configured",
-            "No WordPress site is configured for this target.");
-}
+public sealed record PublishDestination(string MarkdownDirectory);
 
 public interface IPublishDestinationProvider
 {
     /// <summary>
-    /// Resolves a target, or throws a use-case failure when its configuration is missing. Failing loudly here is
-    /// deliberate: a WordPress target whose site is not configured must not quietly export a Markdown file
-    /// instead, because the user asked for their blog.
+    /// Resolves a target, or throws a use-case failure when its configuration is unusable. Failing loudly here is
+    /// deliberate: a target pointed outside the mounted Markdown root must not silently write somewhere else.
     /// </summary>
     Task<PublishDestination> ResolveAsync(PublishTarget target, CancellationToken cancellationToken);
-}
-
-/// <summary>What a publisher is asked to put on the remote.</summary>
-public sealed record RemoteArticleDraft(string Title, string Content, string? Slug, bool IsDraft);
-
-/// <summary>An article as the remote reports it.</summary>
-public sealed record RemoteArticle(
-    string RemoteId,
-    string Title,
-    string Content,
-    string Status,
-    string? Link,
-    DateTimeOffset? ModifiedAtUtc);
-
-/// <summary>
-/// A remote site that articles can be pushed to (docs/开发指导.md §11.1). Implementations must classify failures
-/// as transient or permanent, because that classification is what §14's retry budget acts on.
-/// <para>
-/// The site is a parameter rather than state on the client: one client serves every configured target, and a
-/// long-lived singleton remembering "the site I am currently talking to" would be a data race the first time two
-/// publications ran at once.
-/// </para>
-/// </summary>
-public interface IRemotePublisher
-{
-    /// <summary>Creates the article. Never creates a second one for the same request — see <see cref="UpdateAsync"/>.</summary>
-    Task<RemoteArticle> CreateAsync(WordPressSite site, RemoteArticleDraft draft, CancellationToken cancellationToken);
-
-    /// <summary>Pushes new content onto an article this instance created before, keeping its remote id.</summary>
-    Task<RemoteArticle> UpdateAsync(
-        WordPressSite site,
-        string remoteId,
-        RemoteArticleDraft draft,
-        CancellationToken cancellationToken);
-
-    /// <summary>Reads the article back, or <c>null</c> when it is gone.</summary>
-    Task<RemoteArticle?> GetAsync(WordPressSite site, string remoteId, CancellationToken cancellationToken);
 }
 
 /// <summary>One Markdown export request, with everything the write policy needs to decide safely (§11.2).</summary>

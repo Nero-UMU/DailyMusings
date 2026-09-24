@@ -177,7 +177,7 @@ public class HttpReflectionApiClientTests
         var handler = StubHttpHandler.AlwaysJson(
             HttpStatusCode.OK,
             """
-            {"items":[{"id":"target-1","name":"测试博客","type":"wordPress","destinationReference":null,
+            {"items":[{"id":"target-1","name":"测试博客","type":"markdown","destinationReference":"drafts",
             "automaticPublishEnabled":false,"automaticPublishEnabledBy":null,"automaticPublishEnabledAtUtc":null}]}
             """);
 

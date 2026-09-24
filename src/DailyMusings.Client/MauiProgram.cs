@@ -60,15 +60,11 @@ public static class MauiProgram
 		builder.Services.AddSingleton<DynamicTopicApiClient>();
 		builder.Services.AddSingleton<ITopicApiClient>(sp => sp.GetRequiredService<DynamicTopicApiClient>());
 
-		// The recorder is the one platform-specific piece of the capture path, so it is the one registration that
-		// differs between the two clients. Everything else — the offline queue, the upload, the pages — is the same
-		// code, which is what §5's Client.Core split was for.
+		// The recorder is the one platform-specific piece of the capture path. Everything else — the offline queue,
+		// the upload, the pages — is the same code, which is what §5's Client.Core split was for.
 #if ANDROID
 		builder.Services.AddSingleton<IAudioRecorder, AndroidAudioRecorder>();
 		builder.Services.AddSingleton<IAudioPlayer, AndroidAudioPlayer>();
-#elif WINDOWS
-		builder.Services.AddSingleton<IAudioRecorder, WindowsAudioRecorder>();
-		builder.Services.AddSingleton<IAudioPlayer, WindowsAudioPlayer>();
 #else
 #error Every target needs an IAudioRecorder; add one for this platform rather than shipping a client that cannot record.
 #endif

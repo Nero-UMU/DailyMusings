@@ -311,7 +311,7 @@ else
 </p>
 
 <div class="actions">
-    @foreach (var service in new[] { "transcription", "generation", "embedding", "smtp", "wordpress" })
+    @foreach (var service in new[] { "transcription", "generation", "embedding", "smtp" })
     {
         <button @onclick="() => ProbeAsync(service)" disabled="@_busy">测试 @service</button>
     }
@@ -473,7 +473,6 @@ else
             ["generation"] = ExternalService.Generation,
             ["embedding"] = ExternalService.Embedding,
             ["smtp"] = ExternalService.Smtp,
-            ["wordpress"] = ExternalService.WordPress,
         };
 
         var result = await services

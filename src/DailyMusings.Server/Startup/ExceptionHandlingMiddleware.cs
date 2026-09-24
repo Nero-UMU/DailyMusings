@@ -50,7 +50,7 @@ public sealed class ExceptionHandlingMiddleware
             // The full exception, stack trace included, is logged here on purpose. §16 forbids logging private
             // content, not diagnostics: an unhandled exception is a defect, and a defect that can only be
             // identified by its type cannot be fixed. The obligation this creates sits with the code that talks
-            // to the outside world — a model, SMTP or WordPress adapter must redact content-bearing detail
+            // to the outside world — a model or SMTP adapter must redact content-bearing detail
             // before throwing, rather than relying on this handler to guess.
             _logger.LogError(
                 exception,
