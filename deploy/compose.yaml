@@ -53,6 +53,19 @@ services:
       # recreate — the port would otherwise revert on every deploy — and because it must not travel with a backup.
       - dailymusings-config:/var/lib/dailymusings-config
 
+      # WHERE THE MARKDOWN GOES. With the volumes above alone, the exported .md files are written inside the state
+      # volume — safe, backed up, and invisible to your blog. A publish target's directory is a path *relative to
+      # the markdown root*, so to get files into a Hexo checkout, mount that checkout (or a directory inside it)
+      # over the markdown root or over one of its subdirectories:
+      #
+      #   - /home/you/Blog/source/_drafts:/var/lib/dailymusings/markdown/hexo
+      #
+      # Left commented on purpose: an active bind mount of a host path that does not exist is created by Docker as
+      # an empty root-owned directory, which hides the mistake instead of reporting it. Uncomment it, fix the host
+      # path, and give the container's user (uid 1654) write access — otherwise exports fail with a permission
+      # error that looks like a product bug.
+      # - /home/you/Blog/source/_drafts:/var/lib/dailymusings/markdown/hexo
+
     secrets:
       # Names only. Values are read from files at run time and never appear in configuration, logs or backups.
       - openai-api-key
