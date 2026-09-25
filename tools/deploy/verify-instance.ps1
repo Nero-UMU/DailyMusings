@@ -15,7 +15,11 @@ param(
     [string]$BaseUrl = "http://100.64.0.3:18321",
     [string]$AdminUser = "admin",
     [string]$AdminPassword = "",
-    [string]$MailTo = "operator@example.test"
+    [string]$MailTo = "operator@example.test",
+
+    # 实例若接着真实邮箱（不是测试收信端），跑一次自检就会真的寄出一封信。冒烟测试不该打扰收件人，
+    # 所以给一条「只验证配置形状、不发信」的路：字段与来源照查，唯独跳过真正投递那一步。
+    [switch]$SkipMail
 )
 
 $ErrorActionPreference = "Stop"
@@ -318,10 +322,15 @@ Check "稿件分页列表" {
     "total=$($page.total) 返回=$($page.items.Count)"
 } | Out-Null
 
-Check "发送测试邮件（真实投递到 SMTP）" {
-    $result = Send-Api POST "/api/system/smtp-settings/test" @{ toAddress = $MailTo } -WithSession
-    if (-not $result.sent) { throw "没有发出去：$($result.code) $($result.detail)" }
-    "sent=true"
+if ($SkipMail) {
+    Write-Host "  [SKIP] 真实投递测试邮件（-SkipMail：不打扰真实收件人）" -ForegroundColor Yellow
+}
+else {
+    Check "发送测试邮件（真实投递到 SMTP）" {
+        $result = Send-Api POST "/api/system/smtp-settings/test" @{ toAddress = $MailTo } -WithSession
+        if (-not $result.sent) { throw "没有发出去：$($result.code) $($result.detail)" }
+        "sent=true"
+    }
 }
 
 Check "SMTP 视图就是 ani-rss 那七项（+启用开关）" {
