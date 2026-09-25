@@ -816,7 +816,12 @@ public static class ReflectionEndpointRouteBuilderExtensions
                 StatusCodes.Status404NotFound,
 
             "reflection.confirm.unsourced_claims_not_acknowledged" or
-                "topic.merge.target_retired" or
+
+            // 来源检查还没跑完就要求确认：请求本身没问题，是实例的状态还不允许，和旁边那条一样是 409。
+            // 400 会让「稍后再试一次就好」看起来像「你请求写错了」。
+            "reflection.confirm.source_check_pending" or
+
+            "topic.merge.target_retired" or
                 "topic.retired" or
                 "topic.merge.self" or
 
