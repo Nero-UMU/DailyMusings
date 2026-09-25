@@ -883,6 +883,34 @@ label.checkbox input {
     word-break: break-word;
 }
 
+.draft-body {
+    max-width: 78ch;
+}
+
+.draft-editor {
+    min-height: 24rem;
+}
+
+.source-list {
+    display: grid;
+    gap: 0.75rem;
+    margin: 0.75rem 0 1rem;
+}
+
+.source-item {
+    background: var(--head-bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 0.75rem 0.9rem;
+}
+
+.source-item blockquote {
+    border-left: 3px solid var(--primary);
+    color: var(--text);
+    margin: 0.5rem 0;
+    padding-left: 0.75rem;
+}
+
 .clamp-3 {
     -webkit-box-orient: vertical;
     -webkit-line-clamp: 3;

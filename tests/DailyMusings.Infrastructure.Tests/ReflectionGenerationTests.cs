@@ -321,6 +321,29 @@ public class ReflectionGenerationTests
     }
 
     [TestMethod]
+    public async Task A_draft_cannot_be_confirmed_before_the_source_check_finishes()
+    {
+        await using var context = await ReflectionTestContext.CreateAsync();
+        await context.CaptureTextAsync("今天试着记录了一点东西。");
+
+        var request = await context.RequestGeneration.ExecuteAsync(
+            context.Today, manual: true, ignoreTranscriptionFailures: false, allowOverwriteOfManualEdits: false, CancellationToken.None);
+
+        await context.Generate.ExecuteAsync(
+            context.Today,
+            ReflectionGenerationPayload.FromJson(request.Job!.Payload),
+            CancellationToken.None);
+
+        var exception = await Assert.ThrowsExceptionAsync<UseCaseException>(async () =>
+            await context.Confirm.ExecuteAsync(
+                context.Today,
+                new Application.Reflections.ConfirmReflectionRequest(AcceptedUnsourcedClaims: true),
+                CancellationToken.None));
+
+        Assert.AreEqual("reflection.confirm.source_check_pending", exception.Code);
+    }
+
+    [TestMethod]
     public async Task The_second_stage_records_findings_and_stamps_the_check()
     {
         await using var context = await ReflectionTestContext.CreateAsync();
@@ -394,6 +417,8 @@ public class ReflectionGenerationTests
             context.Today,
             ReflectionGenerationPayload.FromJson(request.Job!.Payload),
             CancellationToken.None);
+
+        await context.Check.ExecuteAsync(first.Version!.Id, CancellationToken.None);
 
         // A second round, as §7's staleness path would produce.
         var secondRequest = await context.RequestGeneration.ExecuteAsync(

@@ -546,6 +546,14 @@ public class InputLoopTests
 
         await WaitForAsync(device, id, view => view.TranscriptionStatus == TranscriptionStatusNames.Succeeded);
 
+        using (var dataPage = await instance.Client.GetAsync("/data"))
+        {
+            var html = WebUtility.HtmlDecode(await dataPage.Content.ReadAsStringAsync());
+
+            Assert.AreEqual(HttpStatusCode.OK, dataPage.StatusCode);
+            StringAssert.Contains(html, "修订文字", "手机端移除的文字修订能力必须在后台数据管理中可用。");
+        }
+
         using var revise = await device.PatchAsJsonAsync(
             $"/api/inputs/{id}",
             new ReviseTranscriptRequest("用户修订后的文字。"));

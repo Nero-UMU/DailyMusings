@@ -39,8 +39,8 @@ public static class AdminLabels
 
     public static string ReflectionText(ReflectionState status) => status switch
     {
-        ReflectionState.PendingInputs => "还没成稿",
-        ReflectionState.Ready => "已成稿",
+        ReflectionState.PendingInputs => "等待素材就绪",
+        ReflectionState.Ready => "等待生成",
         ReflectionState.Generating => "生成中",
         ReflectionState.ReviewRequired => "待核验",
         ReflectionState.Confirmed => "已确认",
@@ -66,7 +66,7 @@ public static class AdminLabels
     {
         null or "none" => "今天还没有稿件",
         "PendingInputs" => "素材不足，未成稿",
-        "Ready" => "已成稿（等待生成）",
+        "Ready" => "等待生成",
         "Generating" => "生成中",
         "ReviewRequired" => "待核验",
         "Confirmed" => "已确认",
@@ -112,7 +112,7 @@ public static class AdminLabels
         "publication.already_published" => "这个版本已经公开发布过了。",
         "publication.superseded" => "那次导出已经被更新的版本取代。",
         "publication.overwrite.not_applicable" => "这篇文章已经公开；要改内容，请先确认一个新版本再导出。",
-        "publication.pull.not_supported" => "Markdown 导出不能拉回草稿：那个文件是你自己的，读它就好。",
+        "publication.pull.not_supported" => "不能把导出文件反向覆盖稿件；需要修改时请直接编辑稿件。",
         _ => string.IsNullOrWhiteSpace(detail) ? "导出请求被拒绝了。" : detail,
     };
 

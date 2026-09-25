@@ -36,19 +36,13 @@ public sealed class ReflectionSchedulerService : BackgroundService
     public static TimeSpan DefaultInterval { get; } = TimeSpan.FromSeconds(30);
 
     private readonly IServiceScopeFactory _scopeFactory;
-    private readonly IGenerationSettingsProvider _generationSettings;
-    private readonly IEmbeddingSettingsProvider _embeddingSettings;
     private readonly ILogger<ReflectionSchedulerService> _logger;
 
     public ReflectionSchedulerService(
         IServiceScopeFactory scopeFactory,
-        IGenerationSettingsProvider generationSettings,
-        IEmbeddingSettingsProvider embeddingSettings,
         ILogger<ReflectionSchedulerService> logger)
     {
         _scopeFactory = scopeFactory;
-        _generationSettings = generationSettings;
-        _embeddingSettings = embeddingSettings;
         _logger = logger;
     }
 
@@ -131,7 +125,15 @@ public sealed class ReflectionSchedulerService : BackgroundService
     private async Task TickAsync(CancellationToken cancellationToken)
     {
         var settings = await ReadSettingsAsync(cancellationToken).ConfigureAwait(false);
-        var generation = await _generationSettings.GetAsync(cancellationToken).ConfigureAwait(false);
+        GenerationSettings generation;
+
+        await using (var scope = _scopeFactory.CreateAsyncScope())
+        {
+            generation = await scope.ServiceProvider
+                .GetRequiredService<IGenerationSettingsProvider>()
+                .GetAsync(cancellationToken)
+                .ConfigureAwait(false);
+        }
 
         if (generation.Enabled)
         {
@@ -333,14 +335,17 @@ public sealed class ReflectionSchedulerService : BackgroundService
     /// </summary>
     private async Task ScheduleEmbeddingRebuildAsync(CancellationToken cancellationToken)
     {
-        var embedding = await _embeddingSettings.GetAsync(cancellationToken).ConfigureAwait(false);
+        await using var scope = _scopeFactory.CreateAsyncScope();
+        var services = scope.ServiceProvider;
+        var embedding = await services
+            .GetRequiredService<IEmbeddingSettingsProvider>()
+            .GetAsync(cancellationToken)
+            .ConfigureAwait(false);
+
         if (!embedding.Enabled)
         {
             return;
         }
-
-        await using var scope = _scopeFactory.CreateAsyncScope();
-        var services = scope.ServiceProvider;
 
         var state = services.GetRequiredService<IEmbeddingIndexState>();
         var jobs = services.GetRequiredService<JobEnqueuer>();

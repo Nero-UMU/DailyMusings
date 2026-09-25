@@ -467,8 +467,8 @@
     else
     {
         <p class="hint">
-            这里与「通知管理」是同一份设置，只是快捷入口：SMTP 服务器、密码与「发送测试邮件」在那张页面。
-            邮件只携带元数据（日期、标题、状态），不含草稿正文（§12）。
+            邮件服务器、收件地址、事件开关和测试邮件统一在「通知管理」配置，避免两处表单互相覆盖。
+            邮件只携带日期、标题和状态，不含稿件正文。
         </p>
 
         <div class="summary">
@@ -484,27 +484,12 @@
             </div>
         </div>
 
-        <div class="stack">
-            <label class="checkbox">
-                <input type="checkbox" checked="@_draftReady" @onchange="e => _draftReady = e.Value is true" />
-                新草稿待确认时发信
-            </label>
-            <label class="checkbox">
-                <input type="checkbox" checked="@_jobFailed" @onchange="e => _jobFailed = e.Value is true" />
-                任务最终失败时发信
-            </label>
-            <label class="checkbox">
-                <input type="checkbox" checked="@_automaticPublication" @onchange="e => _automaticPublication = e.Value is true" />
-                自动发布有结果时发信
-            </label>
-        </div>
-
         <div class="actions">
-            <button class="btn-primary" @onclick="SaveNotificationsAsync" disabled="@_busy">保存通知开关</button>
+            <a class="btn btn-primary" href="/notifications">打开通知管理</a>
         </div>
 
-        <p class="notice @(_draftReady || _jobFailed || _automaticPublication ? "ok" : "warn")">
-            @if (_draftReady || _jobFailed || _automaticPublication)
+        <p class="notice @(_notifications.DraftReady || _notifications.JobFailed || _notifications.AutomaticPublication ? "ok" : "warn")">
+            @if (_notifications.DraftReady || _notifications.JobFailed || _notifications.AutomaticPublication)
             {
                 <text>至少一个事件开着；只要收件地址非空且 SMTP 已启用，就会按事件发信。</text>
             }
@@ -662,9 +647,6 @@
     private bool _diagnosticAcknowledged;
 
     private NotificationSettingsView? _notifications;
-    private bool _draftReady;
-    private bool _jobFailed;
-    private bool _automaticPublication;
 
     private string? _currentPassword;
     private string? _newUsername;
@@ -721,9 +703,6 @@
             .GetRequiredService<ReadNotificationSettingsUseCase>()
             .ExecuteAsync(CancellationToken.None);
 
-        _draftReady = _notifications.DraftReady;
-        _jobFailed = _notifications.JobFailed;
-        _automaticPublication = _notifications.AutomaticPublication;
     }
 
     private void ApplyInstanceSettings(InstanceSettings settings)
@@ -996,27 +975,6 @@
         _diagnostic = await services.GetRequiredService<ManageDiagnosticModeUseCase>().GetAsync(CancellationToken.None);
 
         _message = "调试模式已关闭。";
-    });
-
-    private async Task SaveNotificationsAsync() => await RunAsync(async services =>
-    {
-        await services
-            .GetRequiredService<UpdateNotificationSettingsUseCase>()
-            .ExecuteAsync(
-                // The recipient is owned by the notifications page's own save, which validates it as an address.
-                toAddress: null,
-                instanceUrl: null,
-                _draftReady,
-                _jobFailed,
-                _automaticPublication,
-                CancellationToken.None);
-
-        // Read back rather than trusting the form: what the instance stored is what the next mail will use.
-        _notifications = await services
-            .GetRequiredService<ReadNotificationSettingsUseCase>()
-            .ExecuteAsync(CancellationToken.None);
-
-        _message = "已保存通知开关。";
     });
 
     /// <summary>

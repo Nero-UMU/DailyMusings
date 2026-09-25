@@ -29,6 +29,31 @@ public class AdminSurfaceTests
     };
 
     [TestMethod]
+    public async Task Development_host_passes_dependency_scope_validation()
+    {
+        await using var instance = await TestInstance.StartAsync(environmentName: "Development");
+
+        using var health = await instance.Client.GetAsync(ApiRoutes.Health);
+        Assert.AreEqual(HttpStatusCode.OK, health.StatusCode);
+    }
+
+    [TestMethod]
+    public async Task Model_settings_ask_for_the_key_value_without_exposing_a_secret_name_field()
+    {
+        await using var instance = await TestInstance.StartAsync();
+        await instance.SignInAsChangedAdministratorAsync();
+
+        using var response = await instance.Client.GetAsync("/models");
+        var html = WebUtility.HtmlDecode(await response.Content.ReadAsStringAsync());
+
+        Assert.AreEqual(HttpStatusCode.OK, response.StatusCode);
+        StringAssert.Contains(html, "API Key", "模型设置页应当直接要求用户填写 Key。");
+        Assert.IsFalse(
+            html.Contains("Secret 名", StringComparison.Ordinal),
+            "Secret 的内部存储名不应暴露成用户输入项。");
+    }
+
+    [TestMethod]
     public async Task A_topic_carries_its_origin_and_its_usage_and_can_be_deleted()
     {
         await using var instance = await TestInstance.StartAsync();
@@ -115,6 +140,15 @@ public class AdminSurfaceTests
         Assert.AreEqual("巷子", draft.WorkingVersion.Topics[0].Name);
         Assert.IsTrue(draft.WorkingVersion.Topics[0].IsPrimary);
         Assert.IsFalse(string.IsNullOrEmpty(draft.WorkingVersion.Topics[0].Id));
+
+        using (var contentPage = await instance.Client.GetAsync("/content"))
+        {
+            var html = WebUtility.HtmlDecode(await contentPage.Content.ReadAsStringAsync());
+
+            Assert.AreEqual(HttpStatusCode.OK, contentPage.StatusCode);
+            StringAssert.Contains(html, "今天的记录", "内容列表应显示工作版本的真实标题，而不是永远显示无标题。");
+            StringAssert.Contains(html, "巷子", "内容列表应显示工作版本的主题，而不是永远显示没有主题。");
+        }
 
         var usedTopicId = draft.WorkingVersion.Topics[0].Id;
 

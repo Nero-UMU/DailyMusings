@@ -113,18 +113,22 @@ public static class InfrastructureServiceCollectionExtensions
 
         services.AddScoped<IInstanceSettingsProvider, AppSettingInstanceSettingsProvider>();
 
-        // The transcription endpoint. Configuration and the secret store are singletons, so the client can be one
-        // too — and a single long-lived HttpClient is the recommended shape for one upstream.
-        services.AddSingleton<ITranscriptionSettingsProvider, ConfigurationTranscriptionSettingsProvider>();
-        services.AddSingleton<IGenerationSettingsProvider, ConfigurationGenerationSettingsProvider>();
-        services.AddSingleton<IEmbeddingSettingsProvider, ConfigurationEmbeddingSettingsProvider>();
+        // These providers read the settings table on every call so admin changes apply without a restart. They must
+        // share the request/job scope with IAppSettingStore; making them singletons captures a scoped SQLite
+        // connection and prevents the host from starting when Development scope validation is enabled.
+        services.AddScoped<ITranscriptionSettingsProvider, ConfigurationTranscriptionSettingsProvider>();
+        services.AddScoped<IGenerationSettingsProvider, ConfigurationGenerationSettingsProvider>();
+        services.AddScoped<IEmbeddingSettingsProvider, ConfigurationEmbeddingSettingsProvider>();
 
         // Scoped, not singleton: it now reads the settings table per call, so it holds the scoped setting store (and
         // through it the scoped connection). It used to be a singleton that cached its values in the constructor,
         // which meant a change needed a restart even in deployment configuration.
         services.AddScoped<IRetrievalSettingsProvider, ConfigurationRetrievalSettingsProvider>();
+
+        // The socket pool remains process-wide. The lightweight clients are scoped only because their live settings
+        // providers are scoped; they all reuse this same HttpClient.
         services.AddSingleton(_ => new HttpClient { Timeout = Timeout.InfiniteTimeSpan });
-        services.AddSingleton<ITranscriptionClient, OpenAiCompatibleTranscriptionClient>();
+        services.AddScoped<ITranscriptionClient, OpenAiCompatibleTranscriptionClient>();
 
         // One implementation of "transcribe this entry", called by the durable job handler and — best effort —
         // by the upload path, which is how §8.2's transcript reaches the phone with the response (§8.2 step 4).
@@ -132,17 +136,18 @@ public static class InfrastructureServiceCollectionExtensions
 
         // Generation and the source check share one client because they are the same call shape against the same
         // endpoints; they are registered separately because the jobs that use them are separate.
-        services.AddSingleton<OpenAiCompatibleGenerationClient>();
-        services.AddSingleton<IReflectionGenerationClient>(provider =>
+        services.AddScoped<OpenAiCompatibleGenerationClient>();
+        services.AddScoped<IReflectionGenerationClient>(provider =>
             provider.GetRequiredService<OpenAiCompatibleGenerationClient>());
-        services.AddSingleton<IUnsourcedStatementChecker>(provider =>
+        services.AddScoped<IUnsourcedStatementChecker>(provider =>
             provider.GetRequiredService<OpenAiCompatibleGenerationClient>());
-        services.AddSingleton<IEmbeddingClient, OpenAiCompatibleEmbeddingClient>();
+        services.AddScoped<IEmbeddingClient, OpenAiCompatibleEmbeddingClient>();
 
-        // Publishing and mail. Each is a singleton because they hold no per-call state.
+        // Publishing and mail. The filesystem writer is stateless; SMTP settings and the sender are scoped because
+        // they read live values through the scoped settings store.
         services.AddScoped<IPublishDestinationProvider, ConfigurationPublishDestinationProvider>();
         services.AddSingleton<IMarkdownWriter, FileMarkdownWriter>();
-        services.AddSingleton<ISmtpSettingsProvider, ConfigurationSmtpSettingsProvider>();
+        services.AddScoped<ISmtpSettingsProvider, ConfigurationSmtpSettingsProvider>();
 
         // §15's operations: a readable export, a complete backup, the staged restore and the retention sweep. The
         // snapshotter is scoped because it uses the scoped connection; the writers are singletons because they only
@@ -160,10 +165,10 @@ public static class InfrastructureServiceCollectionExtensions
         // §16: the temporary debug switch and the on-demand test connections. Scoped, because both read settings.
         services.AddScoped<IDiagnosticMode, AppSettingDiagnosticMode>();
         services.AddScoped<IExternalServiceProbe, ExternalServiceProbe>();
-        services.AddSingleton<INotificationSettingsProvider, ConfigurationNotificationSettingsProvider>();
-        services.AddSingleton<IEmailSender, SmtpEmailSender>();
+        services.AddScoped<INotificationSettingsProvider, ConfigurationNotificationSettingsProvider>();
+        services.AddScoped<IEmailSender, SmtpEmailSender>();
 
-        // Use cases. They hold repositories (scoped) and clients (singletons), so they belong to the scope.
+        // Use cases. They hold scoped repositories and scoped live-settings clients, so they belong to the scope.
         services.AddScoped<Application.Jobs.JobEnqueuer>();
         services.AddScoped<Application.Topics.CreateTopicUseCase>();
         services.AddScoped<Application.Topics.ListTopicsUseCase>();

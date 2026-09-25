@@ -119,7 +119,15 @@ else
                 </div>
 
                 <div class="data-cell">
-                    @if (entry.TranscriptForGeneration is { Length: > 0 } transcript)
+                    @if (_editingTranscript == entry.Id)
+                    {
+                        <label>
+                            修订后的文字
+                            <textarea value="@_revisionText" @onchange="e => _revisionText = (string?)e.Value"></textarea>
+                        </label>
+                        <span class="player-meta">原始文字始终保留；清空后保存会撤销修订，恢复使用原始文字。</span>
+                    }
+                    else if (entry.TranscriptForGeneration is { Length: > 0 } transcript)
                     {
                         @if (entry.RevisedTranscript is { Length: > 0 })
                         {
@@ -160,7 +168,14 @@ else
                 </div>
 
                 <div class="data-cell">
-                    @if (_confirmingDelete == entry.Id)
+                    @if (_editingTranscript == entry.Id)
+                    {
+                        <div class="actions">
+                            <button class="btn-primary btn-sm" @onclick="() => SaveTranscriptAsync(entry.Id)" disabled="@_busy">保存修订</button>
+                            <button class="btn btn-sm" @onclick="CancelTranscriptEdit" disabled="@_busy">取消</button>
+                        </div>
+                    }
+                    else if (_confirmingDelete == entry.Id)
                     {
                         <div class="stack">
                             <span class="hint">
@@ -178,6 +193,10 @@ else
                     else
                     {
                         <div class="actions">
+                            @if (!entry.IsDeleted && entry.TranscriptionStatus == TranscriptionStatus.Succeeded)
+                            {
+                                <button class="btn btn-sm" @onclick="() => BeginTranscriptEdit(entry)" disabled="@_busy">修订文字…</button>
+                            }
                             <button class="btn btn-sm" @onclick="() => BeginDelete(entry.Id)" disabled="@_busy">删除…</button>
 
                             @if (entry.TranscriptionStatus == TranscriptionStatus.Failed)
@@ -221,6 +240,8 @@ else
 
     private InputEntryId? _expanded;
     private InputEntryId? _confirmingDelete;
+    private InputEntryId? _editingTranscript;
+    private string? _revisionText;
 
     private string? _message;
     private string? _error;
@@ -300,6 +321,7 @@ else
     private async Task ReloadAsync() => await RunAsync(async () =>
     {
         _confirmingDelete = null;
+        CancelTranscriptEdit();
         await LoadAsync();
     });
 
@@ -307,6 +329,7 @@ else
     {
         _pageNumber = Math.Max(1, _pageNumber - 1);
         _confirmingDelete = null;
+        CancelTranscriptEdit();
         await LoadAsync();
     });
 
@@ -314,6 +337,7 @@ else
     {
         _pageNumber = Math.Min(TotalPages(), _pageNumber + 1);
         _confirmingDelete = null;
+        CancelTranscriptEdit();
         await LoadAsync();
     });
 
@@ -322,6 +346,7 @@ else
         _includeDeleted = args.Value is true;
         _pageNumber = 1;
         _confirmingDelete = null;
+        CancelTranscriptEdit();
         await LoadAsync();
     });
 
@@ -337,6 +362,35 @@ else
         _error = null;
         _confirmingDelete = id;
     }
+
+    private void BeginTranscriptEdit(InputEntry entry)
+    {
+        _message = null;
+        _error = null;
+        _confirmingDelete = null;
+        _editingTranscript = entry.Id;
+        _revisionText = entry.RevisedTranscript ?? entry.TranscriptForGeneration;
+    }
+
+    private void CancelTranscriptEdit()
+    {
+        _editingTranscript = null;
+        _revisionText = null;
+    }
+
+    private async Task SaveTranscriptAsync(InputEntryId id) => await RunAsync(async () =>
+    {
+        await using var scope = ScopeFactory.CreateAsyncScope();
+        await scope.ServiceProvider
+            .GetRequiredService<ReviseTranscriptUseCase>()
+            .ExecuteAsync(id, _revisionText, CancellationToken.None);
+
+        _editingTranscript = null;
+        _revisionText = null;
+        await LoadAsync();
+
+        _message = "修订已保存；原始文字仍然保留，后续生成与语义检索会使用修订后的版本。";
+    });
 
     private void CancelDelete() => _confirmingDelete = null;
 

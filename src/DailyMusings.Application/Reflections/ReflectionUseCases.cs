@@ -213,8 +213,13 @@ public sealed record ReflectionPage(IReadOnlyList<ReflectionView> Items, int Tot
 public sealed class ListReflectionsUseCase
 {
     private readonly IReflectionRepository _reflections;
+    private readonly GetReflectionUseCase _view;
 
-    public ListReflectionsUseCase(IReflectionRepository reflections) => _reflections = reflections;
+    public ListReflectionsUseCase(IReflectionRepository reflections, GetReflectionUseCase view)
+    {
+        _reflections = reflections;
+        _view = view;
+    }
 
     /// <summary>
     /// Summaries only: the calendar needs status per day, not three bodies per day. Bodies are fetched one day
@@ -260,6 +265,40 @@ public sealed class ListReflectionsUseCase
             .ToArray();
 
         return new ReflectionPage(ToViews(items), total);
+    }
+
+    /// <summary>
+    /// The admin content table needs the working title, model and topics in addition to the lifecycle pointers.
+    /// Keep the ordinary API list lightweight, but offer the bounded admin page (ten rows) a deliberate detailed
+    /// read so it does not render every title as blank and every topic as missing.
+    /// </summary>
+    public async Task<ReflectionPage> ExecuteDetailedPageAsync(
+        ContentDate fromInclusive,
+        ContentDate toInclusive,
+        int page,
+        int pageSize,
+        CancellationToken cancellationToken)
+    {
+        var total = await _reflections
+            .CountByDateRangeAsync(fromInclusive, toInclusive, cancellationToken)
+            .ConfigureAwait(false);
+
+        var reflections = await _reflections
+            .ListByDateRangeAsync(fromInclusive, toInclusive, cancellationToken)
+            .ConfigureAwait(false);
+
+        var selected = reflections
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToArray();
+
+        var items = new List<ReflectionView>(selected.Length);
+        foreach (var reflection in selected)
+        {
+            items.Add(await _view.ToViewAsync(reflection, cancellationToken).ConfigureAwait(false));
+        }
+
+        return new ReflectionPage(items, total);
     }
 
     private static IReadOnlyList<ReflectionView> ToViews(IEnumerable<Reflection> reflections) =>
@@ -318,11 +357,18 @@ public sealed class ConfirmReflectionUseCase
 
         if (reflection.WorkingVersionId is not { } workingId)
         {
-            throw new UseCaseException("reflection.confirm.no_version", "This day has no draft to confirm yet.");
+            throw new UseCaseException("reflection.confirm.no_version", "这一天还没有可确认的稿件。");
         }
 
         var version = await _reflections.FindVersionAsync(workingId, cancellationToken).ConfigureAwait(false)
-            ?? throw new UseCaseException("reflection.confirm.no_version", "The working version no longer exists.");
+            ?? throw new UseCaseException("reflection.confirm.no_version", "当前工作版本已经不存在。");
+
+        if (version.SourcesCheckedAtUtc is null)
+        {
+            throw new UseCaseException(
+                "reflection.confirm.source_check_pending",
+                "无来源陈述检查尚未完成；请先运行检查，再确认稿件。");
+        }
 
         if (version.UnsourcedClaims.Count > 0 && !request.AcceptedUnsourcedClaims)
         {
@@ -330,8 +376,7 @@ public sealed class ConfirmReflectionUseCase
             // have shown the findings, and this is the only way it can prove that it did.
             throw new UseCaseException(
                 "reflection.confirm.unsourced_claims_not_acknowledged",
-                $"This draft has {version.UnsourcedClaims.Count} sentence(s) the source check could not trace. "
-                + "Acknowledge them to continue.");
+                $"稿件有 {version.UnsourcedClaims.Count} 条无法追溯到素材的陈述；请逐条查看并明确确认后继续。");
         }
 
         reflection.Confirm(workingId, _clock.UtcNow);
@@ -345,7 +390,7 @@ public sealed class ConfirmReflectionUseCase
         ContentDate contentDate,
         CancellationToken cancellationToken) =>
         await reflections.FindByContentDateAsync(contentDate, cancellationToken).ConfigureAwait(false)
-        ?? throw new UseCaseException("reflection.unknown", $"No reflection for {contentDate}.");
+        ?? throw new UseCaseException("reflection.unknown", $"{contentDate} 还没有稿件。");
 }
 
 /// <summary>Switches which of the three versions is being edited (§6.4, §9.3).</summary>
@@ -418,11 +463,11 @@ public sealed class EditReflectionVersionUseCase
 
         if (reflection.WorkingVersionId is not { } workingId)
         {
-            throw new UseCaseException("reflection.edit.no_version", "This day has no draft to edit yet.");
+            throw new UseCaseException("reflection.edit.no_version", "这一天还没有可编辑的稿件。");
         }
 
         var version = await _reflections.FindVersionAsync(workingId, cancellationToken).ConfigureAwait(false)
-            ?? throw new UseCaseException("reflection.edit.no_version", "The working version no longer exists.");
+            ?? throw new UseCaseException("reflection.edit.no_version", "当前工作版本已经不存在。");
 
         version.Edit(title, summary, body, _clock.UtcNow);
 
@@ -470,11 +515,11 @@ public sealed class GetReflectionSourcesUseCase
 
         if (reflection.WorkingVersionId is not { } workingId)
         {
-            throw new UseCaseException("reflection.sources.no_version", "This day has no draft yet.");
+            throw new UseCaseException("reflection.sources.no_version", "这一天还没有可核验的稿件。");
         }
 
         var version = await _reflections.FindVersionAsync(workingId, cancellationToken).ConfigureAwait(false)
-            ?? throw new UseCaseException("reflection.sources.no_version", "The working version no longer exists.");
+            ?? throw new UseCaseException("reflection.sources.no_version", "当前工作版本已经不存在。");
 
         var view = ReflectionVersionView.From(version);
         var semantic = await _retrieval.GetSemanticSearchStateAsync(cancellationToken).ConfigureAwait(false);

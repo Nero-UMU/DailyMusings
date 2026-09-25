@@ -9,7 +9,7 @@
    而「把这些文章迁移到别的主题」这件事就发生在上面那半张页面里。 *@
 
 <PageHeader Title="内容管理"
-            Hint="稿件按日期从新到旧翻页查看；点开某一天能看正文，也能改这篇文章的主题。主题的删除守卫只看「稿件当前引用的版本」（working / confirmed）——被淘汰的历史版本不算「博客在用」。">
+            Hint="在这里完成稿件核验：查看来源与存疑句、编辑正文、切换版本、确认稿件并管理主题。">
     <Actions>
         <button class="btn" @onclick="ReloadAsync" disabled="@_busy">刷新</button>
     </Actions>
@@ -109,13 +109,13 @@ else
                         <td>
                             <div class="actions">
                                 <button class="btn btn-sm" @onclick="() => OpenDetailAsync(item.ContentDate)" disabled="@(_busy || _detailLoading)">
-                                    查看正文…
+                                    查看与核验…
                                 </button>
 
                                 @if (CanRegenerate(item))
                                 {
                                     <button class="btn btn-sm" @onclick="() => RegenerateAsync(item.ContentDate)" disabled="@_busy">
-                                        重新生成今日随想博客
+                                        重新生成今日稿件
                                     </button>
                                 }
                             </div>
@@ -135,7 +135,7 @@ else
     </div>
 
     <p class="hint">
-        「重新生成今日随想博客」只对<strong>今天</strong>、且还没有被导出过的稿件出现（历史日期不支持重新生成，§7）。
+        「重新生成今日稿件」只对<strong>今天</strong>、且还没有被导出过的稿件出现（历史日期不支持重新生成）。
         生成如果会覆盖工作版本上的手工修改，服务端会拒绝——那时勾上「接受覆盖手工修改」再点一次。
     </p>
 
@@ -186,13 +186,133 @@ else
                 }
             </p>
 
-            @if (_detail.WorkingVersion?.Body is { Length: > 0 } body)
+            @if (DetailVersions().Count > 1)
             {
-                <div class="transcript">@body</div>
+                <h3>版本</h3>
+                <div class="actions">
+                    @foreach (var item in DetailVersions())
+                    {
+                        <button class="btn btn-sm @(item.Version.Id == _detail.WorkingVersionId ? "btn-primary" : "")"
+                                @onclick="() => SwitchVersionAsync(item.Version.Id)"
+                                disabled="@(_busy || item.Version.Id == _detail.WorkingVersionId)">
+                            @item.Label @(item.Version.Id == _detail.WorkingVersionId ? "（当前）" : "")
+                        </button>
+                    }
+                </div>
+            }
+
+            @if (_editingDraft && _detail.WorkingVersion is not null)
+            {
+                <div class="form">
+                    <label>
+                        标题
+                        <input value="@_draftTitle" @onchange="e => _draftTitle = (string?)e.Value" />
+                    </label>
+                    <label>
+                        摘要
+                        <textarea value="@_draftSummary" @onchange="e => _draftSummary = (string?)e.Value"></textarea>
+                    </label>
+                    <label>
+                        正文
+                        <textarea value="@_draftBody" @onchange="e => _draftBody = (string?)e.Value" class="draft-editor"></textarea>
+                    </label>
+                </div>
+                <p class="notice warn">
+                    修改文字后，旧正文上的来源定位和无来源检查结果会失效并被清除。保存后请重新运行检查，再确认稿件。
+                </p>
+                <div class="actions">
+                    <button class="btn-primary" @onclick="SaveDraftAsync" disabled="@_busy">保存稿件</button>
+                    <button class="btn" @onclick="CancelDraftEdit" disabled="@_busy">取消</button>
+                </div>
             }
             else
             {
-                <p class="muted">这个版本还没有正文。</p>
+                @if (_detail.WorkingVersion is { } current)
+                {
+                    <h3>@(string.IsNullOrWhiteSpace(current.Title) ? "（无标题）" : current.Title)</h3>
+                    @if (!string.IsNullOrWhiteSpace(current.Summary))
+                    {
+                        <p class="hint">@current.Summary</p>
+                    }
+                    @if (!string.IsNullOrWhiteSpace(current.Body))
+                    {
+                        <div class="transcript draft-body">@current.Body</div>
+                    }
+                    else
+                    {
+                        <p class="muted">这个版本还没有正文。</p>
+                    }
+
+                    <div class="actions">
+                        <button class="btn" @onclick="BeginDraftEdit" disabled="@_busy">编辑稿件…</button>
+                        <button class="btn" @onclick="RunSourceCheckAsync" disabled="@_busy">重新检查无来源陈述</button>
+                        @if (_detail.Status is ReflectionStatus.ReviewRequired or ReflectionStatus.StaleByLateInput || _detail.ConfirmedVersionIsNotWorking)
+                        {
+                            <button class="btn-primary" @onclick="ConfirmDraftAsync" disabled="@(_busy || current.SourcesCheckedAtUtc is null)">
+                                @(current.SourcesCheckedAtUtc is null ? "等待来源检查" : "确认当前版本")
+                            </button>
+                        }
+                        else if (_detail.Status == ReflectionStatus.Confirmed)
+                        {
+                            <span class="badge badge-ok">当前版本已确认</span>
+                        }
+                    </div>
+
+                    @if (current.UnsourcedClaims.Count > 0)
+                    {
+                        <label class="checkbox notice warn">
+                            <input type="checkbox" checked="@_acceptUnsourcedClaims"
+                                   @onchange="e => _acceptUnsourcedClaims = e.Value is true" />
+                            我已逐条查看下面的 @current.UnsourcedClaims.Count 条存疑句，仍要确认当前版本
+                        </label>
+                    }
+
+                    <h3>来源核验</h3>
+                    <p class="hint">
+                        @(current.SourcesCheckedAtUtc is null
+                            ? "无来源陈述检查尚未完成。"
+                            : $"检查完成于 {AdminFormat.When(current.SourcesCheckedAtUtc.Value)}。")
+                        语义检索：@SemanticSearchText(_detail.SemanticSearch)
+                    </p>
+
+                    @if (current.Sources.Count == 0)
+                    {
+                        <p class="notice info">当前版本没有可显示的来源引用；手工编辑会清除旧正文上的引用定位。</p>
+                    }
+                    else
+                    {
+                        <div class="source-list">
+                            @foreach (var source in current.Sources)
+                            {
+                                <div class="source-item">
+                                    <strong>@(source.IsHistorical ? "历史素材" : "当天素材")</strong>
+                                    <span class="badge @(source.Drift == SourceDrift.Exact ? "badge-ok" : "badge-warn")">
+                                        @SourceDriftText(source.Drift)
+                                    </span>
+                                    <blockquote>@ExcerptAt(current.Body, source.BlockIndex, source.CharStart, source.CharEnd, source.Drift)</blockquote>
+                                    <p>@SourceInputText(source.InputId)</p>
+                                    <p class="hint">相关度 @source.Relevance.ToString("0.00", CultureInfo.InvariantCulture) · @source.Reason</p>
+                                </div>
+                            }
+                        </div>
+                    }
+
+                    @if (current.UnsourcedClaims.Count > 0)
+                    {
+                        <h3>需要人工判断的句子</h3>
+                        @foreach (var claim in current.UnsourcedClaims)
+                        {
+                            <div class="notice warn">
+                                <strong>@ExcerptAt(current.Body, claim.BlockIndex, claim.CharStart, claim.CharEnd, SourceDrift.Exact)</strong>
+                                <br />@claim.Reason
+                            </div>
+                        }
+                    }
+                    else if (current.SourcesCheckedAtUtc is not null)
+                    {
+                        <p class="notice ok">没有发现无法追溯到素材的陈述。</p>
+                    }
+                }
             }
 
             <h3>修改这篇文章的主题</h3>
@@ -441,6 +561,12 @@ else
     private ReflectionView? _detail;
     private string? _detailError;
     private bool _detailLoading;
+    private readonly Dictionary<InputEntryId, InputEntry> _sourceInputs = [];
+    private bool _editingDraft;
+    private string? _draftTitle;
+    private string? _draftSummary;
+    private string? _draftBody;
+    private bool _acceptUnsourcedClaims;
 
     private IReadOnlyList<TopicSummary> _topics = [];
     private bool _includeMerged;
@@ -527,7 +653,7 @@ else
 
         _page = await services
             .GetRequiredService<ListReflectionsUseCase>()
-            .ExecutePageAsync(from, to, Math.Max(1, _pageNumber), PageSize, CancellationToken.None);
+            .ExecuteDetailedPageAsync(from, to, Math.Max(1, _pageNumber), PageSize, CancellationToken.None);
 
         // Fetched once for the whole page rather than per row: the list needs to know which days already have an
         // export record, and one query per row is how a list page ends up owning a join.
@@ -612,6 +738,9 @@ else
 
             _detailDate = date;
             _detailError = _detail is null ? "这一天还没有稿件。" : null;
+            _editingDraft = false;
+            _acceptUnsourcedClaims = false;
+            await LoadSourceInputsAsync(scope.ServiceProvider);
 
             // Pre-select what the article is about right now, so "save" without changes is a no-op.
             var topics = _detail?.WorkingVersion?.Topics ?? [];
@@ -633,7 +762,196 @@ else
         _detailDate = null;
         _detail = null;
         _detailError = null;
+        _sourceInputs.Clear();
+        CancelDraftEdit();
     }
+
+    private IReadOnlyList<(string Label, ReflectionVersionView Version)> DetailVersions()
+    {
+        if (_detail is null)
+        {
+            return [];
+        }
+
+        var versions = new List<(string Label, ReflectionVersionView Version)>();
+        var seen = new HashSet<ReflectionVersionId>();
+
+        Add("最初版", _detail.InitialVersion);
+        Add("上一版", _detail.PreviousVersion);
+        Add("工作版", _detail.WorkingVersion);
+        return versions;
+
+        void Add(string label, ReflectionVersionView? version)
+        {
+            if (version is not null && seen.Add(version.Id))
+            {
+                versions.Add((label, version));
+            }
+        }
+    }
+
+    private async Task SwitchVersionAsync(ReflectionVersionId versionId) => await RunAsync(async services =>
+    {
+        if (_detailDate is not { } date)
+        {
+            return;
+        }
+
+        _detail = await services
+            .GetRequiredService<SwitchReflectionVersionUseCase>()
+            .ExecuteAsync(date, versionId, CancellationToken.None);
+
+        _editingDraft = false;
+        _acceptUnsourcedClaims = false;
+        await LoadSourceInputsAsync(services);
+        await LoadAsync();
+        _message = $"已把版本 {versionId} 切换为工作版本。";
+    });
+
+    private void BeginDraftEdit()
+    {
+        if (_detail?.WorkingVersion is not { } version)
+        {
+            return;
+        }
+
+        _draftTitle = version.Title;
+        _draftSummary = version.Summary;
+        _draftBody = version.Body;
+        _editingDraft = true;
+    }
+
+    private void CancelDraftEdit()
+    {
+        _editingDraft = false;
+        _draftTitle = null;
+        _draftSummary = null;
+        _draftBody = null;
+    }
+
+    private async Task SaveDraftAsync() => await RunAsync(async services =>
+    {
+        if (_detailDate is not { } date)
+        {
+            return;
+        }
+
+        _detail = await services
+            .GetRequiredService<EditReflectionVersionUseCase>()
+            .ExecuteAsync(date, _draftTitle ?? string.Empty, _draftSummary ?? string.Empty, _draftBody ?? string.Empty, CancellationToken.None);
+
+        CancelDraftEdit();
+        _acceptUnsourcedClaims = false;
+        await LoadSourceInputsAsync(services);
+        await LoadAsync();
+        _message = "稿件已保存。旧正文的来源定位和检查结果已经清除，请重新检查后再确认。";
+    });
+
+    private async Task RunSourceCheckAsync() => await RunAsync(async services =>
+    {
+        if (_detailDate is not { } date || _detail?.WorkingVersionId is not { } versionId)
+        {
+            return;
+        }
+
+        var findings = await services
+            .GetRequiredService<RunUnsourcedStatementCheckUseCase>()
+            .ExecuteAsync(versionId, CancellationToken.None);
+
+        _detail = await services.GetRequiredService<GetReflectionUseCase>().ExecuteAsync(date, CancellationToken.None);
+        _acceptUnsourcedClaims = false;
+        await LoadSourceInputsAsync(services);
+        _message = findings == 0
+            ? "检查完成，没有发现无法追溯到素材的陈述。"
+            : $"检查完成，发现 {findings} 条需要人工判断的陈述。";
+    });
+
+    private async Task ConfirmDraftAsync() => await RunAsync(async services =>
+    {
+        if (_detailDate is not { } date)
+        {
+            return;
+        }
+
+        _detail = await services
+            .GetRequiredService<ConfirmReflectionUseCase>()
+            .ExecuteAsync(
+                date,
+                new DailyMusings.Application.Reflections.ConfirmReflectionRequest(_acceptUnsourcedClaims),
+                CancellationToken.None);
+
+        await LoadSourceInputsAsync(services);
+        await LoadAsync();
+        _message = $"已确认 {date} 的当前版本；现在可以在「发布设置」导出 Markdown。";
+    });
+
+    private async Task LoadSourceInputsAsync(IServiceProvider services)
+    {
+        _sourceInputs.Clear();
+
+        if (_detail?.WorkingVersion is not { } version)
+        {
+            return;
+        }
+
+        var repository = services.GetRequiredService<IInputEntryRepository>();
+        foreach (var id in version.Sources.Select(source => source.InputId).Distinct())
+        {
+            if (await repository.FindByIdAsync(id, CancellationToken.None) is { } entry)
+            {
+                _sourceInputs[id] = entry;
+            }
+        }
+    }
+
+    private string SourceInputText(InputEntryId id)
+    {
+        if (!_sourceInputs.TryGetValue(id, out var input))
+        {
+            return $"来源记录 {id} 已不可读。";
+        }
+
+        var text = input.TranscriptForGeneration;
+        return string.IsNullOrWhiteSpace(text)
+            ? $"{input.ContentDate} 的来源记录已按保留策略清理。"
+            : $"{input.ContentDate}：{text}";
+    }
+
+    private static string ExcerptAt(
+        string body,
+        int blockIndex,
+        int charStart,
+        int charEnd,
+        SourceDrift drift)
+    {
+        var paragraphs = ParagraphSplitter.Split(body);
+        if (blockIndex < 0 || blockIndex >= paragraphs.Count)
+        {
+            return "（原文位置已经不存在）";
+        }
+
+        var paragraph = paragraphs[blockIndex];
+        if (drift != SourceDrift.Exact || charStart < 0 || charEnd < charStart || charEnd > paragraph.Length)
+        {
+            return paragraph;
+        }
+
+        return paragraph[charStart..charEnd];
+    }
+
+    private static string SourceDriftText(SourceDrift drift) => drift switch
+    {
+        SourceDrift.Exact => "定位准确",
+        SourceDrift.Drifted => "正文已改动",
+        _ => "原位置已不存在",
+    };
+
+    private static string SemanticSearchText(SemanticSearchState state) => state switch
+    {
+        { Enabled: false } => "未启用，使用主题与全文匹配",
+        { Available: true } => "可用",
+        _ => "重建中，当前使用降级检索",
+    };
 
     private async Task RegenerateAsync(ContentDate date) => await RunAsync(async services =>
     {

@@ -57,8 +57,8 @@ public sealed record ModelEndpointUpdate(
 /// <para>
 /// Values are written to the settings table; the deployment configuration stays as the fallback, so an instance
 /// configured entirely from compose keeps working and an instance configured from the admin page keeps working after
-/// a redeploy. Only the secret's <em>name</em> is ever stored — §10.4's rule that a value never leaves the secret
-/// store is what makes this safe to expose in a web form.
+/// a redeploy. Only the secret's internal lookup name is ever stored — §10.4's rule that a value never leaves the
+/// secret store keeps the setting safe to persist, while the admin form exposes only the write-only API Key value.
 /// </para>
 /// </summary>
 public static class ModelSettingKeys
@@ -312,7 +312,7 @@ public sealed class UpdateModelEndpointUseCase
         {
             throw new UseCaseException(
                 "model.secret_name.invalid",
-                "Secret 名只能是文件名（不含路径分隔符），值本身放在 Secrets 目录里，不经过管理页。");
+                "内部密钥名称只能是文件名，不能包含路径分隔符。");
         }
 
         return trimmed;

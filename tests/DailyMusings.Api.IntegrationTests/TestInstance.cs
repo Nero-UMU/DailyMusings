@@ -58,15 +58,19 @@ internal sealed class TestInstance : IAsyncDisposable
         }
     }
 
-    public static Task<TestInstance> StartAsync(IReadOnlyDictionary<string, string?>? extraSettings = null) =>
+    public static Task<TestInstance> StartAsync(
+        IReadOnlyDictionary<string, string?>? extraSettings = null,
+        string environmentName = "Production") =>
         StartAtAsync(
             Path.Combine(Path.GetTempPath(), "dailymusings-api", Guid.CreateVersion7().ToString("N")),
-            extraSettings);
+            extraSettings,
+            environmentName);
 
     /// <summary>Starts against a specific instance directory, so a test can simulate a restart.</summary>
     public static async Task<TestInstance> StartAtAsync(
         string rootPath,
-        IReadOnlyDictionary<string, string?>? extraSettings = null)
+        IReadOnlyDictionary<string, string?>? extraSettings = null,
+        string environmentName = "Production")
     {
         Directory.CreateDirectory(rootPath);
 
@@ -74,7 +78,7 @@ internal sealed class TestInstance : IAsyncDisposable
 
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions
         {
-            EnvironmentName = "Production",
+            EnvironmentName = environmentName,
             ContentRootPath = root,
         });
 

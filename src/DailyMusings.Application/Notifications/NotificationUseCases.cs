@@ -122,11 +122,11 @@ public static class NotificationComposer
         switch (status)
         {
             case PublicationStatus.Published:
-                body.AppendLine(string.Create(CultureInfo.InvariantCulture, $"文章已经公开在你的站点上：{targetName}。"));
+                body.AppendLine(string.Create(CultureInfo.InvariantCulture, $"稿件已导出为公开 Markdown：{targetName}。"));
                 break;
 
             case PublicationStatus.DraftUploaded:
-                body.AppendLine(string.Create(CultureInfo.InvariantCulture, $"文章已作为草稿上传到 {targetName}，还没有公开。"));
+                body.AppendLine(string.Create(CultureInfo.InvariantCulture, $"稿件已导出为草稿 Markdown：{targetName}（draft: true）。"));
                 break;
 
             case PublicationStatus.Expired:
@@ -149,7 +149,7 @@ public static class NotificationComposer
         if (!string.IsNullOrWhiteSpace(remoteId))
         {
             body.AppendLine();
-            body.AppendLine(string.Create(CultureInfo.InvariantCulture, $"远端文章标识：{remoteId}"));
+            body.AppendLine(string.Create(CultureInfo.InvariantCulture, $"导出文件：{remoteId}"));
         }
 
         if (!string.IsNullOrWhiteSpace(errorCode))

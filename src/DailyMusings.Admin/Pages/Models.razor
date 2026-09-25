@@ -8,19 +8,18 @@
    SMTP 不在这里 —— 它属于「通知管理」。 *@
 
 <PageHeader Title="模型管理"
-            Hint="§8.1 要求的三块：OpenAI 兼容的语音转写、文章生成与可选的 Embedding。留空的项沿用部署配置（环境变量），保存后下一次调用即生效，不需要重启。">
+            Hint="分别配置 OpenAI 兼容的语音转写、文章生成与可选的 Embedding。保存后下一次调用即生效，不需要重启。">
     <Actions>
         <button class="btn" @onclick="ProbeAllAsync" disabled="@_busy">测试全部连接</button>
     </Actions>
 </PageHeader>
 
 <div class="notice info">
-    <strong>密钥只按名字引用，页面上读不回它的值。</strong>
+    <strong>这里只需要填写 API Key，不需要理解或填写内部存储名。</strong>
     <p>
-        密钥现在有两种给法，二选一即可：<strong>直接在这一页填写</strong>（加密后存放在实例根目录之外，
-        不进配置表、不进导出、也不进备份；源码里的解析顺序是「这里填的 → Secrets 目录里的文件 → 环境变量」），
-        或者把值放进部署的 Secrets 目录（例如 <code>deploy/secrets/openai-api-key</code>，文件权限记得
-        <code>chmod 644</code>），文件名就是下面填的「Secret 名」。
+        Key 只写不读：留空表示保持当前值，保存后输入框会立即清空。它会加密存放在实例数据目录之外，
+        不进入配置表、日志、导出或备份。需要由运维系统托管凭据时，也可以改用部署时注入的
+        Docker Secret 或环境变量。
     </p>
     <p>
         每个端点右上角的「密钥来源」会告诉你它当前用的是哪一个：后台填写 / Secret 文件 / 环境变量 / 未配置。
@@ -83,21 +82,17 @@ else
                         <input value="@_models.GetValueOrDefault(service)" @onchange="e => SetModel(service, (string?)e.Value)" />
                     </label>
                     <label>
-                        Secret 名
-                        <input value="@_secretNames.GetValueOrDefault(service)" @onchange="e => SetSecretName(service, (string?)e.Value)" />
-                    </label>
-                    <label>
-                        密钥（留空表示不改）
+                        API Key（留空表示不改）
                         <input type="password" autocomplete="new-password" placeholder="留空即保持现状"
                                value="@_passwords.GetValueOrDefault(service)"
                                @onchange="e => SetPassword(service, (string?)e.Value)" />
                     </label>
-                    @if (_hasPassword.GetValueOrDefault(service))
+                    @if (_secretSources.GetValueOrDefault(service) == SecretSource.Ui)
                     {
                         <label class="checkbox">
                             <input type="checkbox" checked="@_clearPassword.GetValueOrDefault(service)"
                                    @onchange="e => SetClearPassword(service, e.Value is true)" />
-                            清除已保存的密钥
+                            清除在管理页保存的 API Key
                         </label>
                     }
                     <label>
@@ -148,22 +143,6 @@ else
     }
 }
 
-@* 邮件的表单在「通知管理」，这一页只在有人先来这里找邮件时指个路。
-   2026-09-24：底部的「常用邮箱」预设对照表已删——表单不再有预设，用户自己填那七项，
-   这里再抄一份只会在两处各说一半。 *@
-<div class="card">
-    <div class="card-head">
-        <h2>邮件通知</h2>
-        <a class="btn btn-sm btn-primary" href="/notifications">去通知管理</a>
-    </div>
-
-    <p class="hint">
-        SMTP 地址、SMTP 端口、发件人邮箱（同时就是 SMTP 用户名）、密码、SSL、STARTTLS、收件人邮箱，
-        以及「发送测试邮件」都在 <a href="/notifications">通知管理</a>页；<strong>这一页不写也不读邮件配置</strong>。
-        照着你的邮箱服务商给的「SMTP 服务器」那一页填就行，填完用「发送测试邮件」真发一封确认。
-    </p>
-</div>
-
 @code {
     /// <summary>The three endpoints §8.1 lists, in the order an operator meets them.</summary>
     private static readonly string[] Services = ["transcription", "generation", "embedding"];
@@ -191,7 +170,6 @@ else
     // 密码只进不出：输入框永远从空开始，提交后立刻清空，页面上不保留也不回显任何已存的值。
     private readonly Dictionary<string, string?> _passwords = [];
     private readonly Dictionary<string, bool> _clearPassword = [];
-    private readonly Dictionary<string, bool> _hasPassword = [];
 
     private ILogger Logger => LoggerFactory.CreateLogger("DailyMusings.Admin.Models");
 
@@ -230,7 +208,6 @@ else
                 ? SecretSource.None
                 : secrets.ResolveSource(endpoint.SecretName);
 
-            _hasPassword[endpoint.Service] = endpoint.HasPassword;
         }
 
         _dimensions = endpoints
@@ -270,8 +247,6 @@ else
 
     private void SetModel(string service, string? value) => _models[service] = value;
 
-    private void SetSecretName(string service, string? value) => _secretNames[service] = value;
-
     private void SetPassword(string service, string? value) => _passwords[service] = value;
 
     private void SetClearPassword(string service, bool value) => _clearPassword[service] = value;
@@ -297,6 +272,9 @@ else
             dimensions = parsedDimensions;
         }
 
+        var password = string.IsNullOrEmpty(_passwords.GetValueOrDefault(service)) ? null : _passwords[service];
+        var clearPassword = _clearPassword.GetValueOrDefault(service);
+
         await services
             .GetRequiredService<UpdateModelEndpointUseCase>()
             .ExecuteAsync(
@@ -305,11 +283,13 @@ else
                     _enabled.GetValueOrDefault(service),
                     _baseUrls.GetValueOrDefault(service),
                     _models.GetValueOrDefault(service),
-                    _secretNames.GetValueOrDefault(service),
+                    // The storage name is an implementation detail. It is sent only when the write-only key is
+                    // changing, so an ordinary settings save does not freeze a deployment-provided name in the DB.
+                    password is not null || clearPassword ? _secretNames.GetValueOrDefault(service) : null,
                     timeout,
                     dimensions,
-                    Password: string.IsNullOrEmpty(_passwords.GetValueOrDefault(service)) ? null : _passwords[service],
-                    ClearPassword: _clearPassword.GetValueOrDefault(service) ? true : null),
+                    Password: password,
+                    ClearPassword: clearPassword ? true : null),
                 CancellationToken.None);
 
         await LoadAsync();
@@ -393,4 +373,3 @@ else
         }
     }
 }
-

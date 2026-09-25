@@ -118,7 +118,7 @@
         }
     }
 
-    <h3>立即生成今日随想博客</h3>
+    <h3>立即生成今日稿件</h3>
 
     <div class="stack">
         <label class="checkbox">
@@ -146,7 +146,7 @@
 
     <div class="actions">
         <button class="btn-primary" @onclick="GenerateTodayAsync" disabled="@(_busy || _reflection is null)">
-            立即生成今日随想博客
+            立即生成今日稿件
         </button>
     </div>
 
@@ -393,7 +393,7 @@
                                             <button class="btn btn-sm"
                                                     @onclick="() => CheckRemoteAsync(lastForActions.Publication.Id)"
                                                     disabled="@_busy">
-                                                检查远程
+                                                检查文件
                                             </button>
 
                                             @if (lastForActions.Publication.Status is PublicationStatus.Failed or PublicationStatus.Expired)
@@ -427,7 +427,7 @@
     @if (_check is { } check)
     {
         <div class="notice @(check.Comparison.LocalChanged || check.Comparison.RemoteChanged ? "warn" : "ok")">
-            <strong>检查远程：@check.Target.Name</strong>
+            <strong>检查导出文件：@check.Target.Name</strong>
             <p>@DescribeComparison(check.Comparison)</p>
             <p class="hint">
                 记录里的文件：<code>@(check.Publication.RemoteId ?? "（没有文件名）")</code>
