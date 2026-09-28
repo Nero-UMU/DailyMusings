@@ -59,11 +59,61 @@ public sealed class SchedulePublicationsUseCase
         var now = _clock.UtcNow;
         var today = calendar.ContentDateOf(now);
 
+        await QueueUnpublishedReplacementRemindersAsync(settings, today, cancellationToken).ConfigureAwait(false);
         var queued = await QueueDuePublicationsAsync(settings, today, cancellationToken).ConfigureAwait(false);
         var expired = await ExpireOverdueAsync(settings, cancellationToken).ConfigureAwait(false);
         var superseded = await SupersedeStaleAsync(cancellationToken).ConfigureAwait(false);
 
         return new PublicationScheduleResult(queued, expired, superseded);
+    }
+
+    /// <summary>
+    /// Reminds the owner when a regenerated working version reaches the publish slot while an older version is
+    /// still public. Regeneration and confirmation are both editorial actions; neither authorizes replacing a
+    /// public file. The reminder is therefore the scheduler's only action until the user explicitly publishes.
+    /// </summary>
+    private async Task QueueUnpublishedReplacementRemindersAsync(
+        Configuration.ContentSettings settings,
+        ContentDate today,
+        CancellationToken cancellationToken)
+    {
+        var reflections = await _reflections
+            .ListByDateRangeAsync(today.AddDays(-LookBackDays), today, cancellationToken)
+            .ConfigureAwait(false);
+        var calendar = settings.CreateCalendar();
+        var now = _clock.UtcNow;
+
+        foreach (var reflection in reflections.OrderBy(candidate => candidate.ContentDate))
+        {
+            if (reflection.WorkingVersionId is not { } workingVersionId ||
+                calendar.AtLocalTime(reflection.ContentDate.AddDays(1), settings.PublishLocalTime) > now)
+            {
+                continue;
+            }
+
+            var publications = await _publications
+                .ListByReflectionAsync(reflection.Id, cancellationToken)
+                .ConfigureAwait(false);
+
+            if (!publications.Any(publication =>
+                    publication.Status == PublicationStatus.Published &&
+                    publication.ReflectionVersionId != workingVersionId))
+            {
+                continue;
+            }
+
+            var workingVersion = await _reflections
+                .FindVersionAsync(workingVersionId, cancellationToken)
+                .ConfigureAwait(false);
+
+            await _notifications
+                .QueueUnpublishedAtPublishTimeAsync(
+                    reflection.ContentDate,
+                    workingVersionId,
+                    workingVersion?.Title,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
     }
 
     /// <summary>
@@ -98,6 +148,19 @@ public sealed class SchedulePublicationsUseCase
             // says so rather than this loop guessing.
             if (calendar.AtLocalTime(reflection.ContentDate.AddDays(1), settings.PublishLocalTime) > now)
             {
+                continue;
+            }
+
+            var activePublications = await _publications
+                .ListByReflectionAsync(reflection.Id, cancellationToken)
+                .ConfigureAwait(false);
+
+            if (activePublications.Any(publication =>
+                    publication.Status == PublicationStatus.Published &&
+                    publication.ReflectionVersionId != reflection.ConfirmedVersionId))
+            {
+                // A confirmed regeneration is still not permission to replace an already-public file. Only the
+                // manual publication endpoint records that explicit decision.
                 continue;
             }
 

@@ -145,7 +145,15 @@ public sealed class Reflection
                     "Explicit user confirmation is required.");
             }
 
-            PreviousVersionId = current;
+            // Once a confirmed (and potentially already published) version exists, a different working version is
+            // an unpublished replacement. If the user asks for another generation, that abandoned replacement
+            // leaves the visible slots instead of displacing the confirmed/public version from "previous". The
+            // durable row can remain as audit data; References() is the product boundary for versions users can
+            // select and manage.
+            if (ConfirmedVersionId is null || current == ConfirmedVersionId)
+            {
+                PreviousVersionId = current;
+            }
         }
 
         InitialVersionId ??= newVersionId;

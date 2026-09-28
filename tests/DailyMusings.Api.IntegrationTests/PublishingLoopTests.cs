@@ -179,6 +179,14 @@ public class PublishingLoopTests
             publishCard.Value.Contains("已公开发布", StringComparison.Ordinal),
             $"发布设置把旧版本的发布状态错误套到了新工作版本：\n{publishCard.Value}");
 
+        var beforeReplacement = await instance.Client.GetFromJsonAsync<PublicationListResponse>(
+            $"/api/reflections/{contentDate}/publications");
+        Assert.AreEqual(
+            1,
+            beforeReplacement!.Items.Count(item => item.Status == PublicationStatusNames.Published),
+            "重新生成只能产生未发布稿，不能提前撤下当日已发布稿。");
+        Assert.IsTrue(File.Exists(oldFile), "只有用户点击发布替代稿后，才能删除当日旧的已发布文件。");
+
         await ConfirmExistingAsync(instance, contentDate);
         using var publishReplacement = await device.PostAsJsonAsync(
             $"/api/reflections/{contentDate}/publish/{target.Id}",

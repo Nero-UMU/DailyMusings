@@ -262,6 +262,43 @@ internal sealed class PublishingTestContext : IAsyncDisposable
         return (reflection, version);
     }
 
+    /// <summary>
+    /// Installs a newly generated working version while preserving the previously confirmed version. This is the
+    /// state produced when new material arrives after a publication and the user regenerates but has not confirmed
+    /// or published the replacement yet.
+    /// </summary>
+    public async Task<ReflectionVersion> RegenerateUnconfirmedAsync(
+        Reflection reflection,
+        string title = "补充后的记录",
+        string body = "这是重新生成、尚未发布的正文。")
+    {
+        reflection.MarkStaleByLateInput(Clock.UtcNow);
+        reflection.BeginGeneration(GenerationReason.LateInputRegeneration, Clock.UtcNow);
+
+        var version = ReflectionVersion.CreateGenerated(
+            ReflectionVersionId.New(),
+            reflection.Id,
+            title,
+            "补充摘要",
+            body,
+            WritingSettings.Default,
+            new ModelInfo("test-writer"),
+            "generation-test-v1",
+            Clock.UtcNow,
+            tags: ["记录"],
+            categories: ["随想"]);
+
+        reflection.ApplyGeneratedVersion(version.Id, false, false, Clock.UtcNow);
+
+        await using var transaction = await UnitOfWork.BeginAsync(CancellationToken.None);
+        await Reflections.UpdateAsync(reflection, CancellationToken.None);
+        await Reflections.AddVersionAsync(version, CancellationToken.None);
+        await Reflections.ReplaceSourcesAsync(version.Id, [], CancellationToken.None);
+        await transaction.CommitAsync(CancellationToken.None);
+
+        return version;
+    }
+
     public async Task<ProcessingJob> QueueAndRunAsync(Publication publication, bool replaceExistingFile = false)
     {
         var job = await Enqueuer.EnsureAsync(

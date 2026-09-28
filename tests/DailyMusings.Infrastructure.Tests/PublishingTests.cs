@@ -207,6 +207,68 @@ public class PublishingTests
         context.Clock.UtcNow = slot.AddMinutes(1);
     }
 
+    [DataTestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public async Task A_regenerated_unpublished_draft_is_reminded_at_publish_time_without_replacing_the_published_post(
+        bool confirmReplacement)
+    {
+        await using var context = await PublishingTestContext.CreateAsync();
+        var target = await context.AddTargetAsync("hexo", destination: "posts", automatic: true);
+        var day = Day(context);
+        var (reflection, publishedVersion) = await context.SeedConfirmedDraftAsync(day);
+
+        var request = await context.Request.ExecuteAsync(
+            day,
+            target.Id,
+            PublicationVisibility.Public,
+            "owner",
+            replaceExistingFile: false,
+            manual: true,
+            CancellationToken.None);
+
+        await context.QueueAndRunAsync(request.Publication!);
+        var published = (await context.Publications.FindByIdAsync(request.Publication!.Id, CancellationToken.None))!;
+        var publishedPath = ExportedPath(context, "posts", published.RemoteId!);
+        Assert.AreEqual(PublicationStatus.Published, published.Status);
+        Assert.IsTrue(File.Exists(publishedPath));
+
+        var replacement = await context.RegenerateUnconfirmedAsync(reflection);
+        Assert.AreNotEqual(publishedVersion.Id, replacement.Id);
+
+        if (confirmReplacement)
+        {
+            reflection.Confirm(replacement.Id, context.Clock.UtcNow);
+            await context.Reflections.UpdateAsync(reflection, CancellationToken.None);
+        }
+
+        Assert.AreEqual(
+            confirmReplacement ? ReflectionStatus.Confirmed : ReflectionStatus.ReviewRequired,
+            reflection.Status);
+        AdvanceToJustAfterThePublishSlot(context, day);
+
+        var firstSweep = await context.Schedule.ExecuteAsync(CancellationToken.None);
+        var secondSweep = await context.Schedule.ExecuteAsync(CancellationToken.None);
+
+        Assert.AreEqual(0, firstSweep.Queued, "An unconfirmed replacement must never be published by the scheduler.");
+        Assert.AreEqual(0, secondSweep.Queued);
+        Assert.AreEqual(
+            PublicationStatus.Published,
+            (await context.Publications.FindByIdAsync(published.Id, CancellationToken.None))!.Status,
+            "Regeneration alone must leave the old published record current.");
+        Assert.IsTrue(File.Exists(publishedPath), "Regeneration alone must not delete the published Markdown file.");
+
+        var reminderJobs = (await context.Jobs.ListRecentAsync(50, CancellationToken.None))
+            .Where(job => job.JobType == JobType.Notification)
+            .Select(job => NotificationPayload.FromJson(job.Payload))
+            .Where(payload => payload?.Subject.Contains("未发布", StringComparison.Ordinal) == true)
+            .ToArray();
+
+        Assert.AreEqual(1, reminderJobs.Length, "The publish-time reminder must be queued once, even across repeated sweeps.");
+        StringAssert.Contains(reminderJobs[0]!.Body, "不会自动用新稿替换");
+        Assert.AreEqual(1, ExportedFiles(context, "posts").Length);
+    }
+
     [TestMethod]
     public async Task A_manual_publish_exports_the_confirmed_version_and_records_what_it_wrote()
     {

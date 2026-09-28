@@ -73,6 +73,31 @@ public static class NotificationComposer
         return new EmailMessage(recipient, subject, body.ToString().TrimEnd());
     }
 
+    public static EmailMessage UnpublishedAtPublishTime(
+        ContentDate contentDate,
+        string? title,
+        string recipient,
+        string? instanceUrl)
+    {
+        var subject = string.Create(CultureInfo.InvariantCulture, $"[每日随想] {contentDate} 有一篇新稿尚未发布");
+
+        var body = new StringBuilder();
+        body.AppendLine(string.Create(CultureInfo.InvariantCulture, $"{contentDate} 重新生成的稿件到了预定发布时间，但还没有发布。"));
+        body.AppendLine("系统保留了当日原先公开的稿件，不会自动用新稿替换；只有你点击发布后才会替换。");
+        body.AppendLine();
+
+        if (!string.IsNullOrWhiteSpace(title))
+        {
+            body.AppendLine(string.Create(CultureInfo.InvariantCulture, $"新稿标题：{title.Trim()}"));
+            body.AppendLine();
+        }
+
+        AppendLink(body, instanceUrl);
+        body.AppendLine("如果暂时不发布，无需处理；下次重新生成时，内容管理会改为显示最新稿件。");
+
+        return new EmailMessage(recipient, subject, body.ToString().TrimEnd());
+    }
+
     public static EmailMessage JobFailed(
         JobType jobType,
         string targetId,
@@ -207,6 +232,22 @@ public sealed class QueueNotificationUseCase
             NotificationKeys.ForDraftReady(contentDate, version),
             contentDate.ToString(),
             (settings, recipient) => NotificationComposer.DraftReady(contentDate, title, recipient, settings.InstanceUrl),
+            cancellationToken);
+
+    public Task<bool> QueueUnpublishedAtPublishTimeAsync(
+        ContentDate contentDate,
+        Domain.Common.ReflectionVersionId version,
+        string? title,
+        CancellationToken cancellationToken) =>
+        QueueAsync(
+            NotificationEvent.DraftReady,
+            NotificationKeys.ForUnpublishedAtPublishTime(contentDate, version),
+            contentDate.ToString(),
+            (settings, recipient) => NotificationComposer.UnpublishedAtPublishTime(
+                contentDate,
+                title,
+                recipient,
+                settings.InstanceUrl),
             cancellationToken);
 
     public Task<bool> QueueJobFailedAsync(

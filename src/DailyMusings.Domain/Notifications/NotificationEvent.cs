@@ -45,6 +45,14 @@ public static class NotificationKeys
     public static string ForDraftReady(ContentDate contentDate, ReflectionVersionId version) =>
         $"notification:draft-ready:{contentDate}:{version}";
 
+    /// <summary>
+    /// One reminder for the working version that is still unpublished when its configured publish time arrives.
+    /// This is deliberately distinct from <see cref="ForDraftReady"/>: generation may announce that a draft is
+    /// ready immediately, while the publish-time reminder answers a later and different question.
+    /// </summary>
+    public static string ForUnpublishedAtPublishTime(ContentDate contentDate, ReflectionVersionId version) =>
+        $"notification:unpublished-at-publish-time:{contentDate}:{version}";
+
     /// <summary>One notification per failed job. §14 wants the user told which job failed, so the job names it.</summary>
     public static string ForFailedJob(JobId jobId) => $"notification:job-failed:{jobId}";
 

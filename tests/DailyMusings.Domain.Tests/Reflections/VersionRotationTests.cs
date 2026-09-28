@@ -128,6 +128,25 @@ public class VersionRotationTests
     }
 
     [TestMethod]
+    public void A_second_regeneration_discards_the_previous_unpublished_replacement_but_keeps_the_confirmed_version()
+    {
+        var reflection = TestFactory.NewReflection();
+        var (_, published) = Generate(reflection);
+        reflection.Confirm(published.Id, TestFactory.Noon);
+
+        reflection.MarkStaleByLateInput(TestFactory.Noon);
+        var (_, abandonedReplacement) = Generate(reflection);
+        var (_, latestReplacement) = Generate(reflection);
+
+        Assert.AreEqual(published.Id, reflection.ConfirmedVersionId);
+        Assert.AreEqual(published.Id, reflection.PreviousVersionId);
+        Assert.AreEqual(latestReplacement.Id, reflection.WorkingVersionId);
+        Assert.IsFalse(
+            reflection.References(abandonedReplacement.Id),
+            "When the next generation succeeds, the unpublished replacement it superseded must leave the visible slots.");
+    }
+
+    [TestMethod]
     public void Applying_a_generated_version_requires_the_generating_state()
     {
         var reflection = TestFactory.NewReflection();
