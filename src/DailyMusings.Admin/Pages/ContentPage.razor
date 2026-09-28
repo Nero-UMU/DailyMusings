@@ -4,1187 +4,276 @@
 @inject IServiceScopeFactory ScopeFactory
 @inject ILoggerFactory LoggerFactory
 
-@* 内容管理分区：上半是已生成的稿件（翻页查看、重新生成今天的、迁移主题），
-   下半是主题管理。两者放在一起是有原因的：删除一个正在被文章使用的主题会被拒绝，
-   而「把这些文章迁移到别的主题」这件事就发生在上面那半张页面里。 *@
-
-<PageHeader Title="内容管理"
-            Hint="在这里完成稿件核验：查看来源与存疑句、编辑正文、切换版本、确认稿件并管理主题。">
-    <Actions>
-        <button class="btn" @onclick="ReloadAsync" disabled="@_busy">刷新</button>
-    </Actions>
+<PageHeader Title="内容管理" Hint="查看、归类和删除稿件。生成与发布计划统一放在「发布设置」。">
+    <Actions><button class="btn" @onclick="ReloadAsync" disabled="@_busy">刷新</button></Actions>
 </PageHeader>
 
-@if (_message is not null)
-{
-    <p class="notice ok">@_message</p>
-}
+@if (_message is not null) { <p class="notice ok">@_message</p> }
+@if (_error is not null) { <p class="notice error">@_error</p> }
 
-@if (_error is not null)
-{
-    <p class="notice error">@_error</p>
-}
+<section class="library-summary">
+    <div><strong>@_articles.Count</strong><span>全部稿件</span></div>
+    <div><strong>@_articles.Count(article => IsPublished(article.Id))</strong><span>已发布</span></div>
+    <div><strong>@_articles.Count(article => !IsPublished(article.Id))</strong><span>未发布</span></div>
+    <div><strong>@_topics.Count</strong><span>主题</span></div>
+</section>
 
-<div class="toolbar">
-    <label>
-        起始日期
-        <input value="@_fromText" @onchange="e => _fromText = (string?)e.Value" placeholder="YYYY-MM-DD" />
-    </label>
-    <label>
-        结束日期
-        <input value="@_toText" @onchange="e => _toText = (string?)e.Value" placeholder="YYYY-MM-DD" />
-    </label>
-    <div class="actions">
-        <button class="btn" @onclick="ApplyRangeAsync" disabled="@_busy">读取这个区间</button>
-        <button class="btn" @onclick="ResetRangeAsync" disabled="@_busy">最近 31 天</button>
-    </div>
-</div>
-
-<p class="hint">
-    区间最长 366 天（服务端的日期范围上限）；默认与接口默认一致，是今天往前 31 天。
-    每页 @PageSize 条，从新到旧。
-</p>
-
-@if (_page is null)
-{
-    <p class="muted">正在读取…</p>
-}
-else if (_page.Items.Count == 0)
-{
-    <p class="notice info">这个区间里还没有稿件。生成需要一个前提：那一天至少有一条可用的素材。</p>
-}
-else
-{
-    <div class="table-wrap">
-        <table class="table">
-            <thead>
-                <tr>
-                    <th>日期</th>
-                    <th>状态</th>
-                    <th>标题</th>
-                    <th>生成时间（本地）</th>
-                    <th>主题</th>
-                    <th>操作</th>
-                </tr>
-            </thead>
-            <tbody>
-                @foreach (var item in _page.Items)
-                {
-                    // Bound to a local: `item.WorkingVersion?.Title` cannot be proven non-null through the
-                    // conditional, and the row would otherwise have to dereference a nullable chain twice.
-                    var title = item.WorkingVersion?.Title;
-
-                    <tr>
-                        <td class="nowrap"><strong>@item.ContentDate</strong></td>
-                        <td>
-                            <span class="badge @AdminLabels.ReflectionBadge(item.Status)">@AdminLabels.ReflectionText(item.Status)</span>
-                            @if (item.ConfirmedVersionIsNotWorking)
-                            {
-                                <div class="hint">已确认的版本与工作版本不同</div>
-                            }
-                        </td>
-                        <td>
-                            @(string.IsNullOrWhiteSpace(title) ? "（无标题）" : title)
-                        </td>
-                        <td class="nowrap">
-                            @AdminFormat.When(item.WorkingVersion?.CreatedAtUtc ?? item.UpdatedAtUtc)
-                            @if (item.WorkingVersion?.ModelName is { Length: > 0 } model)
-                            {
-                                <div class="hint">模型 @model</div>
-                            }
-                        </td>
-                        <td>
-                            @if (item.WorkingVersion is { Topics.Count: > 0 } version)
-                            {
-                                @foreach (var topic in version.Topics)
-                                {
-                                    <span class="badge @(topic.IsPrimary ? "badge-ok" : "badge-muted")">@topic.Name</span>
-                                }
-                            }
-                            else
-                            {
-                                <span class="muted">没有主题</span>
-                            }
-                        </td>
-                        <td>
-                            <div class="actions">
-                                <button class="btn btn-sm" @onclick="() => OpenDetailAsync(item.ContentDate)" disabled="@(_busy || _detailLoading)">
-                                    查看与核验…
-                                </button>
-
-                                @if (CanRegenerate(item))
-                                {
-                                    <button class="btn btn-sm" @onclick="() => RegenerateAsync(item.ContentDate)" disabled="@_busy">
-                                        重新生成今日稿件
-                                    </button>
-                                }
-                            </div>
-                        </td>
-                    </tr>
-                }
-            </tbody>
-        </table>
-    </div>
-
-    <div class="pager">
-        <span class="pager-info">共 @_page.Total 篇 · 第 @_pageNumber / @TotalPages() 页</span>
-        <span class="actions">
-            <button class="btn btn-sm" @onclick="PreviousPageAsync" disabled="@(_busy || _pageNumber <= 1)">上一页</button>
-            <button class="btn btn-sm" @onclick="NextPageAsync" disabled="@(_busy || _pageNumber >= TotalPages())">下一页</button>
-        </span>
-    </div>
-
-    <p class="hint">
-        「重新生成今日稿件」只对<strong>今天</strong>、且还没有被导出过的稿件出现（历史日期不支持重新生成）。
-        生成如果会覆盖工作版本上的手工修改，服务端会拒绝——那时勾上「接受覆盖手工修改」再点一次。
-    </p>
-
-    <div class="stack">
-        <label class="checkbox">
-            <input type="checkbox" checked="@_regenerateIgnoreFailures"
-                   @onchange="e => _regenerateIgnoreFailures = e.Value is true" />
-            忽略转写失败的项（今天有转写失败的录音时，默认暂缓生成）
-        </label>
-        <label class="checkbox">
-            <input type="checkbox" checked="@_regenerateAcceptOverwrite"
-                   @onchange="e => _regenerateAcceptOverwrite = e.Value is true" />
-            接受覆盖工作版本上的手工修改（不勾选时，有手工修改的稿件会被拒绝重新生成）
-        </label>
-    </div>
-}
-
-@if (_detailDate is { } detailDate)
-{
-    <div class="card">
-        <div class="card-head">
-            <h2>@detailDate 的正文</h2>
-            <button class="btn btn-sm" @onclick="CloseDetail" disabled="@_busy">收起</button>
+<section class="card library-card">
+    <div class="library-toolbar">
+        <div class="segmented" role="group" aria-label="稿件状态筛选">
+            <button class="@FilterClass(FilterAll)" @onclick="() => SetFilter(FilterAll)">全部</button>
+            <button class="@FilterClass(FilterDraft)" @onclick="() => SetFilter(FilterDraft)">未发布</button>
+            <button class="@FilterClass(FilterPublished)" @onclick="() => SetFilter(FilterPublished)">已发布</button>
         </div>
+        <input class="library-search" placeholder="搜索标题、摘要或日期" value="@_search" @oninput="e => _search = (string?)e.Value ?? string.Empty" />
+    </div>
 
-        @if (_detailError is not null)
-        {
-            <p class="notice error">@_detailError</p>
-        }
-        else if (_detail is null)
-        {
-            <p class="muted">正在读取…</p>
-        }
-        else
-        {
-            <p>
-                <span class="badge @AdminLabels.ReflectionBadge(_detail.Status)">@AdminLabels.ReflectionText(_detail.Status)</span>
-                @if (_detail.WorkingVersion is { } working)
-                {
-                    <span class="hint">
-                        · 工作版本生成于 @AdminFormat.When(working.CreatedAtUtc)
-                        <text> · 来源引用 @working.Sources.Count 条 · 无来源陈述 @working.UnsourcedClaims.Count 条</text>
-                        @if (working.HasManualEdits)
-                        {
-                            <text> · 含手工修改</text>
-                        }
-                    </span>
-                }
-            </p>
-
-            @if (DetailVersions().Count > 1)
+    @if (VisibleArticles().Count == 0)
+    {
+        <p class="empty-state">没有符合条件的稿件。</p>
+    }
+    else
+    {
+        <div class="article-grid">
+            @foreach (var article in VisibleArticles())
             {
-                <h3>版本</h3>
-                <div class="actions">
-                    @foreach (var item in DetailVersions())
-                    {
-                        <button class="btn btn-sm @(item.Version.Id == _detail.WorkingVersionId ? "btn-primary" : "")"
-                                @onclick="() => SwitchVersionAsync(item.Version.Id)"
-                                disabled="@(_busy || item.Version.Id == _detail.WorkingVersionId)">
-                            @item.Label @(item.Version.Id == _detail.WorkingVersionId ? "（当前）" : "")
-                        </button>
-                    }
-                </div>
-            }
-
-            @if (_editingDraft && _detail.WorkingVersion is not null)
-            {
-                <div class="form">
-                    <label>
-                        标题
-                        <input value="@_draftTitle" @onchange="e => _draftTitle = (string?)e.Value" />
-                    </label>
-                    <label>
-                        摘要
-                        <textarea value="@_draftSummary" @onchange="e => _draftSummary = (string?)e.Value"></textarea>
-                    </label>
-                    <label>
-                        正文
-                        <textarea value="@_draftBody" @onchange="e => _draftBody = (string?)e.Value" class="draft-editor"></textarea>
-                    </label>
-                </div>
-                <p class="notice warn">
-                    修改文字后，旧正文上的来源定位和无来源检查结果会失效并被清除。保存后请重新运行检查，再确认稿件。
-                </p>
-                <div class="actions">
-                    <button class="btn-primary" @onclick="SaveDraftAsync" disabled="@_busy">保存稿件</button>
-                    <button class="btn" @onclick="CancelDraftEdit" disabled="@_busy">取消</button>
-                </div>
-            }
-            else
-            {
-                @if (_detail.WorkingVersion is { } current)
-                {
-                    <h3>@(string.IsNullOrWhiteSpace(current.Title) ? "（无标题）" : current.Title)</h3>
-                    @if (!string.IsNullOrWhiteSpace(current.Summary))
-                    {
-                        <p class="hint">@current.Summary</p>
-                    }
-                    @if (!string.IsNullOrWhiteSpace(current.Body))
-                    {
-                        <div class="transcript draft-body">@current.Body</div>
-                    }
-                    else
-                    {
-                        <p class="muted">这个版本还没有正文。</p>
-                    }
-
-                    <div class="actions">
-                        <button class="btn" @onclick="BeginDraftEdit" disabled="@_busy">编辑稿件…</button>
-                        <button class="btn" @onclick="RunSourceCheckAsync" disabled="@_busy">重新检查无来源陈述</button>
-                        @if (_detail.Status is ReflectionStatus.ReviewRequired or ReflectionStatus.StaleByLateInput || _detail.ConfirmedVersionIsNotWorking)
+                var version = article.WorkingVersion;
+                <article class="article-card @(article.Id == _selected?.Id ? "selected" : "")">
+                    <button class="article-open" @onclick="() => OpenArticle(article)">
+                        <span class="article-date">@article.ContentDate</span>
+                        <h2>@(string.IsNullOrWhiteSpace(version?.Title) ? "（无标题）" : version.Title)</h2>
+                        <p>@(string.IsNullOrWhiteSpace(version?.Summary) ? Preview(version?.Body) : version.Summary)</p>
+                    </button>
+                    <div class="article-meta">
+                        <span class="badge @(IsPublished(article.Id) ? "badge-ok" : "badge-warn")">@(IsPublished(article.Id) ? "已发布" : "未发布")</span>
+                        @foreach (var topic in version?.Topics ?? [])
                         {
-                            <button class="btn-primary" @onclick="ConfirmDraftAsync" disabled="@(_busy || current.SourcesCheckedAtUtc is null)">
-                                @(current.SourcesCheckedAtUtc is null ? "等待来源检查" : "确认当前版本")
-                            </button>
-                        }
-                        else if (_detail.Status == ReflectionStatus.Confirmed)
-                        {
-                            <span class="badge badge-ok">当前版本已确认</span>
+                            <span class="topic-chip">@topic.Name</span>
                         }
                     </div>
+                </article>
+            }
+        </div>
+    }
+</section>
 
-                    @if (current.UnsourcedClaims.Count > 0)
+@if (_selected is { } selected)
+{
+    <section class="card reader-card">
+        <div class="card-head">
+            <div><span class="eyebrow">@selected.ContentDate · @(IsPublished(selected.Id) ? "已发布" : "未发布")</span>
+                <h2>@(string.IsNullOrWhiteSpace(selected.WorkingVersion?.Title) ? "（无标题）" : selected.WorkingVersion.Title)</h2></div>
+            <button class="btn btn-sm" @onclick="CloseArticle">收起</button>
+        </div>
+
+        @if (selected.WorkingVersion is { } current)
+        {
+            <article class="reader-document">
+                @if (!string.IsNullOrWhiteSpace(current.Summary)) { <p class="article-summary">@current.Summary</p> }
+                <div class="article-body">@current.Body</div>
+            </article>
+
+            <div class="topic-editor">
+                <div><h3>稿件主题</h3><p class="hint">可选择一个或多个主题；第一个选中的主题作为主要主题。</p></div>
+                @if (_topics.Count == 0)
+                {
+                    <p class="notice info">还没有主题，请先在下方创建。</p>
+                }
+                else
+                {
+                    <div class="topic-picker">
+                        @foreach (var item in _topics)
+                        {
+                            <label class="topic-option">
+                                <input type="checkbox" checked="@_selectedTopicIds.Contains(item.Topic.Id)"
+                                       @onchange="e => ToggleTopic(item.Topic.Id, e.Value is true)" />
+                                <span>@item.Topic.Name</span>
+                                <small>@(item.Topic.Origin == TopicOrigin.Model ? "大模型添加" : "用户添加")</small>
+                            </label>
+                        }
+                    </div>
+                    <button class="btn-primary" @onclick="SaveArticleTopicsAsync" disabled="@_busy">保存稿件主题</button>
+                }
+            </div>
+
+            <div class="danger-zone">
+                <div><strong>删除这篇稿件</strong><p class="hint">删除正文、历史版本和发布记录，并阻止定时任务再次生成这一天。为避免误删外部修改，已输出的 Markdown 文件会保留。</p></div>
+                @if (_confirmDeleteArticle == selected.Id)
+                {
+                    <div class="actions"><button class="btn-danger" @onclick="DeleteArticleAsync" disabled="@_busy">确认永久删除</button>
+                        <button class="btn" @onclick="CancelArticleDelete" disabled="@_busy">取消</button></div>
+                }
+                else { <button class="btn-danger" @onclick="() => _confirmDeleteArticle = selected.Id" disabled="@_busy">删除稿件…</button> }
+            </div>
+        }
+    </section>
+}
+
+<section class="card topics-card">
+    <div class="card-head"><div><span class="eyebrow">主题库</span><h2>主题管理</h2></div><span class="hint">大模型只能添加主题，删除只能由你操作。</span></div>
+    <div class="topic-create">
+        <input placeholder="输入新主题名称" value="@_newTopicName" @oninput="e => _newTopicName = (string?)e.Value ?? string.Empty" />
+        <button class="btn-primary" @onclick="CreateTopicAsync" disabled="@(_busy || string.IsNullOrWhiteSpace(_newTopicName))">添加主题</button>
+    </div>
+
+    <div class="topic-list">
+        @foreach (var item in _topics)
+        {
+            <div class="topic-row">
+                <div class="topic-name"><strong>@item.Topic.Name</strong>
+                    <span class="badge @(item.Topic.Origin == TopicOrigin.Model ? "badge-warn" : "badge-ok")">@(item.Topic.Origin == TopicOrigin.Model ? "大模型添加" : "用户添加")</span></div>
+                <div class="topic-usage"><span>@item.ArticleCount 篇稿件</span><span>@item.InputCount 条素材</span></div>
+                <div>
+                    @if (_confirmDeleteTopic == item.Topic.Id)
                     {
-                        <label class="checkbox notice warn">
-                            <input type="checkbox" checked="@_acceptUnsourcedClaims"
-                                   @onchange="e => _acceptUnsourcedClaims = e.Value is true" />
-                            我已逐条查看下面的 @current.UnsourcedClaims.Count 条存疑句，仍要确认当前版本
-                        </label>
-                    }
-
-                    <h3>来源核验</h3>
-                    <p class="hint">
-                        @(current.SourcesCheckedAtUtc is null
-                            ? "无来源陈述检查尚未完成。"
-                            : $"检查完成于 {AdminFormat.When(current.SourcesCheckedAtUtc.Value)}。")
-                        语义检索：@SemanticSearchText(_detail.SemanticSearch)
-                    </p>
-
-                    @if (current.Sources.Count == 0)
-                    {
-                        <p class="notice info">当前版本没有可显示的来源引用；手工编辑会清除旧正文上的引用定位。</p>
+                        <div class="actions"><button class="btn-danger btn-sm" @onclick="() => DeleteTopicAsync(item.Topic.Id)" disabled="@(_busy || item.ArticleCount > 0)">确认删除</button>
+                            <button class="btn btn-sm" @onclick="CancelTopicDelete">取消</button></div>
                     }
                     else
                     {
-                        <div class="source-list">
-                            @foreach (var source in current.Sources)
-                            {
-                                <div class="source-item">
-                                    <strong>@(source.IsHistorical ? "历史素材" : "当天素材")</strong>
-                                    <span class="badge @(source.Drift == SourceDrift.Exact ? "badge-ok" : "badge-warn")">
-                                        @SourceDriftText(source.Drift)
-                                    </span>
-                                    <blockquote>@ExcerptAt(current.Body, source.BlockIndex, source.CharStart, source.CharEnd, source.Drift)</blockquote>
-                                    <p>@SourceInputText(source.InputId)</p>
-                                    <p class="hint">相关度 @source.Relevance.ToString("0.00", CultureInfo.InvariantCulture) · @source.Reason</p>
-                                </div>
-                            }
-                        </div>
+                        <button class="btn btn-sm" @onclick="() => BeginTopicDelete(item)" disabled="@(_busy || item.ArticleCount > 0)" title="@(item.ArticleCount > 0 ? "仍有稿件使用此主题" : "删除主题")">删除</button>
                     }
-
-                    @if (current.UnsourcedClaims.Count > 0)
-                    {
-                        <h3>需要人工判断的句子</h3>
-                        @foreach (var claim in current.UnsourcedClaims)
-                        {
-                            <div class="notice warn">
-                                <strong>@ExcerptAt(current.Body, claim.BlockIndex, claim.CharStart, claim.CharEnd, SourceDrift.Exact)</strong>
-                                <br />@claim.Reason
-                            </div>
-                        }
-                    }
-                    else if (current.SourcesCheckedAtUtc is not null)
-                    {
-                        <p class="notice ok">没有发现无法追溯到素材的陈述。</p>
-                    }
-                }
-            }
-
-            <h3>修改这篇文章的主题</h3>
-
-            <p class="hint">
-                改的是<strong>当前工作版本</strong>的主题——主题删除前要求的「迁移相关内容」就是这一步。
-                被淘汰的历史版本上的主题标签不会被改动（那是它当时的判断）。
-            </p>
-
-            @if (_topics.Count == 0)
-            {
-                <p class="notice info">还没有任何主题，先在下面的「主题管理」里新增一个。</p>
-            }
-            else
-            {
-                <div class="form-grid">
-                    <label>
-                        主要主题
-                        <select value="@_primaryTopicToken" @onchange="e => _primaryTopicToken = (string?)e.Value">
-                            <option value="">（不设置）</option>
-                            @foreach (var topic in _topics)
-                            {
-                                <option value="@topic.Topic.Id.ToString()">@topic.Topic.Name</option>
-                            }
-                        </select>
-                    </label>
-                    <label>
-                        次要主题 1
-                        <select value="@_secondaryTopicToken1" @onchange="e => _secondaryTopicToken1 = (string?)e.Value">
-                            <option value="">（不设置）</option>
-                            @foreach (var topic in _topics)
-                            {
-                                <option value="@topic.Topic.Id.ToString()">@topic.Topic.Name</option>
-                            }
-                        </select>
-                    </label>
-                    <label>
-                        次要主题 2
-                        <select value="@_secondaryTopicToken2" @onchange="e => _secondaryTopicToken2 = (string?)e.Value">
-                            <option value="">（不设置）</option>
-                            @foreach (var topic in _topics)
-                            {
-                                <option value="@topic.Topic.Id.ToString()">@topic.Topic.Name</option>
-                            }
-                        </select>
-                    </label>
                 </div>
-
-                <div class="actions">
-                    <button class="btn-primary" @onclick="SaveArticleTopicsAsync" disabled="@_busy">保存主题</button>
-                </div>
-            }
-        }
-    </div>
-}
-
-<div class="card">
-    <div class="card-head">
-        <h2>主题管理</h2>
-        <span class="hint">共 @_topics.Count 个</span>
-    </div>
-
-    @if (_topicRefusalMessage is not null)
-    {
-        <p class="notice error">
-            <strong>@_topicRefusalMessage</strong>
-            <br />
-            <span class="hint">
-                错误码 <code>@_topicRefusalCode</code>。
-                删除守卫只看「稿件当前引用的版本」：请先在上面把引用这个主题的文章迁移到别的主题，再回来删除。
-            </span>
-        </p>
-
-        @if (_topicUsage is { Articles.Count: > 0 } usage)
-        {
-            <div class="table-wrap">
-                <table class="table">
-                    <thead>
-                        <tr>
-                            <th>日期</th>
-                            <th>正在用这个主题的稿件</th>
-                            <th>操作</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        @foreach (var article in usage.Articles)
-                        {
-                            <tr>
-                                <td class="muted">@article.ContentDate</td>
-                                <td>@(string.IsNullOrWhiteSpace(article.Title) ? "（无标题）" : article.Title)</td>
-                                <td>
-                                    <button class="btn btn-sm" @onclick="() => OpenDetailAsync(article.ContentDate)" disabled="@_busy">
-                                        去迁移…
-                                    </button>
-                                </td>
-                            </tr>
-                        }
-                    </tbody>
-                </table>
             </div>
         }
-    }
-
-    @if (_topicMessage is not null)
-    {
-        <p class="notice ok">@_topicMessage</p>
-    }
-
-    <div class="table-wrap">
-        <table class="table">
-            <thead>
-                <tr>
-                    <th>名称</th>
-                    <th>来源</th>
-                    <th>被文章使用</th>
-                    <th>被随想使用</th>
-                    <th>创建时间（本地）</th>
-                    <th>操作</th>
-                </tr>
-            </thead>
-            <tbody>
-                @if (_topics.Count == 0)
-                {
-                    <tr>
-                        <td colspan="6" class="muted">还没有任何主题。自动识别只会把内容归入已存在的主题，所以先建一个。</td>
-                    </tr>
-                }
-
-                @foreach (var item in _topics)
-                {
-                    <tr>
-                        <td>
-                            @if (_renaming == item.Topic.Id)
-                            {
-                                <input value="@_renameName" @onchange="e => _renameName = (string?)e.Value" />
-                            }
-                            else
-                            {
-                                <strong>@item.Topic.Name</strong>
-                                @if (item.Topic.IsMerged)
-                                {
-                                    <span class="badge badge-muted">已合并</span>
-                                }
-                            }
-                        </td>
-                        <td>
-                            <span class="badge @(item.Topic.Origin == TopicOrigin.Model ? "badge-warn" : "badge-ok")">
-                                @AdminLabels.TopicOriginText(item.Topic.Origin)
-                            </span>
-                        </td>
-                        <td>@item.ArticleCount</td>
-                        <td>@item.InputCount</td>
-                        <td class="nowrap">@AdminFormat.When(item.Topic.CreatedAtUtc)</td>
-                        <td>
-                            @if (_renaming == item.Topic.Id)
-                            {
-                                <div class="actions">
-                                    <button class="btn-primary btn-sm" @onclick="SaveRenameAsync" disabled="@_busy">保存</button>
-                                    <button class="btn btn-sm" @onclick="CancelRename" disabled="@_busy">取消</button>
-                                </div>
-                            }
-                            else if (_merging == item.Topic.Id)
-                            {
-                                <div class="stack">
-                                    <span class="hint">把「@item.Topic.Name」合并到另一个主题：随想归属会被改写，本行留作墓碑。</span>
-                                    <select value="@_mergeTargetToken" @onchange="e => _mergeTargetToken = (string?)e.Value">
-                                        <option value="">选择一个目标主题</option>
-                                        @foreach (var candidate in _topics.Where(candidate => candidate.Topic.Id != item.Topic.Id && !candidate.Topic.IsMerged))
-                                        {
-                                            <option value="@candidate.Topic.Id.ToString()">@candidate.Topic.Name</option>
-                                        }
-                                    </select>
-                                    <div class="actions">
-                                        <button class="btn-primary btn-sm" @onclick="() => MergeTopicAsync(item.Topic.Id)" disabled="@_busy">
-                                            确认合并
-                                        </button>
-                                        <button class="btn btn-sm" @onclick="CancelMerge" disabled="@_busy">取消</button>
-                                    </div>
-                                </div>
-                            }
-                            else if (_confirmingDelete == item.Topic.Id)
-                            {
-                                <div class="stack">
-                                    <span class="hint">
-                                        删除只删这个标签：随想的归属会被清空，历史文章对随想的来源引用不动，正文也不动。
-                                        还在被文章使用时服务端会拒绝，并告诉你先迁移哪些文章。
-                                    </span>
-                                    <div class="actions">
-                                        <button class="btn-danger btn-sm" @onclick="() => DeleteTopicAsync(item.Topic.Id)" disabled="@_busy">
-                                            确认删除
-                                        </button>
-                                        <button class="btn btn-sm" @onclick="CancelDelete" disabled="@_busy">取消</button>
-                                    </div>
-                                </div>
-                            }
-                            else
-                            {
-                                <div class="actions">
-                                    <button class="btn btn-sm" @onclick="() => BeginRename(item)" disabled="@_busy">重命名…</button>
-                                    <button class="btn btn-sm" @onclick="() => BeginMerge(item)" disabled="@_busy">合并…</button>
-                                    <button class="btn btn-sm" @onclick="() => BeginDelete(item.Topic.Id)" disabled="@_busy">删除…</button>
-                                </div>
-                            }
-                        </td>
-                    </tr>
-                }
-            </tbody>
-        </table>
+        @if (_topics.Count == 0) { <p class="empty-state">主题库还是空的。</p> }
     </div>
-
-    <div class="form-grid">
-        <label>
-            新增主题（按名称幂等：忽略大小写、空格与标点，「晨 跑」与「晨跑」是同一个）
-            <input value="@_newTopicName" @onchange="e => _newTopicName = (string?)e.Value" placeholder="晨跑" />
-        </label>
-    </div>
-
-    <div class="actions">
-        <button class="btn-primary" @onclick="CreateTopicAsync" disabled="@_busy">新增主题</button>
-        <label class="checkbox">
-            <input type="checkbox" checked="@_includeMerged" @onchange="OnIncludeMergedChanged" />
-            显示已合并的主题（墓碑，只用于对账，不能再被指派）
-        </label>
-    </div>
-</div>
+    <p class="hint">主题只有在没有任何稿件使用时才能删除；删除主题不会删除原始素材。</p>
+</section>
 
 @code {
-    private const int PageSize = 10;
-
-    /// <summary>The server's default list window, mirrored here so the page opens on the same range the API does.</summary>
-    private const int DefaultRangeDays = 31;
-
-    /// <summary>The server's own date-range ceiling (366 days), restated because this page calls the use case directly.</summary>
-    private const int MaxRangeDays = 366;
-
-    private ContentDate _today = default;
-
-    private string? _fromText;
-    private string? _toText;
-
-    private ReflectionPage? _page;
-    private int _pageNumber = 1;
-    private IReadOnlyList<PublicationView> _publications = [];
-
-    private ContentDate? _detailDate;
-    private ReflectionView? _detail;
-    private string? _detailError;
-    private bool _detailLoading;
-    private readonly Dictionary<InputEntryId, InputEntry> _sourceInputs = [];
-    private bool _editingDraft;
-    private string? _draftTitle;
-    private string? _draftSummary;
-    private string? _draftBody;
-    private bool _acceptUnsourcedClaims;
-
-    private IReadOnlyList<TopicSummary> _topics = [];
-    private bool _includeMerged;
-    private string? _newTopicName;
-
-    private TopicId? _renaming;
-    private string? _renameName;
-
-    private TopicId? _merging;
-    private string? _mergeTargetToken;
-
-    private TopicId? _confirmingDelete;
-
-    private string? _topicRefusalCode;
-    private string? _topicRefusalMessage;
-    private TopicUsageView? _topicUsage;
-    private string? _topicMessage;
-
-    private string? _primaryTopicToken;
-    private string? _secondaryTopicToken1;
-    private string? _secondaryTopicToken2;
-
-    private bool _regenerateIgnoreFailures;
-    private bool _regenerateAcceptOverwrite;
-
+    private const string FilterAll = "all";
+    private const string FilterDraft = "draft";
+    private const string FilterPublished = "published";
+    private readonly List<ReflectionView> _articles = [];
+    private readonly List<TopicSummary> _topics = [];
+    private readonly Dictionary<ReflectionId, PublicationStatus> _publicationStatus = [];
+    private readonly List<TopicId> _selectedTopicIds = [];
+    private ReflectionView? _selected;
+    private ReflectionId? _confirmDeleteArticle;
+    private TopicId? _confirmDeleteTopic;
+    private string _filter = FilterAll;
+    private string _search = string.Empty;
+    private string _newTopicName = string.Empty;
+    private bool _busy;
     private string? _message;
     private string? _error;
-    private bool _busy;
-
     private ILogger Logger => LoggerFactory.CreateLogger("DailyMusings.Admin.Content");
 
-    protected override async Task OnInitializedAsync()
-    {
-        _error = await AdminOperation.RunAsync(
-            async () =>
-            {
-                await using var scope = ScopeFactory.CreateAsyncScope();
-                var calendar = await scope.ServiceProvider
-                    .GetRequiredService<IContentCalendarProvider>()
-                    .GetCalendarAsync(CancellationToken.None);
-
-                _today = calendar.ContentDateOf(scope.ServiceProvider.GetRequiredService<IClock>().UtcNow);
-
-                if (string.IsNullOrEmpty(_toText))
-                {
-                    ApplyDefaultRange();
-                }
-
-                await LoadAsync();
-            },
-            Logger);
-    }
-
-    private void ApplyDefaultRange()
-    {
-        _toText = _today.ToString();
-        _fromText = _today.AddDays(-(DefaultRangeDays - 1)).ToString();
-    }
+    protected override async Task OnInitializedAsync() => _error = await AdminOperation.RunAsync(LoadAsync, Logger);
 
     private async Task LoadAsync()
     {
         await using var scope = ScopeFactory.CreateAsyncScope();
         var services = scope.ServiceProvider;
+        var calendar = await services.GetRequiredService<IContentCalendarProvider>().GetCalendarAsync(CancellationToken.None);
+        var today = calendar.ContentDateOf(services.GetRequiredService<IClock>().UtcNow);
+        var page = await services.GetRequiredService<ListReflectionsUseCase>().ExecuteDetailedPageAsync(
+            today.AddDays(-36500), today, page: 1, pageSize: 10000, CancellationToken.None);
+        _articles.Clear(); _articles.AddRange(page.Items.OrderByDescending(item => item.ContentDate));
 
-        if (!ContentDate.TryParse(_fromText, out var from) || !ContentDate.TryParse(_toText, out var to))
+        _publicationStatus.Clear();
+        var publications = await services.GetRequiredService<ListPublicationsUseCase>().ExecuteAsync(2000, CancellationToken.None);
+        foreach (var group in publications.GroupBy(item => item.Publication.ReflectionId))
         {
-            _error = "两个日期都需要写成 YYYY-MM-DD。";
-            return;
+            var status = group.Any(item => item.Publication.Status == PublicationStatus.Published)
+                ? PublicationStatus.Published
+                : group.First().Publication.Status;
+            _publicationStatus[group.Key] = status;
         }
 
-        if (from > to)
+        _topics.Clear();
+        _topics.AddRange(await services.GetRequiredService<ListTopicsWithUsageUseCase>().ExecuteAsync(false, CancellationToken.None));
+
+        if (_selected is not null)
         {
-            _error = "起始日期不能晚于结束日期。";
-            return;
-        }
-
-        // The same bound the API applies to a date range. Enforced here as well, because this page calls the use case
-        // directly: a range nobody capped would load every draft the instance ever produced into one screen.
-        if (to.Value.DayNumber - from.Value.DayNumber + 1 > MaxRangeDays)
-        {
-            _error = $"区间最长 {MaxRangeDays} 天，请缩小范围。";
-            return;
-        }
-
-        _page = await services
-            .GetRequiredService<ListReflectionsUseCase>()
-            .ExecuteDetailedPageAsync(from, to, Math.Max(1, _pageNumber), PageSize, CancellationToken.None);
-
-        // Fetched once for the whole page rather than per row: the list needs to know which days already have an
-        // export record, and one query per row is how a list page ends up owning a join.
-        _publications = await services
-            .GetRequiredService<ListPublicationsUseCase>()
-            .ExecuteAsync(100, CancellationToken.None);
-
-        await LoadTopicsAsync(services);
-    }
-
-    private async Task LoadTopicsAsync(IServiceProvider services)
-    {
-        _topics = await services
-            .GetRequiredService<ListTopicsWithUsageUseCase>()
-            .ExecuteAsync(_includeMerged, CancellationToken.None);
-    }
-
-    private int TotalPages() =>
-        _page is null || _page.Total <= 0
-            ? 1
-            : Math.Max(1, (int)Math.Ceiling(_page.Total / (double)PageSize));
-
-    private bool HasBeenExported(ReflectionId reflectionId) =>
-        _publications.Any(view =>
-            view.Publication.ReflectionId == reflectionId &&
-            view.Publication.Status is PublicationStatus.DraftUploaded or PublicationStatus.Published);
-
-    /// <summary>
-    /// §7: only the current content day can be generated on request, and a confirmed draft has no edge back into
-    /// generation — so the button appears only for today's draft that has neither been confirmed nor exported.
-    /// </summary>
-    private bool CanRegenerate(ReflectionView view) =>
-        view.ContentDate == _today &&
-        view.Status != ReflectionStatus.Confirmed &&
-        !HasBeenExported(view.Id);
-
-    private async Task ReloadAsync() => await RunAsync(async () =>
-    {
-        _detailDate = null;
-        _detail = null;
-        _topicRefusalMessage = null;
-        await LoadAsync();
-    });
-
-    private async Task ApplyRangeAsync() => await RunAsync(async () =>
-    {
-        _pageNumber = 1;
-        _detailDate = null;
-        _detail = null;
-        await LoadAsync();
-    });
-
-    private async Task ResetRangeAsync() => await RunAsync(async () =>
-    {
-        ApplyDefaultRange();
-        _pageNumber = 1;
-        await LoadAsync();
-    });
-
-    private async Task PreviousPageAsync() => await RunAsync(async () =>
-    {
-        _pageNumber = Math.Max(1, _pageNumber - 1);
-        await LoadAsync();
-    });
-
-    private async Task NextPageAsync() => await RunAsync(async () =>
-    {
-        _pageNumber = Math.Min(TotalPages(), _pageNumber + 1);
-        await LoadAsync();
-    });
-
-    private async Task OpenDetailAsync(ContentDate date) => await RunAsync(async () =>
-    {
-        _detailLoading = true;
-
-        try
-        {
-            await using var scope = ScopeFactory.CreateAsyncScope();
-            _detail = await scope.ServiceProvider
-                .GetRequiredService<GetReflectionUseCase>()
-                .ExecuteAsync(date, CancellationToken.None);
-
-            _detailDate = date;
-            _detailError = _detail is null ? "这一天还没有稿件。" : null;
-            _editingDraft = false;
-            _acceptUnsourcedClaims = false;
-            await LoadSourceInputsAsync(scope.ServiceProvider);
-
-            // Pre-select what the article is about right now, so "save" without changes is a no-op.
-            var topics = _detail?.WorkingVersion?.Topics ?? [];
-
-            _primaryTopicToken = topics.FirstOrDefault(topic => topic.IsPrimary)?.Id.ToString();
-            _secondaryTopicToken1 = topics.FirstOrDefault(topic => !topic.IsPrimary)?.Id.ToString();
-            _secondaryTopicToken2 = topics.Count(topic => !topic.IsPrimary) > 1
-                ? topics.Where(topic => !topic.IsPrimary).ElementAt(1).Id.ToString()
-                : null;
-        }
-        finally
-        {
-            _detailLoading = false;
-        }
-    });
-
-    private void CloseDetail()
-    {
-        _detailDate = null;
-        _detail = null;
-        _detailError = null;
-        _sourceInputs.Clear();
-        CancelDraftEdit();
-    }
-
-    private IReadOnlyList<(string Label, ReflectionVersionView Version)> DetailVersions()
-    {
-        if (_detail is null)
-        {
-            return [];
-        }
-
-        var versions = new List<(string Label, ReflectionVersionView Version)>();
-        var seen = new HashSet<ReflectionVersionId>();
-
-        Add("最初版", _detail.InitialVersion);
-        Add("上一版", _detail.PreviousVersion);
-        Add("工作版", _detail.WorkingVersion);
-        return versions;
-
-        void Add(string label, ReflectionVersionView? version)
-        {
-            if (version is not null && seen.Add(version.Id))
-            {
-                versions.Add((label, version));
-            }
+            _selected = _articles.FirstOrDefault(item => item.Id == _selected.Id);
+            SyncSelectedTopics();
         }
     }
 
-    private async Task SwitchVersionAsync(ReflectionVersionId versionId) => await RunAsync(async services =>
+    private IReadOnlyList<ReflectionView> VisibleArticles()
     {
-        if (_detailDate is not { } date)
+        var query = _articles.AsEnumerable();
+        query = _filter switch
         {
-            return;
-        }
-
-        _detail = await services
-            .GetRequiredService<SwitchReflectionVersionUseCase>()
-            .ExecuteAsync(date, versionId, CancellationToken.None);
-
-        _editingDraft = false;
-        _acceptUnsourcedClaims = false;
-        await LoadSourceInputsAsync(services);
-        await LoadAsync();
-        _message = $"已把版本 {versionId} 切换为工作版本。";
-    });
-
-    private void BeginDraftEdit()
-    {
-        if (_detail?.WorkingVersion is not { } version)
+            FilterPublished => query.Where(article => IsPublished(article.Id)),
+            FilterDraft => query.Where(article => !IsPublished(article.Id)),
+            _ => query,
+        };
+        if (!string.IsNullOrWhiteSpace(_search))
         {
-            return;
+            var term = _search.Trim();
+            query = query.Where(article =>
+                article.ContentDate.ToString().Contains(term, StringComparison.OrdinalIgnoreCase) ||
+                (article.WorkingVersion?.Title?.Contains(term, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (article.WorkingVersion?.Summary?.Contains(term, StringComparison.OrdinalIgnoreCase) ?? false));
         }
-
-        _draftTitle = version.Title;
-        _draftSummary = version.Summary;
-        _draftBody = version.Body;
-        _editingDraft = true;
+        return query.ToArray();
     }
 
-    private void CancelDraftEdit()
-    {
-        _editingDraft = false;
-        _draftTitle = null;
-        _draftSummary = null;
-        _draftBody = null;
-    }
+    private bool IsPublished(ReflectionId id) => _publicationStatus.GetValueOrDefault(id) == PublicationStatus.Published;
+    private static string Preview(string? body) => string.IsNullOrWhiteSpace(body) ? "暂无正文" : body.Length <= 90 ? body : body[..90] + "…";
+    private string FilterClass(string value) => _filter == value ? "active" : string.Empty;
+    private void SetFilter(string value) => _filter = value;
 
-    private async Task SaveDraftAsync() => await RunAsync(async services =>
-    {
-        if (_detailDate is not { } date)
-        {
-            return;
-        }
-
-        _detail = await services
-            .GetRequiredService<EditReflectionVersionUseCase>()
-            .ExecuteAsync(date, _draftTitle ?? string.Empty, _draftSummary ?? string.Empty, _draftBody ?? string.Empty, CancellationToken.None);
-
-        CancelDraftEdit();
-        _acceptUnsourcedClaims = false;
-        await LoadSourceInputsAsync(services);
-        await LoadAsync();
-        _message = "稿件已保存。旧正文的来源定位和检查结果已经清除，请重新检查后再确认。";
-    });
-
-    private async Task RunSourceCheckAsync() => await RunAsync(async services =>
-    {
-        if (_detailDate is not { } date || _detail?.WorkingVersionId is not { } versionId)
-        {
-            return;
-        }
-
-        var findings = await services
-            .GetRequiredService<RunUnsourcedStatementCheckUseCase>()
-            .ExecuteAsync(versionId, CancellationToken.None);
-
-        _detail = await services.GetRequiredService<GetReflectionUseCase>().ExecuteAsync(date, CancellationToken.None);
-        _acceptUnsourcedClaims = false;
-        await LoadSourceInputsAsync(services);
-        _message = findings == 0
-            ? "检查完成，没有发现无法追溯到素材的陈述。"
-            : $"检查完成，发现 {findings} 条需要人工判断的陈述。";
-    });
-
-    private async Task ConfirmDraftAsync() => await RunAsync(async services =>
-    {
-        if (_detailDate is not { } date)
-        {
-            return;
-        }
-
-        _detail = await services
-            .GetRequiredService<ConfirmReflectionUseCase>()
-            .ExecuteAsync(
-                date,
-                new DailyMusings.Application.Reflections.ConfirmReflectionRequest(_acceptUnsourcedClaims),
-                CancellationToken.None);
-
-        await LoadSourceInputsAsync(services);
-        await LoadAsync();
-        _message = $"已确认 {date} 的当前版本；现在可以在「发布设置」导出 Markdown。";
-    });
-
-    private async Task LoadSourceInputsAsync(IServiceProvider services)
-    {
-        _sourceInputs.Clear();
-
-        if (_detail?.WorkingVersion is not { } version)
-        {
-            return;
-        }
-
-        var repository = services.GetRequiredService<IInputEntryRepository>();
-        foreach (var id in version.Sources.Select(source => source.InputId).Distinct())
-        {
-            if (await repository.FindByIdAsync(id, CancellationToken.None) is { } entry)
-            {
-                _sourceInputs[id] = entry;
-            }
-        }
-    }
-
-    private string SourceInputText(InputEntryId id)
-    {
-        if (!_sourceInputs.TryGetValue(id, out var input))
-        {
-            return $"来源记录 {id} 已不可读。";
-        }
-
-        var text = input.TranscriptForGeneration;
-        return string.IsNullOrWhiteSpace(text)
-            ? $"{input.ContentDate} 的来源记录已按保留策略清理。"
-            : $"{input.ContentDate}：{text}";
-    }
-
-    private static string ExcerptAt(
-        string body,
-        int blockIndex,
-        int charStart,
-        int charEnd,
-        SourceDrift drift)
-    {
-        var paragraphs = ParagraphSplitter.Split(body);
-        if (blockIndex < 0 || blockIndex >= paragraphs.Count)
-        {
-            return "（原文位置已经不存在）";
-        }
-
-        var paragraph = paragraphs[blockIndex];
-        if (drift != SourceDrift.Exact || charStart < 0 || charEnd < charStart || charEnd > paragraph.Length)
-        {
-            return paragraph;
-        }
-
-        return paragraph[charStart..charEnd];
-    }
-
-    private static string SourceDriftText(SourceDrift drift) => drift switch
-    {
-        SourceDrift.Exact => "定位准确",
-        SourceDrift.Drifted => "正文已改动",
-        _ => "原位置已不存在",
-    };
-
-    private static string SemanticSearchText(SemanticSearchState state) => state switch
-    {
-        { Enabled: false } => "未启用，使用主题与全文匹配",
-        { Available: true } => "可用",
-        _ => "重建中，当前使用降级检索",
-    };
-
-    private async Task RegenerateAsync(ContentDate date) => await RunAsync(async services =>
-    {
-        var result = await services
-            .GetRequiredService<RequestReflectionGenerationUseCase>()
-            .ExecuteAsync(
-                date,
-                manual: true,
-                _regenerateIgnoreFailures,
-                _regenerateAcceptOverwrite,
-                CancellationToken.None);
-
-        if (!result.Decision.Allowed)
-        {
-            _error = $"{AdminLabels.GenerationRefusalText(result.Decision.Code, result.Decision.Detail)}"
-                + $"（{result.Decision.Code}）";
-            return;
-        }
-
-        await LoadAsync();
-        _message = $"已把 {date} 的生成任务放进队列；生成完成后这一页会显示新的一版（旧版仍留在「上一版」槽）。";
-    });
+    private void OpenArticle(ReflectionView article) { _selected = article; _confirmDeleteArticle = null; SyncSelectedTopics(); }
+    private void CloseArticle() { _selected = null; _selectedTopicIds.Clear(); _confirmDeleteArticle = null; }
+    private void SyncSelectedTopics() { _selectedTopicIds.Clear(); _selectedTopicIds.AddRange(_selected?.WorkingVersion?.Topics.Select(topic => topic.Id) ?? []); }
+    private void ToggleTopic(TopicId id, bool selected) { if (selected && !_selectedTopicIds.Contains(id)) _selectedTopicIds.Add(id); else if (!selected) _selectedTopicIds.Remove(id); }
 
     private async Task SaveArticleTopicsAsync() => await RunAsync(async services =>
     {
-        if (_detailDate is not { } date)
-        {
-            return;
-        }
-
-        var primary = ParseTopicToken(_primaryTopicToken);
-        var secondaries = new List<TopicId>();
-
-        foreach (var token in new[] { _secondaryTopicToken1, _secondaryTopicToken2 })
-        {
-            if (ParseTopicToken(token) is { } secondary && secondary != primary && !secondaries.Contains(secondary))
-            {
-                secondaries.Add(secondary);
-            }
-        }
-
-        var updated = await services
-            .GetRequiredService<AssignReflectionVersionTopicsUseCase>()
-            .ExecuteAsync(date, primary, secondaries, CancellationToken.None);
-
-        // Read the view back rather than reporting what was sent: the names on screen are what the instance stored.
-        _detail = await services.GetRequiredService<GetReflectionUseCase>().ExecuteAsync(date, CancellationToken.None);
-
+        if (_selected is null) return;
+        if (_selectedTopicIds.Count == 0) throw new UseCaseException("topic.article.required", "请至少选择一个主题。");
+        await services.GetRequiredService<AssignReflectionVersionTopicsUseCase>().ExecuteAsync(
+            _selected.ContentDate, _selectedTopicIds[0], _selectedTopicIds.Skip(1).ToArray(), CancellationToken.None);
         await LoadAsync();
-
-        _message = $"已把 {date} 的主题改为：{DescribeTopics(_detail?.WorkingVersion?.Topics.Select(topic => topic.Name) ?? Array.Empty<string>())}。"
-            + $"（版本 {updated.Id}）";
-    });
-
-    private static TopicId? ParseTopicToken(string? token) =>
-        Guid.TryParse(token, out var parsed) ? new TopicId(parsed) : null;
-
-    private static string DescribeTopics(IEnumerable<string> names)
-    {
-        var list = names.ToArray();
-        return list.Length == 0 ? "（没有主题）" : string.Join("、", list);
-    }
+    }, "稿件主题已保存。");
 
     private async Task CreateTopicAsync() => await RunAsync(async services =>
     {
-        if (string.IsNullOrWhiteSpace(_newTopicName))
-        {
-            _error = "主题名不能为空。";
-            return;
-        }
+        await services.GetRequiredService<CreateTopicUseCase>().ExecuteAsync(_newTopicName, CancellationToken.None);
+        _newTopicName = string.Empty;
+        await LoadAsync();
+    }, "主题已添加。");
 
-        var (topic, created) = await services
-            .GetRequiredService<CreateTopicUseCase>()
-            .ExecuteAsync(_newTopicName, CancellationToken.None);
-
-        _newTopicName = null;
-        await LoadTopicsAsync(services);
-
-        _topicMessage = created
-            ? $"已新增主题「{topic.Name}」。"
-            : $"已经有一个等价的主题「{topic.Name}」，没有重复创建。";
-    });
-
-    private void BeginRename(TopicSummary item)
+    private void BeginTopicDelete(TopicSummary item)
     {
-        _topicMessage = null;
-        _error = null;
-        _topicRefusalMessage = null;
-        _renaming = item.Topic.Id;
-        _renameName = item.Topic.Name;
+        if (item.ArticleCount > 0) { _error = "还有稿件使用这个主题，请先修改那些稿件的主题。"; return; }
+        _confirmDeleteTopic = item.Topic.Id;
     }
-
-    private void CancelRename() => _renaming = null;
-
-    private async Task SaveRenameAsync() => await RunAsync(async services =>
+    private void CancelTopicDelete() => _confirmDeleteTopic = null;
+    private async Task DeleteTopicAsync(TopicId id) => await RunAsync(async services =>
     {
-        if (_renaming is not { } topicId)
-        {
-            return;
-        }
+        await services.GetRequiredService<DeleteTopicUseCase>().ExecuteAsync(id, CancellationToken.None);
+        _confirmDeleteTopic = null;
+        await LoadAsync();
+    }, "主题已删除。");
 
-        if (string.IsNullOrWhiteSpace(_renameName))
-        {
-            _error = "主题名不能为空。";
-            return;
-        }
-
-        var topic = await services
-            .GetRequiredService<RenameTopicUseCase>()
-            .ExecuteAsync(topicId, _renameName, CancellationToken.None);
-
-        _renaming = null;
-        await LoadTopicsAsync(services);
-
-        // Renaming never touches the article side: the id is what an article stores (§6.2, A.9).
-        _topicMessage = $"已把主题重命名为「{topic.Name}」。文章引用的是主题 ID，所以历史文章的归属不受影响。";
-    });
-
-    private void BeginMerge(TopicSummary item)
+    private void CancelArticleDelete() => _confirmDeleteArticle = null;
+    private async Task DeleteArticleAsync() => await RunAsync(async services =>
     {
-        _topicMessage = null;
-        _error = null;
-        _topicRefusalMessage = null;
-        _merging = item.Topic.Id;
-        _mergeTargetToken = null;
-    }
+        if (_selected is null) return;
+        await services.GetRequiredService<DeleteReflectionUseCase>().ExecuteAsync(_selected.Id, CancellationToken.None);
+        _selected = null; _confirmDeleteArticle = null; _selectedTopicIds.Clear();
+        await LoadAsync();
+    }, "稿件已删除，自动任务不会重新生成这一天。");
 
-    private void CancelMerge()
+    private async Task ReloadAsync() => await RunAsync(async _ => await LoadAsync(), "内容已刷新。");
+
+    private async Task RunAsync(Func<IServiceProvider, Task> work, string success)
     {
-        _merging = null;
-        _mergeTargetToken = null;
-    }
-
-    private async Task MergeTopicAsync(TopicId sourceId) => await RunAsync(async services =>
-    {
-        if (ParseTopicToken(_mergeTargetToken) is not { } targetId)
-        {
-            _error = "请选择一个目标主题。";
-            return;
-        }
-
-        var (source, target, remapped) = await services
-            .GetRequiredService<MergeTopicsUseCase>()
-            .ExecuteAsync(sourceId, targetId, CancellationToken.None);
-
-        _merging = null;
-        _mergeTargetToken = null;
-        await LoadTopicsAsync(services);
-
-        _topicMessage = $"已把「{source.Name}」合并到「{target.Name}」，改写了 {remapped} 条随想的归属；"
-            + "被合并的主题留作墓碑，历史文章的来源映射没有变化。";
-    });
-
-    private void BeginDelete(TopicId topicId)
-    {
-        _topicMessage = null;
-        _error = null;
-        _topicRefusalMessage = null;
-        _topicUsage = null;
-        _confirmingDelete = topicId;
-    }
-
-    private void CancelDelete() => _confirmingDelete = null;
-
-    /// <summary>
-    /// Deletes a topic. The refusal is caught here rather than left to the guard because the code matters to the
-    /// operator: <c>topic.in_use</c> means "go and re-file those articles first", and the page can then show
-    /// exactly which ones. Anything else still travels out to <c>AdminOperation</c> as usual.
-    /// </summary>
-    private async Task DeleteTopicAsync(TopicId topicId) => await RunAsync(async services =>
-    {
+        _busy = true; _message = null; _error = null;
         try
         {
-            var topic = await services
-                .GetRequiredService<DeleteTopicUseCase>()
-                .ExecuteAsync(topicId, CancellationToken.None);
-
-            _confirmingDelete = null;
-            _topicRefusalMessage = null;
-            _topicUsage = null;
-            await LoadTopicsAsync(services);
-
-            _topicMessage = $"已删除主题「{topic.Name}」。随想上的归属被清空，正文与来源映射都没有改动。";
-        }
-        catch (UseCaseException exception) when (exception.Code is "topic.in_use" or "topic.merge_target")
-        {
-            // The use case's own words are shown verbatim: they name the operation to perform next.
-            _topicRefusalCode = exception.Code;
-            _topicRefusalMessage = exception.Message;
-
-            _topicUsage = await services
-                .GetRequiredService<GetTopicUsageUseCase>()
-                .ExecuteAsync(topicId, CancellationToken.None);
-        }
-    });
-
-    private async Task OnIncludeMergedChanged(ChangeEventArgs args) => await RunAsync(async services =>
-    {
-        _includeMerged = args.Value is true;
-        await LoadTopicsAsync(services);
-    });
-
-    /// <summary>
-    /// The single funnel every handler on this page goes through. The body runs inside <c>AdminOperation</c>: an
-    /// exception escaping an <c>@onclick</c> handler terminates the Blazor circuit, after which every control on the
-    /// page is inert — which the operator reports as 「保存 点不了」.
-    /// </summary>
-    private Task RunAsync(Func<Task> work) => RunAsync(_ => work());
-
-    private async Task RunAsync(Func<IServiceProvider, Task> work)
-    {
-        _busy = true;
-        _message = null;
-        _error = null;
-
-        try
-        {
-            var failure = await AdminOperation.RunAsync(
-                async () =>
-                {
-                    await using var scope = ScopeFactory.CreateAsyncScope();
-                    await work(scope.ServiceProvider);
-                },
-                Logger);
-
-            if (failure is not null)
+            var failure = await AdminOperation.RunAsync(async () =>
             {
-                _error = failure;
-            }
+                await using var scope = ScopeFactory.CreateAsyncScope();
+                await work(scope.ServiceProvider);
+            }, Logger);
+            if (failure is null) _message = success; else _error = failure;
         }
-        finally
-        {
-            _busy = false;
-        }
+        finally { _busy = false; }
     }
 }

@@ -65,6 +65,11 @@ public sealed class ProbeExternalServiceUseCase
 
     public Task<ProbeResult> ExecuteAsync(ExternalService service, CancellationToken cancellationToken) =>
         _probe.ProbeAsync(service, cancellationToken);
+
+    public Task<ProbeResult> ExecuteModelAsync(
+        ModelEndpointProbeRequest request,
+        CancellationToken cancellationToken) =>
+        _probe.ProbeModelAsync(request, cancellationToken);
 }
 
 /// <summary>

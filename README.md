@@ -18,7 +18,7 @@
 
 1. **不再做电脑端。** Windows 客户端整体退出范围：`net10.0-windows` 目标、`Platforms/Windows/` 下的 WinUI 外壳与 `MediaCapture`/`MediaPlayer` 实现、`Package.appxmanifest`、以及 README 与 `docs/发布校验值.md` 里的 MSIX 留档，全部删除。客户端只剩 Android。
 2. **最终交付只做 Hexo。** WordPress 退出范围，而且不是「留着不用」——相关实现、配置、契约、界面与验收步骤都已从仓库里删除：`PublishTargetType.WordPress`、`IRemotePublisher` / `WordPressSite` / `RemoteArticle`、`WordPressRestPublisher`、每目标站点覆盖（`IWordPressSiteOverrideStore`、`UpdateWordPressSiteOverrideUseCase`、`/api/publish-targets/{id}/wordpress`、`WordPressSiteDto`）、`ExternalService.WordPress` 探测、管理页的站点设置区块、`wordpress-application-password` 这个 Secret，以及验收脚本里的真实 WordPress 环节。
-3. **要求进一步降为「生成一个 md 文件」。** Hexo 要的就是 Markdown 加一点 front matter，所以当前范围只承诺**产出一份 `.md`**；让它更贴合某个具体 Hexo 站点的约定（字段集合、`_drafts` / `_posts` 分流、文件名风格）是后续的格式微调，不进当前完成定义。
+3. **要求进一步降为「生成一个 md 文件」。** Hexo 要的就是 Markdown 加一点 front matter，所以这一轮先只承诺**产出一份 `.md`**。这里记录的是当时的范围；稿件/发布目录与 front matter 已在 2026-09-28 的管理端重做中补齐。
 
 这次收窄带出两个必须说明的后果：
 
@@ -45,9 +45,19 @@
 
 这一轮的部署实例自检（`tools/deploy/verify-instance.ps1`，25 项）全部通过，手机端在 MuMu 模拟器（Android 12）上完成了真机验收。
 
+## 2026-09-28 管理端与部署重做
+
+本轮按实际使用流程重新划分了管理端职责，并修复了模型测试与来源检查会“假成功”或长时间卡住的问题（定案记录见 [`docs/开发指导.md`](docs/开发指导.md) 附录 A.19）：
+
+- **模型管理**：文章生成的新实例默认值改为 DeepSeek（`https://api.deepseek.com` / `deepseek-flash` / `deepseek-api-key`）；页面只填写 API Key，不再暴露内部 Secret 名。测试连接会使用页面中尚未保存的 Base URL 与 API Key 实际请求 `/models`，无效 URL、缺少密钥、认证失败或网络失败都会如实报错。
+- **发布设置**：只负责立即生成、立即发布、每日生成/发布时间、自动发布开关与执行窗口、草稿/正式稿输出目录，以及 Hexo front matter 模板。生成完成后会在草稿目录写入 `draft: true` 的文件；发布会在正式目录写入 `draft: false` 的文件。
+- **内容管理**：只负责搜索、筛选、查看和删除已生成/已发布稿件，以及为每篇稿件分配一个或多个主题。用户可添加或删除主题，模型只能添加；仍被稿件使用的主题不允许删除。删除稿件会清除数据库中的正文、版本和发布记录，并留下日期墓碑防止调度器重新生成；已经输出到磁盘的 Markdown 不会被删除。
+- **Compose 持久化**：启动时必须在 `deploy/.env` 指定一个配置目录和一个数据目录，Compose 只映射这两个宿主机目录；数据库、媒体与全部稿件均归入数据目录，DataProtection 密钥和管理页保存的凭据归入配置目录。
+- **来源检查可靠性**：模型请求的超时现在覆盖响应头和响应体读取全过程。服务商只返回响应头却不结束正文时，任务会按 `generation.timeout` 失败并进入既有重试，而不会无限保持运行中。
+
 ## 当前进度
 
-**阶段一（领域骨架与部署）、阶段二（Android 输入闭环）、阶段三（主题与每日生成）、阶段四（通知与发布）、阶段五（运维与交付）与 2026-09-24 的方向收缩轮均已完成。**
+**阶段一（领域骨架与部署）、阶段二（Android 输入闭环）、阶段三（主题与每日生成）、阶段四（通知与发布）、阶段五（运维与交付）、2026-09-24 的方向收缩轮与 2026-09-28 的管理端/部署重做均已完成。**
 
 已实现：
 
@@ -55,13 +65,13 @@
 - `DailyMusings.Application` —— 端口与用例：管理员初始化 / 登录 / 强制改密、配对码签发与兑换、设备管理、系统健康聚合、输入接收与维护、任务查询与重试、主题、历史检索、生成编排、无来源陈述检查、Embedding 索引；阶段四补充导出目标的增改与自动导出开关（`SetAutomaticPublishUseCase` 强制校验管理员密码）、导出排队 / 执行 / 重试 / 检查文件差异 / 三种处置（覆盖、保留两边，以及一个恒定被拒绝的「拉取」）、通知的排队与发送、内容与导出时间配置；阶段五补充可读导出与完整备份的组装（含清单与「哪些东西按定案不进包」的声明）、恢复暂存与校验、音频清理、调试模式、外部服务探测与索引重建。
 - `DailyMusings.Infrastructure` —— SQLite 自动向前迁移、仓储、Docker Secrets、目录约定、PBKDF2-SHA256、健康探针、音频存储、OpenAI 兼容转写 / 生成 / Embedding 适配器、**真正消费任务的后台执行器**（独占认领、指数退避、重启恢复、分批续跑）、**调度器**（生成时刻、逐日补跑、Embedding 指纹变化时重建、导出时刻、执行窗口、过期与失效）、**Markdown 安全写入**（临时文件 + 原子改名、只覆盖自己写过且未被改动的文件、同名时按版本号让位）、**SMTP 通知发送**；阶段五补充**导出写入器**（先写 `.partial` 再改名、同名时让位而不是覆盖、清单放包根）、**备份写入器**（`VACUUM INTO` 快照 + 剥离设备令牌再 `VACUUM` 重建文件 + zip + 按名字而非文件系统时间裁剪保留份数）、**恢复服务**（包外一律不动：校验 schema 版本、拒绝 zip-slip、拒绝含设备令牌的包，随后写入 `restore-pending.json`，由下次启动应用并保留 `pre-restore-*.db`）、**启动期应用恢复**、音频清理与备份任务、**调试模式与应用设置存储**、**外部服务探测**（转写 / 生成 / Embedding 用 `/models`，SMTP 只读问候语）。方向收缩轮删除了 WordPress REST 客户端、每目标站点覆盖存储，以及那条探测。
 - `DailyMusings.Server` —— ASP.NET Core 宿主：启动即迁移与初始化管理员、Cookie 登录、设备 Bearer 令牌认证、强制改密闸门、结构化错误码、统一异常处理，以及输入 / 任务 / 主题 / 稿件 / 来源 / 语义检索 / 导出目标 / 导出记录 / 通知设置 / 内容设置 API；阶段五补充管理员专属的导出、备份、恢复、清理、索引与诊断（测试连接、四小时上限的调试模式）接口，以及 `GET /api/inputs/{id}/audio`。方向收缩轮删除 WordPress 站点设置路由，并让 `POST /api/publish-targets` 只接受 `type: "markdown"`。
-- `DailyMusings.Admin` —— Blazor 管理页，**八个功能区**（2026-09-24 第二轮重做，附录 A.18）：**状态**（今日随想数量、稿件与发布计数、设备与队列计数、能力状态、存储占用、健康检查）、**设备**（配对码、已连接 / 已撤销、撤回授权、更换令牌、删除已撤销记录）、**数据管理**（从新到旧逐条看随想，修订文字，录音行带播放条）、**模型管理**（转写 / 生成 / Embedding 三块，只填写 API Key，不暴露内部 Secret 名）、**通知管理**（SMTP 全套 + 收件地址 + 事件开关 + 真发一封测试邮件）、**发布设置**（立即生成、立即发布、自动发布时刻与窗口、Markdown 导出目标与检查文件 / 覆盖 / 保留两边）、**内容管理**（查看来源与存疑句、编辑/切换/确认版本、重新生成、迁移文章主题 + 主题管理）、**系统设置**（监听端口、自动备份、备份与导出 / 恢复、两条保留策略、语义索引、日志与调试、通知快捷入口、修改账号与密码）。另有一个不在菜单里的 `/inputs`：按日期看某一天的随想与当天草稿。
+- `DailyMusings.Admin` —— Blazor 管理页，**八个功能区**：**状态**（今日随想数量、稿件与发布计数、设备与队列计数、能力状态、存储占用、健康检查）、**设备**（配对码、已连接 / 已撤销、撤回授权、更换令牌、删除已撤销记录）、**数据管理**（从新到旧逐条看随想，修订文字，录音行带播放条）、**模型管理**（转写 / 生成 / Embedding 三块，只填写 API Key，不暴露内部 Secret 名，并用当前表单值真实测试连接）、**通知管理**（SMTP 全套 + 收件地址 + 事件开关 + 真发一封测试邮件）、**发布设置**（立即生成/发布、生成/发布时间、自动发布、草稿/正式稿目录、Hexo front matter）、**内容管理**（筛选、搜索、查看、删除稿件，为稿件分配一个或多个主题并管理主题库）、**系统设置**（监听端口、自动备份、备份与导出 / 恢复、两条保留策略、语义索引、日志与调试、通知快捷入口、修改账号与密码）。另有一个不在菜单里的 `/inputs`：按日期看某一天的随想与当天草稿。
 - `DailyMusings.Client.Core` / `DailyMusings.Client` —— 与界面无关的客户端逻辑（本机记录、上传与重试、配对与令牌）+ MAUI 界面，**只有 Android 一个目标**。手机端只有三个页面（附录 A.18）：**今日随想**（占屏中央的大圆圈录音 + 一键切换手动输入 + 本条的播放 / 进度 / 暂停 / 删除 + 显式的「上传」按钮）、**日历**（一行一条、必标时间、点开看完整内容与录音、按新到旧 / 旧到新 / 今日 / 昨日 / 本周 / 本月筛选）、**设置**（服务器地址与风险确认、测试连接、配对与解除、本机记录占用与清空、实例上的模型名）。**本机记录上传成功后不再删除**：手机是往期记录的事实来源。录音与回放由 `IAudioRecorder` / `IAudioPlayer` 的 Android 实现承担，音频以 `.partial` 再改名的缓存落盘。读取结果统一成 `ApiResult<T>`（送达 / 被拒绝 / 未送达），界面一律如实说明而不是抛异常。
-- `deploy/` —— Dockerfile、Compose、环境与 Secrets 示例（三份 Secret，不再有 WordPress 的那份）。
+- `deploy/` —— Dockerfile、Compose、环境与 Secrets 示例（四份 Secret：DeepSeek 生成、OpenAI 转写、Embedding 与 SMTP）。
 
 ## 已知的实现取舍
 
-- **模型与 SMTP 既可以由部署配置提供，也可以在管理页配置**。读取顺序是「管理页设置 → 部署配置 → 内置默认」，同一个实例可以只用其中一种，老实例的 `Transcription:` / `Generation:` / `Embedding:` / `Smtp:` 行为不变；管理页保存后**下一次调用即生效，不需要重启**（提供方每次调用都重读设置表）。**密钥的值有两种给法**（第二轮起）：直接在管理页填写，或放进 Docker Secrets。前者加密存放在实例根目录之外（与 DataProtection 密钥环同一个卷），所以原来的三条承诺没有变——不进配置表、不进导出、不进备份；页面只显示「有没有、来源是哪里」，读不回明文。解析顺序是「管理页填的 → Secret 文件 → 环境变量」。内容时区与生成 / 导出时刻在发布设置的「自动发布」里。转写、生成、Embedding、SMTP 默认**全部关闭**，未配置时不会把任何内容发往任何地方；生成关闭时调度器不会往队列里塞任务。通知偏好反过来：设备令牌**可以读**，但**只有管理员能改**——设备令牌若能改收件地址，就等于能把当天的标题发到别人邮箱。
+- **模型与 SMTP 既可以由部署配置提供，也可以在管理页配置**。读取顺序是「管理页设置 → 部署配置 → 内置默认」，同一个实例可以只用其中一种，老实例的 `Transcription:` / `Generation:` / `Embedding:` / `Smtp:` 行为不变；管理页保存后**下一次调用即生效，不需要重启**（提供方每次调用都重读设置表）。**密钥的值有两种给法**（第二轮起）：直接在管理页填写，或放进 Docker Secrets。前者加密存放在实例根目录之外（部署里是配置目录下的 `keys/ui-secrets`，与 DataProtection 密钥环同处一个不进备份的目录），所以原来的三条承诺没有变——不进配置表、不进导出、不进备份；页面只显示「有没有、来源是哪里」，读不回明文。解析顺序是「管理页填的 → Secret 文件 → 环境变量」。内容时区与生成 / 导出时刻在发布设置的「自动发布」里。转写、生成、Embedding、SMTP 默认**全部关闭**，未配置时不会把任何内容发往任何地方；生成关闭时调度器不会往队列里塞任务。通知偏好反过来：设备令牌**可以读**，但**只有管理员能改**——设备令牌若能改收件地址，就等于能把当天的标题发到别人邮箱。
 - **`§13` 的接口表里没有「创建主题」**，而没有它主题功能无法使用（自动识别只把内容归入已存在的主题）。因此增加了 `POST /api/topics`，按名称创建且幂等（忽略大小写、空格与标点）。
 - **§13 的接口表里没有「取回录音」**，而 A.1 保留音频 30 天的理由正是「用户事后能核对转写是否有误」，§15.2 第 6 步也要求恢复后的实例里语音可播放。因此增加了 `GET /api/inputs/{id}/audio`（与其它输入接口同权限，支持 Range 请求以便播放器拖动）。
 - **文件就是「远端」。** 定向差分（`check-remote`）比的是导出文件当下的哈希与记录里那次写入的哈希，所以「远端改了」的意思是**有人在编辑器里动过那个文件**。三种处置里「拉取」恒定不可用：导出的文件是用户自己的，把它抄回草稿会让导出目录变成第二份事实来源。它保留在契约里，只为给出一个说明清楚的拒绝（`publication.pull.not_supported`）而不是静默失败。
@@ -121,16 +131,16 @@ Storage__RootPath=/var/lib/dailymusings dotnet run --project src/DailyMusings.Se
 
 ```bash
 Generation__Enabled=true \
-Generation__BaseUrl=https://api.example.com/v1 \
-Generation__Model=gpt-4o-mini \
-Generation__SecretName=openai-api-key \
+Generation__BaseUrl=https://api.deepseek.com \
+Generation__Model=deepseek-flash \
+Generation__SecretName=deepseek-api-key \
 Storage__SecretsPath=/run/secrets \
 dotnet run --project src/DailyMusings.Server
 ```
 
 `Embedding__Enabled=true` 需另行开启；关掉它产品照常工作，历史检索退化为主题标签与全文匹配（§8.3）。
 
-要在本地看到 Markdown 产物，在管理页的「发布目标」里加一个 Markdown 目标（例如目录留空即 markdown 根目录），确认某天的草稿后点导出即可。
+要在本地看到 Markdown 产物，在「发布设置」配置稿件输出目录和稿件发布目录。生成完成会自动写出带 `draft: true` 的草稿；确认并发布后写出 `draft: false` 的文件。
 
 ## 运行测试
 
@@ -140,9 +150,9 @@ dotnet test
 
 覆盖范围：§17.1 列出的领域规则；迁移与仓储的原子性（含配对码只能被兑换一次的并发用例、一个真实的外键顺序回归，以及文件存储的「先落盘后引用」）；用例层；客户端离线队列（含「本地副本只在服务端确认后才删除」的顺序断言与幂等键复用）；以及走真实 HTTP 的端到端流程——阶段一的完整流程，阶段二的上传 → 执行器认领 → 转写端点 → 结果落库，阶段三的采集 → 主题识别 → 语义检索 → 生成 → 来源映射 → 无来源陈述检查 → 确认，阶段四的导出排队 / 执行 / 文件差异，以及阶段五的取回录音（含 Range 与未配对者被拒）、导出 / 备份 / 裁剪 / 恢复校验 / 音频清理。外部服务一律使用可控桩端点。
 
-方向收缩轮之后的实际数字：**519 项通过**（Domain 231、Application 27、Infrastructure 151、Client 48、Api.Integration 62）。发布相关的测试现在断言的是磁盘上的文件本身：`draft` 字段随可见性变化、重复导出不会覆盖不是自己写的文件、外部改动被判为差异而不是可重试的失败。第二轮撤掉手机端草稿 / 主题 / 来源核验后，Client 从 74 项降到 48 项——删掉的是不再存在的能力，不是被跳过的测试。
+当前测试基线：**536 项通过**（Domain 231、Application 30、Infrastructure 161、Client 48、Api.Integration 66）。发布相关的测试直接断言磁盘文件：`draft` 字段随可见性变化、重复导出不会覆盖非本系统写入的文件、外部改动会被判为差异而不是可重试失败；另外覆盖模型候选配置探测、生成响应体超时，以及设备页配对按钮可点击回归。手机端只保留采集与查看能力，稿件、主题和发布统一由管理端负责。
 
-除 `dotnet test` 之外还有两套脚本，见 [`tools/deploy/`](tools/deploy/)：`deploy.ps1` 把工作树部署到远程主机（停容器 → 删旧镜像 → 构建 → 启新镜像 → 等健康检查），`verify-instance.ps1` 在部署好的实例上跑 25 项端到端自检，`configure-instance.ps1` 把实例配成可验收状态，`android-ui.ps1` 用 adb 驱动手机界面，`test-doubles.sh` 起模型桩与邮件接收端。
+除 `dotnet test` 之外还有部署验收脚本，见 [`tools/deploy/`](tools/deploy/)：`deploy.ps1` 把工作树部署到远程主机（停容器 → 删旧镜像 → 构建 → 启新镜像 → 等健康检查），`reset-instance.ps1` 在明确需要全新实例时清空配置/数据目录与旧命名卷，`verify-instance.ps1` 在部署好的实例上跑 25 项端到端自检，`configure-instance.ps1` 把实例配成可验收状态，`android-ui.ps1` 用 adb 驱动手机界面，`test-doubles.sh` 起模型桩与邮件接收端。
 
 此外还有一层**不在 `dotnet test` 之内**的验收脚本：它对着真实 SMTP 接收端、真实的导出目录和真实 Docker 部署跑 §17.3 与 §15.2，见 [`tools/acceptance/`](tools/acceptance/README.md)。脚本已按新范围改写（去掉 WordPress 环节，补上 Markdown 的草稿 → 公开 → 手改 → 差异这几步），**但尚未在新范围下重跑过**。
 
@@ -161,15 +171,18 @@ dotnet build src/DailyMusings.Client -f net10.0-android -c Release -t:SignAndroi
 ## Docker Compose 部署
 
 ```bash
+cp deploy/.env.example deploy/.env               # 填写两个宿主机绝对目录
+sudo mkdir -p /srv/dailymusings/config /srv/dailymusings/data
+sudo chown -R 1654:1654 /srv/dailymusings/config /srv/dailymusings/data
 cp -r deploy/secrets.example deploy/secrets     # 填入真实密钥（该目录已被 gitignore）
-docker compose -f deploy/compose.yaml up -d --build
-docker compose -f deploy/compose.yaml logs app | grep INITIAL-ADMIN-PASSWORD
+docker compose --env-file deploy/.env -f deploy/compose.yaml up -d --build
+docker compose --env-file deploy/.env -f deploy/compose.yaml logs app | grep INITIAL-ADMIN-PASSWORD
 ```
 
 - 单一实例。数据库驱动的任务队列假定只有一个执行器，**不要**横向扩容。
-- 全部持久状态都在 `dailymusings-state` 卷里（数据库、音频、导出、Markdown 输出、备份），备份与迁移只需处理它。
-- 另有 `dailymusings-keys` 卷存放 DataProtection 密钥环。它放在实例根目录**之外**是有意的：这个密钥环签发管理员登录 Cookie，属凭据等价物，放进实例卷就等于让每份备份都带着伪造会话的能力。删掉它会让所有管理员登出，但**不要**把它纳入备份。
-- 密钥通过 Docker Secrets 以**文件名**引用，不进配置文件、不进日志、不进备份。现在有三份：`openai-api-key`、`embedding-api-key`、`smtp-password`。
+- `deploy/.env` 必须指定 `DAILYMUSINGS_CONFIG_DIR` 与 `DAILYMUSINGS_DATA_DIR`；Compose 只有这两个持久目录映射，路径不存在时会直接拒绝启动。
+- 数据目录保存数据库、音频、导出、备份和 `markdown/` 下的全部稿件；配置目录保存 `runtime.json` 与 DataProtection 密钥环。备份内容时只备份数据目录，配置目录应单独保护。
+- 密钥通过 Docker Secrets 以**文件名**引用，不进配置文件、不进日志、不进备份。默认文件为：`deepseek-api-key`（文章生成）、`openai-api-key`（语音转写）、`embedding-api-key`、`smtp-password`。
 - 从 1.0.0 之前的实例升级上来时，启动会自动执行 `0006_markdown_only`，**WordPress 目标与其发布历史会在那一步被删除**——先备份。
 
 ## 安全须知

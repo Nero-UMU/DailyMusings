@@ -209,6 +209,31 @@ public sealed class GetReflectionUseCase
 /// <summary>One page of drafts plus the total a pager needs.</summary>
 public sealed record ReflectionPage(IReadOnlyList<ReflectionView> Items, int Total);
 
+/// <summary>Deletes one article and leaves a date tombstone so scheduled generation cannot silently recreate it.</summary>
+public sealed class DeleteReflectionUseCase
+{
+    private readonly IReflectionRepository _reflections;
+    private readonly IUnitOfWork _unitOfWork;
+    private readonly IClock _clock;
+
+    public DeleteReflectionUseCase(IReflectionRepository reflections, IUnitOfWork unitOfWork, IClock clock)
+    {
+        _reflections = reflections;
+        _unitOfWork = unitOfWork;
+        _clock = clock;
+    }
+
+    public async Task ExecuteAsync(ReflectionId reflectionId, CancellationToken cancellationToken)
+    {
+        var reflection = await _reflections.FindByIdAsync(reflectionId, cancellationToken).ConfigureAwait(false)
+            ?? throw new UseCaseException("reflection.unknown", "这篇稿件已经不存在。");
+
+        await using var transaction = await _unitOfWork.BeginAsync(cancellationToken).ConfigureAwait(false);
+        await _reflections.DeleteAsync(reflection, _clock.UtcNow, cancellationToken).ConfigureAwait(false);
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+    }
+}
+
 /// <summary>Lists drafts over a date range, for the calendar page (§9.3).</summary>
 public sealed class ListReflectionsUseCase
 {

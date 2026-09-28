@@ -1,10 +1,11 @@
 # 每日随想 — single-instance self-hosted deployment (docs/开发指导.md §3.1, §14).
 #
-# Run from the repository root:
-#   docker compose -f deploy/compose.yaml up -d --build
+# First copy deploy/.env.example to deploy/.env and set the two absolute host directories.
+# Then run from the repository root:
+#   docker compose --env-file deploy/.env -f deploy/compose.yaml up -d --build
 #
 # Read the generated administrator password once, at first start:
-#   docker compose -f deploy/compose.yaml logs app | grep INITIAL-ADMIN-PASSWORD
+#   docker compose --env-file deploy/.env -f deploy/compose.yaml logs app | grep INITIAL-ADMIN-PASSWORD
 
 name: dailymusings
 
@@ -24,7 +25,7 @@ services:
       ASPNETCORE_URLS: http://+:${DAILYMUSINGS_INTERNAL_PORT:-18321}
       Storage__RootPath: /var/lib/dailymusings
       Storage__SecretsPath: /run/secrets
-      Storage__KeyRingPath: /var/lib/dailymusings-keys
+      Storage__KeyRingPath: /var/lib/dailymusings-config/keys
       Storage__RuntimeConfigPath: /var/lib/dailymusings-config/runtime.json
       # Mirrors the port above so the healthcheck can fall back to it when there is no admin-page override.
       DM_INTERNAL_PORT: "${DAILYMUSINGS_INTERNAL_PORT:-18321}"
@@ -59,34 +60,30 @@ services:
       - "${DAILYMUSINGS_HTTP_PORT:-18321}:${DAILYMUSINGS_INTERNAL_PORT:-18321}"
 
     volumes:
-      # Everything durable: SQLite database, audio, exports, Markdown output and backups. This is the backup set.
-      - dailymusings-state:/var/lib/dailymusings
-
-      # The DataProtection key ring, kept out of the backup set on purpose: it signs the administrator's auth
-      # cookies, so a backup containing it would be a way to forge a session (§10.4, decision A.13). It is
-      # persisted at all so that recreating the container does not silently log the operator out.
-      - dailymusings-keys:/var/lib/dailymusings-keys
-
-      # The bootstrap overrides file (the admin-chosen listening port). Its own volume because it has to survive a
-      # recreate — the port would otherwise revert on every deploy — and because it must not travel with a backup.
-      - dailymusings-config:/var/lib/dailymusings-config
-
-      # WHERE THE MARKDOWN GOES. With the volumes above alone, the exported .md files are written inside the state
-      # volume — safe, backed up, and invisible to your blog. A publish target's directory is a path *relative to
-      # the markdown root*, so to get files into a Hexo checkout, mount that checkout (or a directory inside it)
-      # over the markdown root or over one of its subdirectories:
+      # Exactly two user-selected bind mounts. Both source paths are required in deploy/.env, must already exist,
+      # and must be writable by the container user (uid 1654). create_host_path=false prevents Docker from hiding
+      # a typo by silently creating a root-owned directory.
       #
-      #   - /home/you/Blog/source/_drafts:/var/lib/dailymusings/markdown/hexo
-      #
-      # Left commented on purpose: an active bind mount of a host path that does not exist is created by Docker as
-      # an empty root-owned directory, which hides the mistake instead of reporting it. Uncomment it, fix the host
-      # path, and give the container's user (uid 1654) write access — otherwise exports fail with a permission
-      # error that looks like a product bug.
-      # - /home/you/Blog/source/_drafts:/var/lib/dailymusings/markdown/hexo
+      # Configuration: runtime.json plus the DataProtection key ring under keys/. Keep this directory out of the
+      # ordinary content backup because possession of the key ring is equivalent to possession of login cookies.
+      - type: bind
+        source: ${DAILYMUSINGS_CONFIG_DIR:?请在 deploy/.env 中设置 DAILYMUSINGS_CONFIG_DIR}
+        target: /var/lib/dailymusings-config
+        bind:
+          create_host_path: false
+
+      # Data: SQLite, audio, backups, readable exports and every generated/published manuscript. Drafts and posts
+      # are stored below ${DAILYMUSINGS_DATA_DIR}/markdown/<发布设置中的相对目录> on the host.
+      - type: bind
+        source: ${DAILYMUSINGS_DATA_DIR:?请在 deploy/.env 中设置 DAILYMUSINGS_DATA_DIR}
+        target: /var/lib/dailymusings
+        bind:
+          create_host_path: false
 
     secrets:
       # Names only. Values are read from files at run time and never appear in configuration, logs or backups.
       - openai-api-key
+      - deepseek-api-key
       - embedding-api-key
       - smtp-password
 
@@ -106,14 +103,11 @@ services:
       retries: 5
       start_period: 30s
 
-volumes:
-  dailymusings-state:
-  dailymusings-keys:
-  dailymusings-config:
-
 # Copy deploy/secrets.example/* into deploy/secrets/ and fill in real values before starting.
 # deploy/secrets/ is gitignored on purpose.
 secrets:
+  deepseek-api-key:
+    file: ./secrets/deepseek-api-key
   openai-api-key:
     file: ./secrets/openai-api-key
   embedding-api-key:

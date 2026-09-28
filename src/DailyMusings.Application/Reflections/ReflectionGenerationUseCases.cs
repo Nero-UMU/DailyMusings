@@ -82,6 +82,16 @@ public sealed class RequestReflectionGenerationUseCase
                                GenerationRules.HasBlockingTranscriptionFailures(dayInputs);
 
         var reflection = await _reflections.FindByContentDateAsync(contentDate, cancellationToken).ConfigureAwait(false);
+
+        if (reflection is null && await _reflections.IsDeletedAsync(contentDate, cancellationToken).ConfigureAwait(false))
+        {
+            return new ReflectionGenerationRequestResult(
+                contentDate,
+                GenerationDecision.Block("reflection.deleted", "这一天的稿件已被你删除，不会自动重新生成。"),
+                null,
+                null);
+        }
+
         var status = reflection?.Status;
 
         GenerationDecision decision;

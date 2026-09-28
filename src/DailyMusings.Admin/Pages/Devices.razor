@@ -10,7 +10,7 @@
 <PageHeader Title="设备"
             Hint="每台设备用自己独立的令牌访问实例，令牌以哈希保存、可单独轮换或撤回。撤回在下一次请求即生效，不需要重启服务。">
     <Actions>
-        <button class="btn btn-primary" @onclick="IssueCodeAsync" disabled="@_busy || _issuingCode">
+        <button class="btn btn-primary" @onclick="IssueCodeAsync" disabled="@(_busy || _issuingCode)">
             @(_issuingCode ? "正在签发…" : "生成配对码")
         </button>
     </Actions>

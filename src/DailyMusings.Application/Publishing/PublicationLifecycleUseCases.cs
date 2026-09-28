@@ -1,5 +1,6 @@
 using DailyMusings.Application.Abstractions;
 using DailyMusings.Application.Jobs;
+using DailyMusings.Application.Configuration;
 using DailyMusings.Domain.Common;
 using DailyMusings.Domain.Inputs;
 using DailyMusings.Domain.Jobs;
@@ -171,6 +172,7 @@ public sealed class CheckRemoteUseCase
     private readonly IPublishDestinationProvider _destinations;
     private readonly IMarkdownWriter _markdown;
     private readonly IClock _clock;
+    private readonly IContentSettingsProvider _settings;
 
     public CheckRemoteUseCase(
         IPublicationRepository publications,
@@ -178,7 +180,8 @@ public sealed class CheckRemoteUseCase
         IReflectionRepository reflections,
         IPublishDestinationProvider destinations,
         IMarkdownWriter markdown,
-        IClock clock)
+        IClock clock,
+        IContentSettingsProvider settings)
     {
         _publications = publications;
         _targets = targets;
@@ -186,6 +189,7 @@ public sealed class CheckRemoteUseCase
         _destinations = destinations;
         _markdown = markdown;
         _clock = clock;
+        _settings = settings;
     }
 
     public async Task<RemoteCheckResult> ExecuteAsync(PublicationId publicationId, CancellationToken cancellationToken)
@@ -256,10 +260,12 @@ public sealed class CheckRemoteUseCase
             .FindByIdAsync(publication.ReflectionId, cancellationToken)
             .ConfigureAwait(false);
 
+        var settings = await _settings.GetAsync(cancellationToken).ConfigureAwait(false);
+
         return reflection is null
             ? null
             : MarkdownFileHash.Of(
-                MarkdownTemplate.DefaultTemplate.Render(
+                new MarkdownTemplate(settings.HexoFrontMatterTemplate).Render(
                     MarkdownDocument.From(
                         version,
                         reflection.ContentDate,
@@ -362,4 +368,3 @@ public sealed class ResolveRemoteDivergenceUseCase
         return await _check.ExecuteAsync(publicationId, cancellationToken).ConfigureAwait(false);
     }
 }
-

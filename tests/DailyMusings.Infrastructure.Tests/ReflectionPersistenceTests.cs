@@ -17,6 +17,30 @@ namespace DailyMusings.Infrastructure.Tests;
 public class ReflectionPersistenceTests
 {
     [TestMethod]
+    public async Task Deleting_an_article_removes_its_content_and_leaves_a_generation_tombstone()
+    {
+        await using var context = await ReflectionTestContext.CreateAsync();
+        await context.CaptureTextAsync("准备删除的稿件素材。");
+        var (reflection, version) = await context.SeedDraftAsync(context.Today, ReflectionStatus.ReviewRequired);
+
+        await context.Reflections.DeleteAsync(reflection, context.Clock.UtcNow, CancellationToken.None);
+
+        Assert.IsNull(await context.Reflections.FindByIdAsync(reflection.Id, CancellationToken.None));
+        Assert.IsNull(await context.Reflections.FindVersionAsync(version.Id, CancellationToken.None));
+        Assert.IsTrue(await context.Reflections.IsDeletedAsync(context.Today, CancellationToken.None));
+
+        var regeneration = await context.RequestGeneration.ExecuteAsync(
+            context.Today,
+            manual: true,
+            ignoreTranscriptionFailures: true,
+            allowOverwriteOfManualEdits: false,
+            CancellationToken.None);
+
+        Assert.IsFalse(regeneration.Decision.Allowed);
+        Assert.AreEqual("reflection.deleted", regeneration.Decision.Code);
+    }
+
+    [TestMethod]
     public async Task A_draft_round_trips_with_its_versions_and_slot_pointers()
     {
         await using var context = await ReflectionTestContext.CreateAsync();

@@ -14,8 +14,9 @@
 # / `embedding.secret_missing` even though the file is right there under the right name. Found the hard way on a
 # real deployment; 644 costs nothing here because the directory itself is 700.
 #
-# deploy/secrets/ is gitignored. These three files are placeholders and must not be used as-is.
+# deploy/secrets/ is gitignored. These four files are placeholders and must not be used as-is.
 
-openai-api-key                       # OpenAI-compatible transcription / generation API key
+deepseek-api-key                     # DeepSeek article-generation API key
+openai-api-key                       # OpenAI-compatible transcription API key
 embedding-api-key                    # optional OpenAI-compatible embedding API key
 smtp-password                        # SMTP password for the notification sender

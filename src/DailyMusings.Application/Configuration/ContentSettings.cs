@@ -25,6 +25,12 @@ public sealed record ContentSettings
     /// the only retention a user gets without asking for more.
     /// </summary>
     public const string ContentRetentionKey = "retention.contentDays";
+    public const string DraftDirectoryKey = "publish.draftDirectory";
+    public const string PublishedDirectoryKey = "publish.publishedDirectory";
+    public const string HexoTemplateKey = "publish.hexoFrontMatterTemplate";
+
+    public const string DefaultDraftDirectory = "drafts";
+    public const string DefaultPublishedDirectory = "posts";
 
     /// <summary>Default content time zone, per §7.</summary>
     public const string DefaultTimeZoneId = ContentTimeZone.DefaultId;
@@ -50,7 +56,10 @@ public sealed record ContentSettings
         DefaultPublishTime,
         DefaultPublishWindowMinutes,
         DefaultAudioRetentionDays,
-        DefaultContentRetentionDays);
+        DefaultContentRetentionDays,
+        DefaultDraftDirectory,
+        DefaultPublishedDirectory,
+        Domain.Publishing.MarkdownTemplate.Default);
 
     public ContentSettings(
         string timeZoneId,
@@ -58,7 +67,10 @@ public sealed record ContentSettings
         TimeOnly publishLocalTime,
         int publishWindowMinutes,
         int audioRetentionDays,
-        int contentRetentionDays = DefaultContentRetentionDays)
+        int contentRetentionDays = DefaultContentRetentionDays,
+        string draftDirectory = DefaultDraftDirectory,
+        string publishedDirectory = DefaultPublishedDirectory,
+        string? hexoFrontMatterTemplate = null)
     {
         TimeZoneId = timeZoneId;
         GenerationLocalTime = generationLocalTime;
@@ -66,6 +78,9 @@ public sealed record ContentSettings
         PublishWindowMinutes = publishWindowMinutes;
         AudioRetentionDays = audioRetentionDays;
         ContentRetentionDays = contentRetentionDays;
+        DraftDirectory = draftDirectory;
+        PublishedDirectory = publishedDirectory;
+        HexoFrontMatterTemplate = hexoFrontMatterTemplate ?? Domain.Publishing.MarkdownTemplate.Default;
     }
 
     public string TimeZoneId { get; init; }
@@ -83,6 +98,12 @@ public sealed record ContentSettings
     /// <summary>Days to keep the captured content itself after confirmation. <c>-1</c> (the default) keeps it
     /// forever, and <c>0</c> deletes it as soon as the day is confirmed.</summary>
     public int ContentRetentionDays { get; init; }
+
+    public string DraftDirectory { get; init; }
+
+    public string PublishedDirectory { get; init; }
+
+    public string HexoFrontMatterTemplate { get; init; }
 
     public AudioRetentionPolicy ResolveAudioRetention() => new(AudioRetentionDays);
 
@@ -105,7 +126,10 @@ public sealed record ContentSettings
             ReadTime(values, PublishTimeKey, DefaultPublishTime),
             ReadInt(values, PublishWindowKey, DefaultPublishWindowMinutes),
             ReadInt(values, AudioRetentionKey, DefaultAudioRetentionDays),
-            ReadInt(values, ContentRetentionKey, DefaultContentRetentionDays));
+            ReadInt(values, ContentRetentionKey, DefaultContentRetentionDays),
+            Read(values, DraftDirectoryKey, DefaultDraftDirectory),
+            Read(values, PublishedDirectoryKey, DefaultPublishedDirectory),
+            Read(values, HexoTemplateKey, Domain.Publishing.MarkdownTemplate.Default));
     }
 
     public IReadOnlyDictionary<string, string> ToValues() => new Dictionary<string, string>(StringComparer.Ordinal)
@@ -116,6 +140,9 @@ public sealed record ContentSettings
         [PublishWindowKey] = PublishWindowMinutes.ToString(CultureInfo.InvariantCulture),
         [AudioRetentionKey] = AudioRetentionDays.ToString(CultureInfo.InvariantCulture),
         [ContentRetentionKey] = ContentRetentionDays.ToString(CultureInfo.InvariantCulture),
+        [DraftDirectoryKey] = DraftDirectory,
+        [PublishedDirectoryKey] = PublishedDirectory,
+        [HexoTemplateKey] = HexoFrontMatterTemplate,
     };
 
     public static string FormatTime(TimeOnly time) => time.ToString("HH:mm", CultureInfo.InvariantCulture);

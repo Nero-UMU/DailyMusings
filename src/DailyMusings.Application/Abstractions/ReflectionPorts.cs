@@ -163,6 +163,12 @@ public interface IReflectionRepository
 
     Task UpdateAsync(Reflection reflection, CancellationToken cancellationToken);
 
+    /// <summary>Whether a user explicitly removed this content day. Tombstones prevent the scheduler recreating it.</summary>
+    Task<bool> IsDeletedAsync(ContentDate contentDate, CancellationToken cancellationToken);
+
+    /// <summary>Deletes the article and all versions/publications, while retaining a content-date tombstone.</summary>
+    Task DeleteAsync(Reflection reflection, DateTimeOffset deletedAtUtc, CancellationToken cancellationToken);
+
     /// <summary>
     /// Loads a version with its source map and its second-stage findings already attached, which is the shape
     /// every caller needs: sources are meaningless apart from the version they were produced for (A.6).

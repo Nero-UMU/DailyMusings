@@ -44,11 +44,10 @@ RUN apt-get update \
 WORKDIR /app
 
 # The instance's whole state lives under one directory (§15.2), so a single volume is enough to be durable.
-# The key ring gets its own directory on purpose: it signs the admin's auth cookies, so it must survive a
-# container recreate but must NOT be inside the directory that gets backed up (§10.4, decision A.13).
-# Creating both here, owned by the runtime user, means fresh named volumes inherit that ownership.
-RUN mkdir -p /var/lib/dailymusings /var/lib/dailymusings-keys /var/lib/dailymusings-config \
-    && chown -R "$APP_UID" /var/lib/dailymusings /var/lib/dailymusings-keys /var/lib/dailymusings-config
+# The key ring lives below the separately mounted configuration directory: it signs the admin's auth cookies,
+# so it must survive a container recreate but must NOT be included in the ordinary content backup (§10.4).
+RUN mkdir -p /var/lib/dailymusings /var/lib/dailymusings-config/keys \
+    && chown -R "$APP_UID" /var/lib/dailymusings /var/lib/dailymusings-config
 
 COPY --from=build /app ./
 
@@ -58,7 +57,7 @@ ENV ASPNETCORE_URLS=http://+:18321 \
     DOTNET_CLI_TELEMETRY_OPTOUT=true \
     Storage__RootPath=/var/lib/dailymusings \
     Storage__SecretsPath=/run/secrets \
-    Storage__KeyRingPath=/var/lib/dailymusings-keys \
+    Storage__KeyRingPath=/var/lib/dailymusings-config/keys \
     Storage__RuntimeConfigPath=/var/lib/dailymusings-config/runtime.json
 
 EXPOSE 18321

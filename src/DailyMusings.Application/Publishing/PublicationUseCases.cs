@@ -407,6 +407,7 @@ public sealed class RunPublicationUseCase
                 destination,
                 payload,
                 publishPublicly,
+                settings.HexoFrontMatterTemplate,
                 cancellationToken).ConfigureAwait(false);
 
             await _publications.UpdateAsync(publication, cancellationToken).ConfigureAwait(false);
@@ -444,12 +445,13 @@ public sealed class RunPublicationUseCase
         PublishDestination destination,
         PublicationPayload payload,
         bool publishPublicly,
+        string hexoFrontMatterTemplate,
         CancellationToken cancellationToken)
     {
         // Visibility means one thing for a file: whether Hexo is told this post is still a draft. That is the
         // front matter's `draft` field, and it is the whole of what "公开" can be for the only target kind left.
         var document = MarkdownDocument.From(version, contentDate, isDraft: !publishPublicly);
-        var content = MarkdownTemplate.DefaultTemplate.Render(document);
+        var content = new MarkdownTemplate(hexoFrontMatterTemplate).Render(document);
 
         var baseName = MarkdownFileName.BaseName(contentDate, document.Slug);
 

@@ -42,7 +42,10 @@ public sealed class UpdateContentSettingsUseCase
             update.PublishLocalTime ?? current.PublishLocalTime,
             update.PublishWindowMinutes ?? current.PublishWindowMinutes,
             update.AudioRetentionDays ?? current.AudioRetentionDays,
-            update.ContentRetentionDays ?? current.ContentRetentionDays);
+            update.ContentRetentionDays ?? current.ContentRetentionDays,
+            update.DraftDirectory ?? current.DraftDirectory,
+            update.PublishedDirectory ?? current.PublishedDirectory,
+            update.HexoFrontMatterTemplate ?? current.HexoFrontMatterTemplate);
 
         Validate(next);
 
@@ -90,6 +93,20 @@ public sealed class UpdateContentSettingsUseCase
                 "content.retention.invalid",
                 "Content retention must be a number of days, or -1 to keep captured content forever.");
         }
+
+
+        ValidateDirectory(settings.DraftDirectory, "publish.draft_directory.invalid");
+        ValidateDirectory(settings.PublishedDirectory, "publish.published_directory.invalid");
+        new Domain.Publishing.MarkdownTemplate(settings.HexoFrontMatterTemplate).Validate();
+    }
+
+    private static void ValidateDirectory(string value, string code)
+    {
+        if (string.IsNullOrWhiteSpace(value) || Path.IsPathRooted(value) ||
+            value.Replace('\\', '/').Split('/', StringSplitOptions.RemoveEmptyEntries).Contains(".."))
+        {
+            throw new UseCaseException(code, "目录必须是 Markdown 根目录下的相对路径，且不能包含 ..。");
+        }
     }
 }
 
@@ -100,4 +117,7 @@ public sealed record ContentSettingsUpdate(
     TimeOnly? PublishLocalTime,
     int? PublishWindowMinutes,
     int? AudioRetentionDays,
-    int? ContentRetentionDays = null);
+    int? ContentRetentionDays = null,
+    string? DraftDirectory = null,
+    string? PublishedDirectory = null,
+    string? HexoFrontMatterTemplate = null);

@@ -97,7 +97,19 @@ public sealed record ProbeResult(bool Ok, string Code, string Detail)
 public interface IExternalServiceProbe
 {
     Task<ProbeResult> ProbeAsync(ExternalService service, CancellationToken cancellationToken);
+
+    Task<ProbeResult> ProbeModelAsync(ModelEndpointProbeRequest request, CancellationToken cancellationToken);
 }
+
+/// <summary>
+/// Values currently shown in the model form. A connection test must probe these values, even before they are saved.
+/// <paramref name="ApiKey"/> is write-only UI input; when omitted, the configured secret is resolved by name.
+/// </summary>
+public sealed record ModelEndpointProbeRequest(
+    ExternalService Service,
+    string BaseUrl,
+    string SecretName,
+    string? ApiKey = null);
 
 /// <summary>
 /// One line kept by the in-memory log buffer. Deliberately a plain record with no exception object: the operator

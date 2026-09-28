@@ -181,6 +181,7 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<Application.Topics.GetTopicUsageUseCase>();
         services.AddScoped<Application.Topics.DeleteTopicUseCase>();
         services.AddScoped<Application.Topics.AssignReflectionVersionTopicsUseCase>();
+        services.AddScoped<Application.Reflections.DeleteReflectionUseCase>();
         services.AddScoped<Application.Embeddings.GetSemanticSearchStateUseCase>();
         services.AddScoped<Application.Embeddings.EnsureEmbeddingIndexedUseCase>();
         services.AddScoped<Application.Embeddings.EmbedInputUseCase>();
@@ -226,6 +227,7 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<Application.Publishing.CheckRemoteUseCase>();
         services.AddScoped<Application.Publishing.ResolveRemoteDivergenceUseCase>();
         services.AddScoped<Application.Publishing.SchedulePublicationsUseCase>();
+        services.AddScoped<Application.Publishing.ExportWorkingDraftUseCase>();
 
         // Job handlers are scoped because they use repositories, which hold a scoped connection.
         services.AddScoped<IJobHandler, TranscriptionJobHandler>();

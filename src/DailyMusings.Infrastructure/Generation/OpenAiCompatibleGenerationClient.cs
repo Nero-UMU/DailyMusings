@@ -216,7 +216,7 @@ public sealed class OpenAiCompatibleGenerationClient : IReflectionGenerationClie
                 .SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, timeout.Token)
                 .ConfigureAwait(false);
         }
-        catch (TaskCanceledException exception) when (!cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
         {
             throw new TransientExternalFailureException(
                 "generation.timeout",
@@ -260,7 +260,22 @@ public sealed class OpenAiCompatibleGenerationClient : IReflectionGenerationClie
                     "The generation endpoint rejected the request.");
             }
 
-            var payload = await ReadAsync(response, malformedCode, cancellationToken).ConfigureAwait(false);
+            ChatResponse payload;
+            try
+            {
+                // ResponseHeadersRead returns as soon as the provider sends headers. The same configured deadline
+                // must remain in force while its (possibly streamed) JSON body is read; otherwise a provider can
+                // leave the job running forever after satisfying only the header phase.
+                payload = await ReadAsync(response, malformedCode, timeout.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
+            {
+                throw new TransientExternalFailureException(
+                    "generation.timeout",
+                    "The generation endpoint did not answer in time.",
+                    exception);
+            }
+
             var content = payload.Choices?.FirstOrDefault()?.Message?.Content;
 
             if (string.IsNullOrWhiteSpace(content))

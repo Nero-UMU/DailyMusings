@@ -161,8 +161,8 @@ if ($Text) {
 }
 
 if ($Screenshot) {
-    Invoke-Adb shell screencap -p /sdcard/dm-shot.png | Out-Null
-    Invoke-Adb pull /sdcard/dm-shot.png $Screenshot | Out-Null
+    Invoke-Adb -Args @("shell", "screencap", "-p", "/sdcard/dm-shot.png") | Out-Null
+    Invoke-Adb -Args @("pull", "/sdcard/dm-shot.png", $Screenshot) | Out-Null
     Write-Host "saved $Screenshot"
     exit 0
 }

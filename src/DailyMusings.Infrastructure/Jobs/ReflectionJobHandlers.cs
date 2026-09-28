@@ -2,6 +2,7 @@ using DailyMusings.Application.Abstractions;
 using DailyMusings.Application.Embeddings;
 using DailyMusings.Application.Jobs;
 using DailyMusings.Application.Reflections;
+using DailyMusings.Application.Publishing;
 using DailyMusings.Domain.Common;
 using DailyMusings.Domain.Jobs;
 using DailyMusings.Domain.Time;
@@ -22,17 +23,20 @@ public sealed class ReflectionGenerationJobHandler : IJobHandler
     private readonly GenerateReflectionUseCase _generate;
     private readonly IReflectionRepository _reflections;
     private readonly IClock _clock;
+    private readonly ExportWorkingDraftUseCase? _exportDraft;
     private readonly ILogger<ReflectionGenerationJobHandler> _logger;
 
     public ReflectionGenerationJobHandler(
         GenerateReflectionUseCase generate,
         IReflectionRepository reflections,
         IClock clock,
-        ILogger<ReflectionGenerationJobHandler> logger)
+        ILogger<ReflectionGenerationJobHandler> logger,
+        ExportWorkingDraftUseCase? exportDraft = null)
     {
         _generate = generate;
         _reflections = reflections;
         _clock = clock;
+        _exportDraft = exportDraft;
         _logger = logger;
     }
 
@@ -58,6 +62,26 @@ public sealed class ReflectionGenerationJobHandler : IJobHandler
             switch (result.Outcome)
             {
                 case ReflectionGenerationOutcome.Generated:
+                    try
+                    {
+                        var fileName = _exportDraft is null
+                            ? null
+                            : await _exportDraft.ExecuteAsync(contentDate, cancellationToken).ConfigureAwait(false);
+                        if (fileName is not null)
+                        {
+                            _logger.LogInformation("Exported generated draft for {ContentDate} as {FileName}.", contentDate, fileName);
+                        }
+                    }
+                    catch (Exception exportFailure) when (exportFailure is not OperationCanceledException)
+                    {
+                        // The database draft is the source of truth. A directory problem must not throw away a
+                        // successfully generated article or regenerate it on retry; it remains visible for repair.
+                        _logger.LogWarning(
+                            exportFailure,
+                            "Generated reflection for {ContentDate}, but its draft file could not be exported.",
+                            contentDate);
+                    }
+
                     // The draft's text is never logged (§16); only the fact that it was produced and how many
                     // citations could not be located, which is a health signal rather than content.
                     _logger.LogInformation(

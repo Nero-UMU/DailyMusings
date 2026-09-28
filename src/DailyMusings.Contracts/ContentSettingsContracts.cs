@@ -18,7 +18,10 @@ public sealed record ContentSettingsDto(
     /// How long captured content is kept after the day is confirmed. <c>-1</c> means "keep everything", which
     /// is the default: a fresh instance never deletes anything on its own.
     /// </summary>
-    int ContentRetentionDays);
+    int ContentRetentionDays,
+    string DraftDirectory,
+    string PublishedDirectory,
+    string HexoFrontMatterTemplate);
 
 public sealed record UpdateContentSettingsRequest(
     string? TimeZoneId,
@@ -26,4 +29,7 @@ public sealed record UpdateContentSettingsRequest(
     string? PublishLocalTime,
     int? PublishWindowMinutes,
     int? AudioRetentionDays,
-    int? ContentRetentionDays = null);
+    int? ContentRetentionDays = null,
+    string? DraftDirectory = null,
+    string? PublishedDirectory = null,
+    string? HexoFrontMatterTemplate = null);

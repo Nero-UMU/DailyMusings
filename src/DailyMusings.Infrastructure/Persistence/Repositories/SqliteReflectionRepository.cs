@@ -156,6 +156,56 @@ public sealed class SqliteReflectionRepository : IReflectionRepository
             ("$updatedAt", SqliteValues.Instant(reflection.UpdatedAtUtc)),
             ("$confirmedAt", SqliteValues.InstantOrNull(reflection.ConfirmedAtUtc))).ConfigureAwait(false);
 
+    public async Task<bool> IsDeletedAsync(ContentDate contentDate, CancellationToken cancellationToken) =>
+        await _accessor.QuerySingleAsync(
+            "SELECT EXISTS(SELECT 1 FROM deleted_reflection WHERE content_date = $day);",
+            reader => reader.GetInt32(0) != 0,
+            cancellationToken,
+            ("$day", SqliteValues.ContentDay(contentDate))).ConfigureAwait(false);
+
+    public async Task DeleteAsync(
+        Reflection reflection,
+        DateTimeOffset deletedAtUtc,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(reflection);
+
+        await _accessor.ExecuteAsync(
+            "INSERT OR REPLACE INTO deleted_reflection (content_date, deleted_at_utc) VALUES ($day, $at);",
+            cancellationToken,
+            ("$day", SqliteValues.ContentDay(reflection.ContentDate)),
+            ("$at", SqliteValues.Instant(deletedAtUtc))).ConfigureAwait(false);
+
+        // The reflection points at its versions and every version points back. Break the former edge first, then
+        // remove publications, versions and finally the day itself. Child rows cascade from those two deletes.
+        await _accessor.ExecuteAsync(
+            """
+            UPDATE reflection
+               SET initial_version_id = NULL,
+                   previous_version_id = NULL,
+                   working_version_id = NULL,
+                   confirmed_version_id = NULL
+             WHERE id = $id;
+            """,
+            cancellationToken,
+            ("$id", reflection.Id.ToString())).ConfigureAwait(false);
+
+        await _accessor.ExecuteAsync(
+            "DELETE FROM publication WHERE reflection_id = $id;",
+            cancellationToken,
+            ("$id", reflection.Id.ToString())).ConfigureAwait(false);
+
+        await _accessor.ExecuteAsync(
+            "DELETE FROM reflection_version WHERE reflection_id = $id;",
+            cancellationToken,
+            ("$id", reflection.Id.ToString())).ConfigureAwait(false);
+
+        await _accessor.ExecuteAsync(
+            "DELETE FROM reflection WHERE id = $id;",
+            cancellationToken,
+            ("$id", reflection.Id.ToString())).ConfigureAwait(false);
+    }
+
     /// <summary>
     /// Loads a version together with its source map and its second-stage findings.
     /// <para>

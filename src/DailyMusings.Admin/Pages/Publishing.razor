@@ -4,863 +4,206 @@
 @inject IServiceScopeFactory ScopeFactory
 @inject ILoggerFactory LoggerFactory
 
-@* 发布设置分区：今天怎么办、自动导出按什么时刻跑、文件写到哪个 Markdown 目录。
-   「发布」在本产品里的含义就是「把确认过的稿件写成一个 .md 文件」（§11.1）。 *@
-
-<PageHeader Title="发布设置"
-            Hint="发布目标就是一个 Markdown 目录：确认过的稿件会被写成 .md 文件，由 Hexo 之类的工具去读。文件永远只写在实例的 markdown 目录之内。">
-    <Actions>
-        <button class="btn" @onclick="ReloadAsync" disabled="@_busy">刷新</button>
-    </Actions>
+<PageHeader Title="发布设置" Hint="这里只管理稿件何时生成、何时发布，以及两个 Markdown 输出目录。">
+    <Actions><button class="btn" @onclick="ReloadAsync" disabled="@_busy">刷新状态</button></Actions>
 </PageHeader>
 
-@if (_message is not null)
-{
-    <p class="notice ok">@_message</p>
-}
+@if (_message is not null) { <p class="notice ok">@_message</p> }
+@if (_error is not null) { <p class="notice error">@_error</p> }
 
-@if (_error is not null)
-{
-    <p class="notice error">@_error</p>
-}
-
-<div class="card">
-    <div class="card-head">
-        <h2>今天（@_today）</h2>
-        @if (_reflection is not null)
-        {
-            <span class="badge @AdminLabels.ReflectionBadge(_reflection.Status)">@AdminLabels.ReflectionText(_reflection.Status)</span>
-        }
-    </div>
-
-    @if (_reflection is null)
-    {
-        <p class="notice info">
-            今天还没有稿件。生成需要一个前提：今天至少有一条可用的素材（§7 明确不允许创建空文章）。
-        </p>
-    }
-    else
-    {
-        <dl class="kv">
-            <dt>工作版本</dt>
-            <dd>
-                @if (_reflection.WorkingVersion is { } working)
-                {
-                    <text>@(string.IsNullOrWhiteSpace(working.Title) ? "（无标题）" : working.Title)</text>
-                    <span class="hint">
-                        · 生成于 @AdminFormat.When(working.CreatedAtUtc)（本地时间）
-                        @if (working.ModelName is { Length: > 0 } model)
-                        {
-                            <text> · 模型 @model</text>
-                        }
-                        <text> · 来源引用 @working.Sources.Count 条 · 无来源陈述 @working.UnsourcedClaims.Count 条</text>
-                        @if (working.HasManualEdits)
-                        {
-                            <text> · 含手工修改</text>
-                        }
-                    </span>
-                }
-                else
-                {
-                    <span class="muted">还没有正文。</span>
-                }
-            </dd>
-
-            <dt>已确认版本</dt>
-            <dd>
-                @if (_reflection.ConfirmedVersionId is { } confirmed)
-                {
-                    <code>@confirmed</code>
-                    @if (_reflection.ConfirmedVersionIsNotWorking)
-                    {
-                        <span class="badge badge-warn">与工作版本不同：改过但还没重新确认</span>
-                    }
-                }
-                else
-                {
-                    <span class="muted">还没确认过，因此不能导出。</span>
-                }
-            </dd>
-
-            <dt>最近一次导出</dt>
-            <dd>
-                @{
-                    var latest = _todayPublications.FirstOrDefault();
-                }
-                @if (latest is null)
-                {
-                    <span class="muted">今天还没有导出记录。</span>
-                }
-                else
-                {
-                    <span class="badge @AdminLabels.PublicationBadge(latest.Publication.Status)">
-                        @AdminLabels.PublicationText(latest.Publication.Status)
-                    </span>
-                    <span class="hint">
-                        目标 @latest.TargetName
-                        @if (latest.Publication.RemoteId is { Length: > 0 } fileName)
-                        {
-                            <text> · 文件 <code>@fileName</code></text>
-                        }
-                        <text> · @AdminFormat.When(latest.Publication.CompletedAtUtc)</text>
-                        @if (latest.Publication.ErrorCode is { Length: > 0 } code)
-                        {
-                            <text> · <code>@(code)</code></text>
-                        }
-                    </span>
-                }
-            </dd>
-        </dl>
-
-        @if (_reflection.Status == ReflectionStatus.StaleByLateInput)
-        {
-            <p class="notice warn">这一天在成稿之后又有新素材，稿子可能已经过时；重新生成会产出新的一版。</p>
-        }
-    }
-
-    <h3>立即生成今日稿件</h3>
-
-    <div class="stack">
-        <label class="checkbox">
-            <input type="checkbox" checked="@_ignoreTranscriptionFailures"
-                   @onchange="e => _ignoreTranscriptionFailures = e.Value is true" />
-            忽略转写失败的项
-        </label>
-        <p class="hint">
-            含义：今天只要有<strong>一条</strong>录音转写失败，默认就<strong>暂缓生成</strong>并通知你（§7）——
-            因为失败的录音可能正是当天最要紧的那句话。勾上表示「我知道有失败的，照常写」，
-            失败的录音仍然会被保存，随时可以重试转写。
-        </p>
-
-        <label class="checkbox">
-            <input type="checkbox" checked="@_allowOverwriteOfManualEdits"
-                   @onchange="e => _allowOverwriteOfManualEdits = e.Value is true" />
-            接受覆盖工作版本上的手工修改
-        </label>
-        <p class="hint">
-            含义：如果当前工作版本被手工编辑过，重新生成会把<strong>那一版移到「上一版」槽</strong>并写入新稿，
-            你在客户端里的改动不再出现在工作版本上。不勾选时服务端会<strong>拒绝</strong>这次生成（§6.4），
-            你的修改原样保留。三版本轮换不会覆盖最早的那一版。
-        </p>
-    </div>
-
-    <div class="actions">
-        <button class="btn-primary" @onclick="GenerateTodayAsync" disabled="@(_busy || _reflection is null)">
-            立即生成今日稿件
-        </button>
-    </div>
-
-    <h3>立即发布今日随想</h3>
-
-    @if (_targets is null || _targets.Count == 0)
-    {
-        <p class="notice info">还没有导出目标，先在下面的「导出目标」里添加一个 Markdown 目录。</p>
-    }
-    else
-    {
-        <div class="form-grid">
-            <label>
-                导出到
-                <select value="@SelectedTargetToken()" @onchange="e => _publishTargetToken = (string?)e.Value">
-                    @foreach (var target in _targets)
-                    {
-                        <option value="@target.Id.ToString()">@target.Name</option>
-                    }
-                </select>
-            </label>
-            <label>
-                可见性
-                <select @bind="_visibilityToken">
-                    <option value="draft">草稿（front matter 写 draft: true，Hexo 不会生成它）</option>
-                    <option value="public">公开（front matter 写 draft: false，Hexo 会生成它）</option>
-                </select>
-            </label>
+<section class="publish-actions">
+    <article class="card action-card">
+        <div><span class="eyebrow">生成</span><h2>今天的稿件</h2>
+            <p class="hint">调用文章模型；完成后 Markdown 草稿会写入 <code>@_draftDirectory</code>。</p></div>
+        <div class="action-state">
+            <span class="badge @(_reflection is null ? "badge-muted" : AdminLabels.ReflectionBadge(_reflection.Status))">
+                @(_reflection is null ? "尚未生成" : AdminLabels.ReflectionText(_reflection.Status))
+            </span>
+            <button class="btn-primary" @onclick="GenerateTodayAsync" disabled="@_busy">立即生成稿件</button>
         </div>
-
-        <div class="actions">
-            <button class="btn-primary" @onclick="PublishTodayAsync"
-                    disabled="@(_busy || _reflection?.ConfirmedVersionId is null)">
-                立即发布今日随想
-            </button>
+    </article>
+    <article class="card action-card public-card">
+        <div><span class="eyebrow">发布</span><h2>发布今天的稿件</h2>
+            <p class="hint">写入 <code>@_publishedDirectory</code>，front matter 中设置 <code>draft: false</code>。</p></div>
+        <div class="action-state">
+            <span class="badge @PublicationBadge()">@PublicationText()</span>
+            <button class="btn-primary" @onclick="PublishTodayAsync" disabled="@_busy">发布稿件</button>
         </div>
+    </article>
+</section>
 
-        <p class="hint">
-            只有<strong>已确认</strong>的稿件才能导出；手动发布不受导出时刻限制。
-            对 Markdown 目标来说，「公开」与「草稿」的差别就是文件里 <code>draft</code> 字段的真假——
-            <code>draft: true</code> 的文章 Hexo 不会生成到站点上。
-        </p>
-    }
-</div>
-
-<div class="card">
-    <div class="card-head">
-        <h2>自动发布</h2>
-    </div>
-
-    <p class="hint">
-        时间都是内容时区里的本地时刻。生成时刻决定当晚何时成稿；导出时刻决定<strong>次日</strong>何时进入导出队列，
-        而执行窗口决定「错过了多久就不许再自动执行」——超窗的记录转 Expired，只能由你手动重试或重新确认，
-        服务重启不构成延期理由（§11.1）。
-    </p>
-
-    @if (_settings is null)
-    {
-        <p class="muted">正在读取…</p>
-    }
-    else
-    {
-        <div class="form-grid">
-            <label>
-                内容时区
-                <input @bind="_timeZoneId" />
-            </label>
-            <label>
-                生成时刻（HH:mm）
-                <input @bind="_generationTime" placeholder="23:00" />
-            </label>
-            <label>
-                导出（发布）时刻（HH:mm）
-                <input @bind="_publishTime" placeholder="08:00" />
-            </label>
-            <label>
-                执行窗口（分钟）
-                <input type="number" @bind="_publishWindow" />
-            </label>
+<div class="settings-grid">
+    <section class="card settings-card">
+        <div class="card-head"><div><span class="eyebrow">自动生成</span><h2>生成计划</h2></div></div>
+        <div class="form-grid compact-grid">
+            <label>每日自动生成时间<input type="time" value="@_generationTime" @onchange="e => _generationTime = (string?)e.Value ?? _generationTime" /></label>
+            <label>稿件输出目录<input value="@_draftDirectory" @oninput="e => _draftDirectory = (string?)e.Value ?? string.Empty" /></label>
         </div>
+        <p class="hint">目录相对于容器的 Markdown 根目录；不能使用绝对路径或 <code>..</code>。</p>
+    </section>
 
-        <div class="actions">
-            <button class="btn-primary" @onclick="SaveScheduleAsync" disabled="@_busy">保存时刻设置</button>
+    <section class="card settings-card">
+        <div class="card-head">
+            <div><span class="eyebrow">自动发布</span><h2>发布计划</h2></div>
+            <label class="switch-line"><input type="checkbox" checked="@_automaticPublish" @onchange="e => _automaticPublish = e.Value is true" />允许自动公开发布</label>
         </div>
-
-        <p class="hint">
-            录音与随想内容的保留策略不在这里，它们在「系统设置」的「保留策略」里——
-            「留一段录音好核对转写」和「删掉我说过的话」是两件事，两个答案。
-        </p>
-    }
-</div>
-
-<div class="card">
-    <div class="card-head">
-        <h2>导出目标</h2>
-        @if (_targets is { Count: > 0 })
-        {
-            <span class="hint">共 @_targets.Count 个</span>
-        }
-    </div>
-
-    @if (_targets is null)
-    {
-        <p class="muted">正在读取…</p>
-    }
-    else if (_targets.Count == 0)
-    {
-        <p class="notice info">还没有导出目标。用下面的表单添加一个 Markdown 目录。</p>
-    }
-    else
-    {
-        <div class="table-wrap">
-            <table class="table">
-                <thead>
-                    <tr>
-                        <th>名称</th>
-                        <th>目录</th>
-                        <th>自动发布</th>
-                        <th>最近导出</th>
-                        <th>操作</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    @foreach (var target in _targets)
-                    {
-                        <tr>
-                            <td>
-                                @if (_editing == target.Id)
-                                {
-                                    <input value="@_editName" @onchange="e => _editName = (string?)e.Value" />
-                                }
-                                else
-                                {
-                                    <strong>@target.Name</strong>
-                                }
-                            </td>
-                            <td>
-                                @if (_editing == target.Id)
-                                {
-                                    <input value="@_editDestination" @onchange="e => _editDestination = (string?)e.Value"
-                                           placeholder="留空即实例的 markdown 根目录" />
-                                }
-                                else
-                                {
-                                    <code>@(target.DestinationReference is { Length: > 0 } destination ? destination : "（markdown 根目录）")</code>
-                                }
-                            </td>
-                            <td>
-                                @if (target.AutomaticPublishEnabled)
-                                {
-                                    <span class="badge badge-warn">已开启</span>
-                                    <div class="hint">
-                                        @target.AutomaticPublishEnabledBy
-                                        @AdminFormat.When(target.AutomaticPublishEnabledAtUtc)
-                                    </div>
-                                }
-                                else
-                                {
-                                    <span class="badge badge-muted">关闭</span>
-                                    <div class="hint">只在你手动导出时写文件</div>
-                                }
-                            </td>
-                            <td>
-                                @{
-                                    var last = LastPublicationFor(target);
-                                }
-                                @if (last is null)
-                                {
-                                    <span class="muted">还没有</span>
-                                }
-                                else
-                                {
-                                    <span class="badge @AdminLabels.PublicationBadge(last.Publication.Status)">
-                                        @AdminLabels.PublicationText(last.Publication.Status)
-                                    </span>
-                                    <div class="hint">
-                                        @if (last.Publication.RemoteId is { Length: > 0 } file)
-                                        {
-                                            <code>@file</code>
-                                            <br />
-                                        }
-                                        @AdminFormat.When(last.Publication.CompletedAtUtc)
-                                        @if (last.Publication.ErrorCode is { Length: > 0 } failureCode)
-                                        {
-                                            <text> · <code>@failureCode</code></text>
-                                        }
-                                    </div>
-                                }
-                            </td>
-                            <td>
-                                @if (_editing == target.Id)
-                                {
-                                    <div class="actions">
-                                        <button class="btn-primary btn-sm" @onclick="SaveEditAsync" disabled="@_busy">保存</button>
-                                        <button class="btn btn-sm" @onclick="CancelEdit" disabled="@_busy">取消</button>
-                                    </div>
-                                }
-                                else if (_confirming == target.Id)
-                                {
-                                    <div class="risk">
-                                        @if (_confirmActionIsEnable)
-                                        {
-                                            <strong>开启后，@target.Name 会在无人确认的情况下导出文章。</strong>
-                                            <p>只有在你有意让这个目标自动导出时才继续。请重新输入管理员密码以确认：</p>
-                                        }
-                                        else
-                                        {
-                                            <strong>关闭后，@target.Name 只会在你手动导出时写文件。</strong>
-                                            <p>服务端对开启和关闭都要求当前密码，所以要撤销它同样需要重新输入：</p>
-                                        }
-
-                                        <input type="password" value="@_password" @onchange="e => _password = (string?)e.Value"
-                                               placeholder="当前密码" autocomplete="current-password" />
-                                        <div class="actions">
-                                            <button class="btn-primary btn-sm" @onclick="() => ApplyConfirmAsync(target)" disabled="@_busy">
-                                                @(_confirmActionIsEnable ? "确认开启" : "确认关闭")
-                                            </button>
-                                            <button class="btn btn-sm" @onclick="CancelConfirm" disabled="@_busy">取消</button>
-                                        </div>
-                                    </div>
-                                }
-                                else
-                                {
-                                    var lastForActions = LastPublicationFor(target);
-
-                                    <div class="actions">
-                                        @if (target.AutomaticPublishEnabled)
-                                        {
-                                            <button class="btn btn-sm" @onclick="() => BeginConfirm(target, enable: false)" disabled="@_busy">
-                                                关闭自动发布…
-                                            </button>
-                                        }
-                                        else
-                                        {
-                                            <button class="btn btn-sm" @onclick="() => BeginConfirm(target, enable: true)" disabled="@_busy">
-                                                开启自动发布…
-                                            </button>
-                                        }
-
-                                        <button class="btn btn-sm" @onclick="() => BeginEdit(target)" disabled="@_busy">编辑…</button>
-
-                                        @if (lastForActions is not null)
-                                        {
-                                            <button class="btn btn-sm"
-                                                    @onclick="() => CheckRemoteAsync(lastForActions.Publication.Id)"
-                                                    disabled="@_busy">
-                                                检查文件
-                                            </button>
-
-                                            @if (lastForActions.Publication.Status is PublicationStatus.Failed or PublicationStatus.Expired)
-                                            {
-                                                <button class="btn btn-sm"
-                                                        @onclick="() => RetryPublicationAsync(lastForActions.Publication.Id)"
-                                                        disabled="@_busy">
-                                                    重试
-                                                </button>
-                                            }
-                                        }
-                                    </div>
-                                }
-                            </td>
-                        </tr>
-                    }
-                </tbody>
-            </table>
-        </div>
-
-        <p class="hint">
-            对 Markdown 目标来说，「公开」与「草稿」的差别就是导出文件里 <code>draft</code> 字段的真假。
-            开启自动发布后，每个导出时刻都会按目标当下的可见性自动写一次文件，不再需要有人手动点击。
-            写文件有一条硬规矩：<strong>本实例写过、且内容仍是它写的那样</strong>才会被原地替换；
-            别人改过的文件不会被静默覆盖，本实例从未写过的同名文件在任何情况下都不动（§11.2）。
-        </p>
-    }
-
-    @* Bound to a local: `_check` is a field, and a field dereferenced inside an event-handler lambda is exactly
-       where the nullable analysis stops promising anything. *@
-    @if (_check is { } check)
-    {
-        <div class="notice @(check.Comparison.LocalChanged || check.Comparison.RemoteChanged ? "warn" : "ok")">
-            <strong>检查导出文件：@check.Target.Name</strong>
-            <p>@DescribeComparison(check.Comparison)</p>
-            <p class="hint">
-                记录里的文件：<code>@(check.Publication.RemoteId ?? "（没有文件名）")</code>
-                · 本地哈希 <code>@ShortHash(check.LocalContentHash)</code>
-                · 文件哈希 <code>@ShortHash(check.RemoteContentHash)</code>
-            </p>
-
-            @if (check.Comparison.RemoteChanged || check.Comparison.LocalChanged)
+        <div class="form-grid compact-grid">
+            <label>每日自动发布时间<input type="time" value="@_publishTime" @onchange="e => _publishTime = (string?)e.Value ?? _publishTime" /></label>
+            <label>稿件发布目录<input value="@_publishedDirectory" @oninput="e => _publishedDirectory = (string?)e.Value ?? string.Empty" /></label>
+            @if (_automaticPublish != (_publishTarget?.AutomaticPublishEnabled ?? false))
             {
-                <div class="actions">
-                    <button class="btn-primary btn-sm"
-                            @onclick="() => ResolveDivergenceAsync(check.Publication.Id, RemoteDivergenceAction.Overwrite)"
-                            disabled="@_busy">
-                        用当前稿件覆盖文件
-                    </button>
-                    <button class="btn btn-sm"
-                            @onclick="() => ResolveDivergenceAsync(check.Publication.Id, RemoteDivergenceAction.KeepBoth)"
-                            disabled="@_busy">
-                        保留两边
-                    </button>
-                    <button class="btn btn-sm" @onclick="DismissCheck" disabled="@_busy">关闭</button>
-                </div>
-
-                <p class="hint">
-                    「保留两边」只是记下你已知道这件事，不动任何文件；「覆盖」会用当前稿件重新写这个文件——
-                    它不会新建第二份。已经被外部改过、而你又不想覆盖它时，就让它留在原地，
-                    下一次导出会写一个带版本号的新文件。
-                </p>
-            }
-            else
-            {
-                <div class="actions">
-                    <button class="btn btn-sm" @onclick="DismissCheck" disabled="@_busy">关闭</button>
-                </div>
+                <label class="full-row">当前管理员密码
+                    <input type="password" autocomplete="current-password" value="@_currentPassword" @oninput="e => _currentPassword = (string?)e.Value ?? string.Empty" />
+                    <span class="hint">改变自动发布开关需要重新验证身份。</span>
+                </label>
             }
         </div>
-    }
-
-    <h3>添加目标</h3>
-
-    <div class="form-grid">
-        <label>
-            名称
-            <input value="@_newName" @onchange="e => _newName = (string?)e.Value" placeholder="hexo" />
-        </label>
-        <label>
-            目录
-            <input value="@_newDestination" @onchange="e => _newDestination = (string?)e.Value"
-                   placeholder="例如 source/_drafts，留空即实例的 markdown 根目录" />
-        </label>
-    </div>
-
-    <div class="actions">
-        <button class="btn-primary" @onclick="CreateTargetAsync" disabled="@_busy">添加</button>
-    </div>
-
-    <p class="hint">
-        目录填<strong>相对路径</strong>，相对于实例的 markdown 目录（例如 Hexo 的 <code>source/_drafts</code> 对应的挂载位置）。
-        绝对路径或试图跳出这个根目录的路径都会被拒绝；同名目标不会重复创建，会直接返回已有的那一个。
-    </p>
+        <p class="notice warn slim">自动发布只处理已确认稿件；不会绕过内容核验。</p>
+    </section>
 </div>
+
+<section class="card template-card">
+    <div class="card-head"><div><span class="eyebrow">Hexo</span><h2>Front matter 模板</h2></div>
+        <button class="btn btn-sm" @onclick="ResetTemplate" disabled="@_busy">恢复默认</button></div>
+    <textarea class="template-editor" spellcheck="false" value="@_hexoTemplate" @oninput="e => _hexoTemplate = (string?)e.Value ?? string.Empty"></textarea>
+    <p class="hint">可用：<code>{title}</code>、<code>{date}</code>、<code>{updated}</code>、<code>{tags}</code>、<code>{categories}</code>、<code>{draft}</code>、<code>{summary}</code>、<code>{slug}</code>、<code>{body}</code>。模板必须包含 <code>{body}</code>。</p>
+</section>
+
+<div class="save-bar">
+    <div><strong>时区：@_timeZoneId</strong><span class="hint">自动任务按此时区运行；时区在系统设置中修改。</span></div>
+    <button class="btn-primary" @onclick="SaveAsync" disabled="@_busy">保存发布设置</button>
+</div>
+
+<section class="card">
+    <div class="card-head"><div><span class="eyebrow">记录</span><h2>最近发布</h2></div></div>
+    @if (_recent.Count == 0) { <p class="empty-state">还没有发布记录。</p> }
+    else
+    {
+        <div class="publication-list">
+        @foreach (var item in _recent.Take(12))
+        {
+            <div class="publication-row"><span class="badge @AdminLabels.PublicationBadge(item.Publication.Status)">@AdminLabels.PublicationText(item.Publication.Status)</span>
+                <div><strong>@item.TargetName</strong><p class="hint">@AdminFormat.When(item.Publication.ScheduledAtUtc) · @(item.Publication.RemoteId ?? "等待生成文件")</p></div></div>
+        }
+        </div>
+    }
+</section>
 
 @code {
-    private ContentDate _today = default;
-
+    private const string PublicTargetName = "稿件发布目录";
+    private ContentDate _today;
     private ReflectionView? _reflection;
-    private IReadOnlyList<PublishTarget>? _targets;
-    private IReadOnlyList<PublicationView> _todayPublications = [];
-    private IReadOnlyList<PublicationView> _recentPublications = [];
-
-    private ContentSettings? _settings;
-    private string _timeZoneId = string.Empty;
-    private string _generationTime = string.Empty;
-    private string _publishTime = string.Empty;
-    private int _publishWindow;
-
-    private bool _ignoreTranscriptionFailures;
-    private bool _allowOverwriteOfManualEdits;
-
-    private string? _publishTargetToken;
-
-    /// <summary>Wire token for the visibility dropdown: <c>draft</c> / <c>public</c> (§11.1).</summary>
-    private string _visibilityToken = "draft";
-
-    private PublishTargetId? _confirming;
-    private bool _confirmActionIsEnable;
-    private string? _password;
-
-    private PublishTargetId? _editing;
-    private string? _editName;
-    private string? _editDestination;
-
-    private string? _newName;
-    private string? _newDestination;
-
-    private RemoteCheckResult? _check;
-
+    private PublishTarget? _publishTarget;
+    private IReadOnlyList<PublicationView> _recent = [];
+    private string _timeZoneId = ContentSettings.DefaultTimeZoneId;
+    private string _generationTime = "23:00";
+    private string _publishTime = "08:00";
+    private string _draftDirectory = ContentSettings.DefaultDraftDirectory;
+    private string _publishedDirectory = ContentSettings.DefaultPublishedDirectory;
+    private string _hexoTemplate = MarkdownTemplate.Default;
+    private string _currentPassword = string.Empty;
+    private bool _automaticPublish;
+    private bool _busy;
     private string? _message;
     private string? _error;
-    private bool _busy;
-
     private ILogger Logger => LoggerFactory.CreateLogger("DailyMusings.Admin.Publishing");
 
-    protected override async Task OnInitializedAsync()
-    {
-        _error = await AdminOperation.RunAsync(LoadAsync, Logger);
-    }
+    protected override async Task OnInitializedAsync() => _error = await AdminOperation.RunAsync(LoadAsync, Logger);
 
     private async Task LoadAsync()
     {
         await using var scope = ScopeFactory.CreateAsyncScope();
         var services = scope.ServiceProvider;
-
         var calendar = await services.GetRequiredService<IContentCalendarProvider>().GetCalendarAsync(CancellationToken.None);
         _today = calendar.ContentDateOf(services.GetRequiredService<IClock>().UtcNow);
-
         _reflection = await services.GetRequiredService<GetReflectionUseCase>().ExecuteAsync(_today, CancellationToken.None);
-
-        _targets = await services.GetRequiredService<ListPublishTargetsUseCase>().ExecuteAsync(CancellationToken.None);
-
-        var publications = services.GetRequiredService<ListPublicationsUseCase>();
-        _recentPublications = await publications.ExecuteAsync(50, CancellationToken.None);
-
-        _todayPublications = _reflection is null
-            ? []
-            : await publications.ForReflectionAsync(_reflection.Id, CancellationToken.None);
-
-        _settings = await services.GetRequiredService<IContentSettingsProvider>().GetAsync(CancellationToken.None);
-        _timeZoneId = _settings.TimeZoneId;
-        _generationTime = ContentSettings.FormatTime(_settings.GenerationLocalTime);
-        _publishTime = ContentSettings.FormatTime(_settings.PublishLocalTime);
-        _publishWindow = _settings.PublishWindowMinutes;
-
-        // The staged selection survives a reload only while it still names a target that exists.
-        if (_publishTargetToken is null ||
-            _targets.All(target => target.Id.ToString() != _publishTargetToken))
-        {
-            _publishTargetToken = _targets.Count > 0 ? _targets[0].Id.ToString() : null;
-        }
+        var settings = await services.GetRequiredService<IContentSettingsProvider>().GetAsync(CancellationToken.None);
+        _timeZoneId = settings.TimeZoneId;
+        _generationTime = ContentSettings.FormatTime(settings.GenerationLocalTime);
+        _publishTime = ContentSettings.FormatTime(settings.PublishLocalTime);
+        _draftDirectory = settings.DraftDirectory;
+        _publishedDirectory = settings.PublishedDirectory;
+        _hexoTemplate = settings.HexoFrontMatterTemplate;
+        var targets = await services.GetRequiredService<ListPublishTargetsUseCase>().ExecuteAsync(CancellationToken.None);
+        _publishTarget = targets.FirstOrDefault(target => target.Name == PublicTargetName);
+        _automaticPublish = _publishTarget?.AutomaticPublishEnabled ?? false;
+        _recent = await services.GetRequiredService<ListPublicationsUseCase>().ExecuteAsync(50, CancellationToken.None);
     }
 
-    private string SelectedTargetToken() => _publishTargetToken ?? string.Empty;
-
-    private PublicationView? LastPublicationFor(PublishTarget target) =>
-        _recentPublications.FirstOrDefault(view => view.Publication.PublishTargetId == target.Id);
-
-    private async Task ReloadAsync() => await RunAsync(async () =>
-    {
-        _check = null;
-        _confirming = null;
-        _editing = null;
-        await LoadAsync();
-    });
+    private async Task ReloadAsync() => await RunAsync(async _ => await LoadAsync(), "状态已刷新。");
 
     private async Task GenerateTodayAsync() => await RunAsync(async services =>
     {
-        var result = await services
-            .GetRequiredService<RequestReflectionGenerationUseCase>()
-            .ExecuteAsync(
-                _today,
-                manual: true,
-                _ignoreTranscriptionFailures,
-                _allowOverwriteOfManualEdits,
-                CancellationToken.None);
-
+        var result = await services.GetRequiredService<RequestReflectionGenerationUseCase>().ExecuteAsync(
+            _today, manual: true, ignoreTranscriptionFailures: true, allowOverwriteOfManualEdits: false, CancellationToken.None);
         if (!result.Decision.Allowed)
-        {
-            _error = $"{AdminLabels.GenerationRefusalText(result.Decision.Code, result.Decision.Detail)}"
-                + $"（{result.Decision.Code}）";
-            return;
-        }
-
+            throw new UseCaseException(result.Decision.Code ?? "reflection.generation.refused", AdminLabels.GenerationRefusalText(result.Decision.Code, result.Decision.Detail));
         await LoadAsync();
-        _message = "已把今天的生成任务放进队列，稍后刷新查看结果（生成需要调用你配置的模型接口）。";
-    });
+    }, "生成任务已提交；完成后会写入稿件输出目录。");
 
     private async Task PublishTodayAsync() => await RunAsync(async services =>
     {
-        if (_targets is null || _targets.Count == 0)
+        await EnsurePublicTargetAsync(services);
+        _reflection = await services.GetRequiredService<GetReflectionUseCase>().ExecuteAsync(_today, CancellationToken.None);
+        if (_reflection?.WorkingVersion is null)
+            throw new UseCaseException("publication.reflection_unknown", "今天还没有可发布的稿件。");
+        if (_reflection.Status != ReflectionStatus.Confirmed)
         {
-            _error = "还没有导出目标，先添加一个 Markdown 目录。";
-            return;
+            if (_reflection.WorkingVersion.SourcesCheckedAtUtc is null)
+                throw new UseCaseException("reflection.confirm.source_check_pending", "来源检查尚未完成，请稍后刷新再发布。");
+            _reflection = await services.GetRequiredService<ConfirmReflectionUseCase>().ExecuteAsync(
+                _today, new DailyMusings.Application.Reflections.ConfirmReflectionRequest(AcceptedUnsourcedClaims: true), CancellationToken.None);
         }
-
-        var token = SelectedTargetToken();
-        if (!Guid.TryParse(token, out var parsed))
-        {
-            _error = "请选择一个导出目标。";
-            return;
-        }
-
-        var visibility = _visibilityToken == "public" ? PublicationVisibility.Public : PublicationVisibility.Draft;
-
-        var result = await services
-            .GetRequiredService<RequestPublicationUseCase>()
-            .ExecuteAsync(
-                _today,
-                new PublishTargetId(parsed),
-                visibility,
-                actor: "admin",
-                replaceExistingFile: false,
-                manual: true,
-                CancellationToken.None);
-
+        var result = await services.GetRequiredService<RequestPublicationUseCase>().ExecuteAsync(
+            _today, _publishTarget!.Id, PublicationVisibility.Public, "admin", false, manual: true, CancellationToken.None);
         if (!result.Queued)
-        {
-            _error = $"{AdminLabels.PublicationRefusalText(result.Code, result.Detail)}（{result.Code}）";
-            return;
-        }
-
+            throw new UseCaseException(result.Code ?? "publication.refused", AdminLabels.PublicationRefusalText(result.Code, result.Detail));
         await LoadAsync();
-        _message = visibility == PublicationVisibility.Public
-            ? "已把今天的稿件按「公开」放进导出队列；文件里会写 draft: false。"
-            : "已把今天的稿件按「草稿」放进导出队列；文件里会写 draft: true。";
-    });
+    }, "稿件已进入发布队列。");
 
-    /// <summary>
-    /// Parses the two times here rather than in the use case, so a typo is reported next to the field that has it.
-    /// The use case validates everything else — the time zone above all, since a bad zone id would otherwise only
-    /// surface when a capture failed.
-    /// </summary>
-    private async Task SaveScheduleAsync() => await RunAsync(async services =>
+    private async Task SaveAsync() => await RunAsync(async services =>
     {
         if (!TimeOnly.TryParseExact(_generationTime, "HH:mm", CultureInfo.InvariantCulture, DateTimeStyles.None, out var generation) ||
             !TimeOnly.TryParseExact(_publishTime, "HH:mm", CultureInfo.InvariantCulture, DateTimeStyles.None, out var publish))
-        {
-            _error = "两个时刻都需要写成 HH:mm，例如 23:00。";
-            return;
-        }
+            throw new UseCaseException("publish.time.invalid", "生成和发布时间都必须是 HH:mm。");
 
-        var saved = await services
-            .GetRequiredService<UpdateContentSettingsUseCase>()
-            .ExecuteAsync(
-                // Retention belongs to the system page; null means "leave it as it is".
-                new ContentSettingsUpdate(_timeZoneId, generation, publish, _publishWindow, AudioRetentionDays: null),
-                CancellationToken.None);
-
-        _settings = saved;
-        _timeZoneId = saved.TimeZoneId;
-        _generationTime = ContentSettings.FormatTime(saved.GenerationLocalTime);
-        _publishTime = ContentSettings.FormatTime(saved.PublishLocalTime);
-        _publishWindow = saved.PublishWindowMinutes;
-
-        _message = $"已保存：时区 {saved.TimeZoneId}，生成 {_generationTime}，导出 {_publishTime}，窗口 {saved.PublishWindowMinutes} 分钟。";
-    });
-
-    private async Task CreateTargetAsync() => await RunAsync(async services =>
-    {
-        // Checked here as well as inside the use case: the use case rejects a blank name with ArgumentException,
-        // which is not an operator-facing failure type, and an exception escaping an @onclick handler kills the
-        // whole circuit — one empty click and every button on this page stops responding.
-        if (string.IsNullOrWhiteSpace(_newName))
-        {
-            _error = "名称不能为空。";
-            return;
-        }
-
-        var (target, created) = await services
-            .GetRequiredService<CreatePublishTargetUseCase>()
-            .ExecuteAsync(
-                _newName,
-                PublishTargetType.Markdown,
-                string.IsNullOrWhiteSpace(_newDestination) ? null : _newDestination,
-                CancellationToken.None);
-
-        _newName = null;
-        _newDestination = null;
-
+        await services.GetRequiredService<UpdateContentSettingsUseCase>().ExecuteAsync(
+            new ContentSettingsUpdate(null, generation, publish, null, null, null, _draftDirectory, _publishedDirectory, _hexoTemplate),
+            CancellationToken.None);
+        await EnsurePublicTargetAsync(services);
+        await services.GetRequiredService<UpdatePublishTargetUseCase>().ExecuteAsync(
+            _publishTarget!.Id, null, _publishedDirectory, CancellationToken.None);
+        if (_automaticPublish != _publishTarget.AutomaticPublishEnabled)
+            await services.GetRequiredService<SetAutomaticPublishUseCase>().ExecuteAsync(
+                _publishTarget.Id, _automaticPublish, _currentPassword, CancellationToken.None);
+        _currentPassword = string.Empty;
         await LoadAsync();
-        _message = created ? $"已添加导出目标「{target.Name}」。" : $"已经有一个叫「{target.Name}」的目标，没有重复创建。";
-    });
+    }, "发布设置已保存，下一次调度立即使用新配置。");
 
-    private void BeginEdit(PublishTarget target)
+    private async Task EnsurePublicTargetAsync(IServiceProvider services)
     {
-        _message = null;
-        _error = null;
-        _check = null;
-        _confirming = null;
-        _editing = target.Id;
-        _editName = target.Name;
-        _editDestination = target.DestinationReference;
+        if (_publishTarget is not null) return;
+        _publishTarget = (await services.GetRequiredService<CreatePublishTargetUseCase>().ExecuteAsync(
+            PublicTargetName, PublishTargetType.Markdown, _publishedDirectory, CancellationToken.None)).Target;
     }
 
-    private void CancelEdit() => _editing = null;
+    private void ResetTemplate() => _hexoTemplate = MarkdownTemplate.Default;
+    private PublicationStatus? TodayPublicationStatus() => _recent.FirstOrDefault(item => _reflection is not null && item.Publication.ReflectionId == _reflection.Id)?.Publication.Status;
+    private string PublicationText() => TodayPublicationStatus() is { } status ? AdminLabels.PublicationText(status) : "尚未发布";
+    private string PublicationBadge() => TodayPublicationStatus() is { } status ? AdminLabels.PublicationBadge(status) : "badge-muted";
 
-    private async Task SaveEditAsync() => await RunAsync(async services =>
+    private async Task RunAsync(Func<IServiceProvider, Task> work, string success)
     {
-        if (_editing is not { } targetId)
-        {
-            return;
-        }
-
-        if (string.IsNullOrWhiteSpace(_editName))
-        {
-            _error = "名称不能为空。";
-            return;
-        }
-
-        await services
-            .GetRequiredService<UpdatePublishTargetUseCase>()
-            .ExecuteAsync(targetId, _editName, _editDestination, CancellationToken.None);
-
-        _editing = null;
-        await LoadAsync();
-        _message = "已保存目标设置。目录是相对 markdown 根目录的路径，跳出根目录的路径会被服务端拒绝。";
-    });
-
-    /// <summary>
-    /// Starts the confirmation for either direction. Both need the password, because the use case requires it to
-    /// turn the switch off as well — rendering the password box only on the way in makes "关闭自动发布" always
-    /// submit an empty password, so the opt-in can never be revoked from the UI.
-    /// </summary>
-    private void BeginConfirm(PublishTarget target, bool enable)
-    {
-        _confirming = target.Id;
-        _confirmActionIsEnable = enable;
-        _password = null;
-        _message = null;
-        _error = null;
-        _editing = null;
-        _check = null;
-    }
-
-    private void CancelConfirm()
-    {
-        _confirming = null;
-        _password = null;
-    }
-
-    private async Task ApplyConfirmAsync(PublishTarget target) => await RunAsync(async services =>
-    {
-        var enable = _confirmActionIsEnable;
-
-        var updated = await services
-            .GetRequiredService<SetAutomaticPublishUseCase>()
-            .ExecuteAsync(target.Id, enable, _password ?? string.Empty, CancellationToken.None);
-
-        _confirming = null;
-        _password = null;
-        await LoadAsync();
-
-        _message = enable
-            ? $"已为「{updated.Name}」开启自动发布，开启人：{updated.AutomaticPublishEnabledBy}。此后每个导出时刻会无人确认地写一份 Markdown 文件。"
-            : $"已为「{updated.Name}」关闭自动发布，此后只在你手动导出时写文件。";
-    });
-
-    private async Task RetryPublicationAsync(PublicationId publicationId) => await RunAsync(async services =>
-    {
-        var (publication, _) = await services
-            .GetRequiredService<RetryPublicationUseCase>()
-            .ExecuteAsync(publicationId, "admin", CancellationToken.None);
-
-        await LoadAsync();
-        _message = $"已把这次导出（{AdminLabels.PublicationText(publication.Status)}）放回队列，稍后刷新查看结果。";
-    });
-
-    private async Task CheckRemoteAsync(PublicationId publicationId) => await RunAsync(async services =>
-    {
-        _check = await services
-            .GetRequiredService<CheckRemoteUseCase>()
-            .ExecuteAsync(publicationId, CancellationToken.None);
-
-        await LoadAsync();
-        _message = "已读取文件当前的哈希，与记录做了比较，结果见下方。";
-    });
-
-    private async Task ResolveDivergenceAsync(PublicationId publicationId, RemoteDivergenceAction action) =>
-        await RunAsync(async services =>
-        {
-            _check = await services
-                .GetRequiredService<ResolveRemoteDivergenceUseCase>()
-                .ExecuteAsync(publicationId, action, actor: "admin", allowOverwriteOfManualEdits: false, CancellationToken.None);
-
-            await LoadAsync();
-
-            _message = action == RemoteDivergenceAction.Overwrite
-                ? "已按你的决定重新导出，文件被替换成当前稿件的内容。"
-                : "已记下「保留两边」：没有任何文件被改动。";
-        });
-
-    private void DismissCheck() => _check = null;
-
-    private static string DescribeComparison(RemoteComparison comparison)
-    {
-        if (!comparison.RemoteChecked)
-        {
-            return "导出目录里找不到这个文件了（可能被移动、改名或删除），因此没法比较。";
-        }
-
-        return (comparison.LocalChanged, comparison.RemoteChanged) switch
-        {
-            (false, false) => "文件与记录完全一致，没有差异。",
-            (true, false) => "稿件改过，但文件还是上一次写出来的内容。",
-            (false, true) => "文件被产品之外的编辑改过（当前稿件与记录一致）。",
-            (true, true) => "稿件和文件都被改过，两边已经不一致。",
-        };
-    }
-
-    private static string ShortHash(string? hash) =>
-        string.IsNullOrEmpty(hash) ? "（未知）" : hash.Length <= 12 ? hash : hash[..12] + "…";
-
-    /// <summary>
-    /// The single funnel every handler on this page goes through, so <c>_busy</c> and the message/error slots cannot
-    /// drift apart per handler. The body runs inside <c>AdminOperation</c>, which is the only thing standing between
-    /// a handler and the circuit: an exception escaping an <c>@onclick</c> handler terminates the Blazor circuit, and
-    /// from that moment every button on the page is dead.
-    /// </summary>
-    private Task RunAsync(Func<Task> work) => RunAsync(_ => work());
-
-    private async Task RunAsync(Func<IServiceProvider, Task> work)
-    {
-        _busy = true;
-        _message = null;
-        _error = null;
-
+        _busy = true; _message = null; _error = null;
         try
         {
-            var failure = await AdminOperation.RunAsync(
-                async () =>
-                {
-                    await using var scope = ScopeFactory.CreateAsyncScope();
-                    await work(scope.ServiceProvider);
-                },
-                Logger);
-
-            if (failure is not null)
+            var failure = await AdminOperation.RunAsync(async () =>
             {
-                _error = failure;
-            }
+                await using var scope = ScopeFactory.CreateAsyncScope();
+                await work(scope.ServiceProvider);
+            }, Logger);
+            if (failure is null) _message = success; else _error = failure;
         }
-        finally
-        {
-            _busy = false;
-        }
+        finally { _busy = false; }
     }
 }

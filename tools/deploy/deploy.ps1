@@ -10,8 +10,10 @@
 #   pwsh -File tools/deploy/deploy.ps1                       # 用默认主机与端口
 #   pwsh -File tools/deploy/deploy.ps1 -Server 100.64.0.3 -Port 18321
 param(
-    [string]$Server = "100.64.0.3",
+    [string]$Server = "nero@100.64.0.3",
     [int]$Port = 18321,
+    [string]$RemoteConfigDirectory = "/home/nero/dailymusings-config",
+    [string]$RemoteDataDirectory = "/home/nero/dailymusings-data",
     [switch]$SkipBuild
 )
 
@@ -19,13 +21,15 @@ $ErrorActionPreference = "Stop"
 $repo = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $tarball = Join-Path $env:TEMP "dailymusings-$stamp.tar.gz"
+$configDirectoryB64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($RemoteConfigDirectory))
+$dataDirectoryB64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($RemoteDataDirectory))
 
 Write-Host "== 1. packaging $repo =="
 # tar 是 Windows 10+ 自带的 bsdtar；用 .gitignore 之外的显式排除，避免把构建产物与本地状态送上去。
 & tar -czf $tarball `
     --exclude=./.git --exclude=./.vs --exclude=./.tmp-work --exclude=./.tmp-device --exclude=./.tmp-verify `
     --exclude=./artifacts --exclude=./data --exclude=./keys --exclude=./media --exclude=./exports --exclude=./markdown `
-    --exclude='*/bin' --exclude='*/obj' --exclude=./deploy/secrets `
+    --exclude='*/bin' --exclude='*/obj' --exclude=./deploy/secrets --exclude=./deploy/.env `
     -C $repo .
 if ($LASTEXITCODE -ne 0) { throw "tar failed" }
 
@@ -39,15 +43,113 @@ if ($LASTEXITCODE -ne 0) { throw "scp failed" }
 Write-Host "== 3. stop -> remove old image -> build -> start =="
 $remote = @"
 set -euo pipefail
-ROOT=`$HOME/dailymusings
-COMPOSE="docker compose -f `$ROOT/deploy/compose.yaml"
-SECRETS=`$(mktemp -d)
+ROOT=/home/nero/dailymusings
+[ "`$(dirname "`$ROOT")" = "/home/nero" ] && [ "`$(basename "`$ROOT")" = "dailymusings" ] || {
+    echo "refusing unsafe project path: `$ROOT" >&2
+    exit 2
+}
+OLD_COMPOSE="docker compose -f `$ROOT/deploy/compose.yaml"
+PRESERVED=`$(mktemp -d)
+case "`$PRESERVED" in
+    /tmp/tmp.*) ;;
+    *) echo "refusing unexpected temporary path: `$PRESERVED" >&2; exit 2 ;;
+esac
+cleanup_preserved() {
+    if [ -n "`$PRESERVED" ] && [ -d "`$PRESERVED" ]; then rm -rf -- "`$PRESERVED"; fi
+}
+trap cleanup_preserved EXIT
+DEFAULT_CONFIG_DIR=`$(echo $configDirectoryB64 | base64 -d)
+DEFAULT_DATA_DIR=`$(echo $dataDirectoryB64 | base64 -d)
 
-echo "-- keep the real secrets out of the wipe --"
-if [ -d "`$ROOT/deploy/secrets" ]; then cp -a "`$ROOT/deploy/secrets" "`$SECRETS/secrets"; fi
+read_env_path() {
+    key="`$1"
+    file="`$ROOT/deploy/.env"
+    [ -f "`$file" ] || return 0
+    awk -F= -v key="`$key" '`$1 == key { sub(/^[^=]*=/, ""); gsub(/\r$/, ""); print }' "`$file" | tail -n1
+}
+
+CONFIG_DIR=`$(read_env_path DAILYMUSINGS_CONFIG_DIR)
+DATA_DIR=`$(read_env_path DAILYMUSINGS_DATA_DIR)
+CONFIG_DIR=`${CONFIG_DIR:-`$DEFAULT_CONFIG_DIR}
+DATA_DIR=`${DATA_DIR:-`$DEFAULT_DATA_DIR}
+
+validate_bind_dir() {
+    label="`$1"
+    value="`$2"
+    case "`$value" in
+        /*) ;;
+        *) echo "`$label must be an absolute path: `$value" >&2; exit 2 ;;
+    esac
+
+    resolved=`$(realpath -m "`$value")
+    case "`$resolved" in
+        /|/home|/home/nero|"`$ROOT"|"`$ROOT"/*)
+            echo "refusing unsafe `$label: `$resolved" >&2
+            exit 2
+            ;;
+    esac
+    printf '%s' "`$resolved"
+}
+
+CONFIG_DIR=`$(validate_bind_dir DAILYMUSINGS_CONFIG_DIR "`$CONFIG_DIR")
+DATA_DIR=`$(validate_bind_dir DAILYMUSINGS_DATA_DIR "`$DATA_DIR")
+[ "`$CONFIG_DIR" != "`$DATA_DIR" ] || { echo "config and data directories must differ" >&2; exit 2; }
+
+echo "-- keep deployment settings and real secrets out of the source-tree wipe --"
+if [ -d "`$ROOT/deploy/secrets" ]; then cp -a "`$ROOT/deploy/secrets" "`$PRESERVED/secrets"; fi
+if [ -f "`$ROOT/deploy/.env" ]; then cp -a "`$ROOT/deploy/.env" "`$PRESERVED/.env"; fi
 
 echo "-- stop and remove the running instance --"
-`$COMPOSE down --remove-orphans || true
+if [ -f "`$ROOT/deploy/.env" ]; then
+    docker compose --env-file "`$ROOT/deploy/.env" -f "`$ROOT/deploy/compose.yaml" down --remove-orphans || true
+else
+    `$OLD_COMPOSE down --remove-orphans || true
+fi
+
+echo "-- migrate named volumes to the two bind-mounted directories (first bind-mount deploy only) --"
+mkdir -p "`$CONFIG_DIR/keys" "`$DATA_DIR"
+if [ ! -f "`$CONFIG_DIR/.named-volumes-migrated" ]; then
+    copy_volume() {
+        volume="`$1"
+        destination="`$2"
+        if docker volume inspect "`$volume" >/dev/null 2>&1; then
+            docker run --rm \
+                --user 0 \
+                -v "`$volume:/source:ro" \
+                -v "`$destination:/target" \
+                --entrypoint sh dailymusings/server:local \
+                -c 'cp -a /source/. /target/'
+        fi
+    }
+
+    copy_volume dailymusings_dailymusings-state "`$DATA_DIR"
+    copy_volume dailymusings_dailymusings-config "`$CONFIG_DIR"
+    copy_volume dailymusings_dailymusings-keys "`$CONFIG_DIR/keys"
+
+    source_files=0
+    if docker volume inspect dailymusings_dailymusings-state >/dev/null 2>&1; then
+        source_files=`$(docker run --rm --user 0 -v dailymusings_dailymusings-state:/source:ro --entrypoint sh dailymusings/server:local -c 'find /source -type f | wc -l')
+    fi
+    target_files=`$(find "`$DATA_DIR" -type f | wc -l)
+    [ "`$target_files" -ge "`$source_files" ] || {
+        echo "data migration verification failed: source=`$source_files target=`$target_files" >&2
+        exit 3
+    }
+    # cp -a deliberately preserves the container uid/mode from the old volumes, so the SSH user may no longer
+    # be able to create the marker directly. Create it through the same narrowly mounted root helper instead.
+    docker run --rm --user 0 \
+        -v "`$CONFIG_DIR:/config" \
+        --entrypoint sh dailymusings/server:local \
+        -c 'touch /config/.named-volumes-migrated'
+fi
+
+# The image runs as uid 1654. Chown only the two exact, validated deployment directories through a root helper
+# container; the SSH account needs Docker access but does not need host-root privileges.
+docker run --rm --user 0 \
+    -v "`$CONFIG_DIR:/config" \
+    -v "`$DATA_DIR:/data" \
+    --entrypoint sh dailymusings/server:local \
+    -c 'chown -R 1654:1654 /config /data'
 
 echo "-- remove the old image (user rule: never start a new image beside the old one) --"
 docker image rm -f dailymusings/server:local || true
@@ -56,10 +158,24 @@ echo "-- lay down the new tree --"
 rm -rf "`$ROOT"
 mkdir -p "`$ROOT"
 tar -xzf /tmp/dm-$stamp.tar.gz -C "`$ROOT"
-if [ -d "`$SECRETS/secrets" ]; then cp -a "`$SECRETS/secrets" "`$ROOT/deploy/secrets"; fi
+if [ -d "`$PRESERVED/secrets" ]; then cp -a "`$PRESERVED/secrets" "`$ROOT/deploy/secrets"; fi
+mkdir -p "`$ROOT/deploy/secrets"
+for name in deepseek-api-key openai-api-key embedding-api-key smtp-password; do
+    [ -e "`$ROOT/deploy/secrets/`$name" ] || : > "`$ROOT/deploy/secrets/`$name"
+done
 chmod 700 "`$ROOT/deploy/secrets" 2>/dev/null || true
 chmod 644 "`$ROOT/deploy/secrets/"* 2>/dev/null || true
-rm -rf "`$SECRETS"
+# Always write back the resolved and validated directories. An older .env may contain only the port settings;
+# restoring it verbatim would leave the two required bind sources undefined in the new Compose file.
+printf 'DAILYMUSINGS_CONFIG_DIR=%s\nDAILYMUSINGS_DATA_DIR=%s\nDAILYMUSINGS_HTTP_PORT=%s\nDAILYMUSINGS_INTERNAL_PORT=%s\n' \
+    "`$CONFIG_DIR" "`$DATA_DIR" "$Port" "$Port" > "`$ROOT/deploy/.env"
+cleanup_preserved
+trap - EXIT
+
+COMPOSE="docker compose --env-file `$ROOT/deploy/.env -f `$ROOT/deploy/compose.yaml"
+
+echo "-- validate resolved compose configuration --"
+`$COMPOSE config --quiet
 
 echo "-- build --"
 `$COMPOSE build app

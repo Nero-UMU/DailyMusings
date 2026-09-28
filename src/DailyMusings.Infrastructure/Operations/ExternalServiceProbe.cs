@@ -162,6 +162,51 @@ public sealed class ExternalServiceProbe : IExternalServiceProbe
         return result;
     }
 
+    public async Task<ProbeResult> ProbeModelAsync(
+        ModelEndpointProbeRequest request,
+        CancellationToken cancellationToken)
+    {
+        var name = request.Service switch
+        {
+            ExternalService.Transcription => "transcription",
+            ExternalService.Generation => "generation",
+            ExternalService.Embedding => "embedding",
+            _ => null,
+        };
+
+        if (name is null)
+        {
+            return ProbeResult.Failure("probe.unknown_service", "That is not a model service.");
+        }
+
+        if (!Uri.TryCreate(request.BaseUrl?.Trim(), UriKind.Absolute, out var baseUri) ||
+            baseUri.Scheme is not ("http" or "https"))
+        {
+            return ProbeResult.Failure($"probe.{name}.url_invalid", "Base URL 必须是有效的 HTTP 或 HTTPS 地址。");
+        }
+
+        var secret = string.IsNullOrWhiteSpace(request.ApiKey)
+            ? _secrets.TryGet(request.SecretName)
+            : request.ApiKey.Trim();
+
+        if (string.IsNullOrWhiteSpace(secret))
+        {
+            return ProbeResult.Failure($"probe.{name}.secret_missing", "请填写 API Key，或先保存一个可用的 Key。");
+        }
+
+        var modelsUri = new Uri($"{baseUri.ToString().TrimEnd('/')}/models", UriKind.Absolute);
+        var result = await SendAsync(
+            name,
+            HttpMethod.Get,
+            modelsUri,
+            new AuthenticationHeaderValue("Bearer", secret),
+            $"已连接 {modelsUri.GetLeftPart(UriPartial.Authority)}，并通过 /models 校验。",
+            cancellationToken).ConfigureAwait(false);
+
+        _logger.LogInformation("Test candidate connection for {Service} reported {Outcome}.", request.Service, result.Code);
+        return result;
+    }
+
     private async Task<ProbeResult> ProbeModelAsync(
         string name,
         (string BaseUrl, string SecretName)? settings,

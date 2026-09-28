@@ -73,7 +73,10 @@ public static class ContentSettingsEndpointRouteBuilderExtensions
                         request.PublishLocalTime is null ? null : publish,
                         request.PublishWindowMinutes,
                         request.AudioRetentionDays,
-                        request.ContentRetentionDays),
+                        request.ContentRetentionDays,
+                        request.DraftDirectory,
+                        request.PublishedDirectory,
+                        request.HexoFrontMatterTemplate),
                     cancellationToken)
                 .ConfigureAwait(false);
 
@@ -105,5 +108,8 @@ public static class ContentSettingsEndpointRouteBuilderExtensions
         ContentSettings.FormatTime(settings.PublishLocalTime),
         settings.PublishWindowMinutes,
         settings.AudioRetentionDays,
-        settings.ContentRetentionDays);
+        settings.ContentRetentionDays,
+        settings.DraftDirectory,
+        settings.PublishedDirectory,
+        settings.HexoFrontMatterTemplate);
 }

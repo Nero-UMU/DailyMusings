@@ -24,6 +24,10 @@
     <p>
         每个端点右上角的「密钥来源」会告诉你它当前用的是哪一个：后台填写 / Secret 文件 / 环境变量 / 未配置。
     </p>
+    <p>
+        新实例的文章生成默认填入 DeepSeek（<code>https://api.deepseek.com</code> / <code>deepseek-flash</code>）。
+        DeepSeek 当前不提供语音转写或 Embedding 接口，因此这两项保留为可替换的 OpenAI 兼容端点，不会伪装成 DeepSeek 可用。
+    </p>
 </div>
 
 @if (_message is not null)
@@ -75,17 +79,17 @@ else
                     </label>
                     <label>
                         Base URL
-                        <input value="@_baseUrls.GetValueOrDefault(service)" @onchange="e => SetBaseUrl(service, (string?)e.Value)" />
+                        <input value="@_baseUrls.GetValueOrDefault(service)" @oninput="e => SetBaseUrl(service, (string?)e.Value)" />
                     </label>
                     <label>
                         模型名
-                        <input value="@_models.GetValueOrDefault(service)" @onchange="e => SetModel(service, (string?)e.Value)" />
+                        <input value="@_models.GetValueOrDefault(service)" @oninput="e => SetModel(service, (string?)e.Value)" />
                     </label>
                     <label>
                         API Key（留空表示不改）
                         <input type="password" autocomplete="new-password" placeholder="留空即保持现状"
                                value="@_passwords.GetValueOrDefault(service)"
-                               @onchange="e => SetPassword(service, (string?)e.Value)" />
+                               @oninput="e => SetPassword(service, (string?)e.Value)" />
                     </label>
                     @if (_secretSources.GetValueOrDefault(service) == SecretSource.Ui)
                     {
@@ -302,7 +306,13 @@ else
     {
         var result = await services
             .GetRequiredService<ProbeExternalServiceUseCase>()
-            .ExecuteAsync(ParseService(service), CancellationToken.None);
+            .ExecuteModelAsync(
+                new ModelEndpointProbeRequest(
+                    ParseService(service),
+                    _baseUrls.GetValueOrDefault(service) ?? string.Empty,
+                    _secretNames.GetValueOrDefault(service) ?? string.Empty,
+                    _passwords.GetValueOrDefault(service)),
+                CancellationToken.None);
 
         _probes[service] = result;
         _message = $"已测试{Describe(service)}。";
@@ -314,7 +324,13 @@ else
 
         foreach (var service in Services)
         {
-            _probes[service] = await probe.ExecuteAsync(ParseService(service), CancellationToken.None);
+            _probes[service] = await probe.ExecuteModelAsync(
+                new ModelEndpointProbeRequest(
+                    ParseService(service),
+                    _baseUrls.GetValueOrDefault(service) ?? string.Empty,
+                    _secretNames.GetValueOrDefault(service) ?? string.Empty,
+                    _passwords.GetValueOrDefault(service)),
+                CancellationToken.None);
         }
 
         _message = "三个端点都测过了，结果在各块里。";

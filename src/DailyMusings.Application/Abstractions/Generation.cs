@@ -22,9 +22,9 @@ public sealed record GenerationSettings(
     /// <summary>Off until an operator configures an endpoint: nothing is sent anywhere by default.</summary>
     public static GenerationSettings Default { get; } = new(
         Enabled: false,
-        BaseUrl: "https://api.openai.com/v1",
-        Model: "gpt-4o-mini",
-        SecretName: "openai-api-key",
+        BaseUrl: "https://api.deepseek.com",
+        Model: "deepseek-flash",
+        SecretName: "deepseek-api-key",
         Timeout: TimeSpan.FromMinutes(3),
 
         // v2 added the topic instruction: the model is now asked to pick the day's topics from the existing

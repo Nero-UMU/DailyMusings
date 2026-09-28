@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.RegularExpressions;
 using DailyMusings.Contracts;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
@@ -27,6 +28,25 @@ public class AdminSurfaceTests
         ["Generation:TimeoutSeconds"] = "30",
         ["Scheduler:IntervalSeconds"] = "1",
     };
+
+    [TestMethod]
+    public async Task Pairing_code_button_is_enabled_while_the_device_page_is_idle()
+    {
+        await using var instance = await TestInstance.StartAsync();
+        await instance.SignInAsChangedAdministratorAsync();
+
+        using var response = await instance.Client.GetAsync("/devices");
+        var html = WebUtility.HtmlDecode(await response.Content.ReadAsStringAsync());
+        var button = Regex.Match(
+            html,
+            "<button[^>]*class=\"btn btn-primary\"[^>]*>",
+            RegexOptions.CultureInvariant);
+
+        Assert.IsTrue(button.Success, $"配对码按钮没有渲染：\n{html}");
+        Assert.IsFalse(
+            button.Value.Contains("disabled", StringComparison.OrdinalIgnoreCase),
+            $"页面空闲时配对码按钮不应被禁用，实际标签是：{button.Value}");
+    }
 
     [TestMethod]
     public async Task Development_host_passes_dependency_scope_validation()
@@ -439,7 +459,7 @@ public class AdminSurfaceTests
             ("/data", "数据管理"),
             ("/models", "语音转写"),
             ("/notifications", "发送测试邮件"),
-            ("/publishing", "导出目标"),
+            ("/publishing", "Front matter 模板"),
             ("/content", "主题管理"),
             ("/system", "监听端口"),
         };

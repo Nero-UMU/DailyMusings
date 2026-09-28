@@ -112,7 +112,7 @@ internal sealed class PublishingTestContext : IAsyncDisposable
             clock,
             QueueNotifications);
 
-        Check = new CheckRemoteUseCase(Publications, Targets, Reflections, Destinations, Markdown, clock);
+        Check = new CheckRemoteUseCase(Publications, Targets, Reflections, Destinations, Markdown, clock, Content);
 
         Resolve = new ResolveRemoteDivergenceUseCase(Publications, Check, clock, Enqueuer);
 
