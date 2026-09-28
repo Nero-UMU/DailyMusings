@@ -159,6 +159,22 @@ public class PublishingLoopTests
         Assert.IsFalse(
             articleCard.Value.Contains(">已发布<", StringComparison.Ordinal),
             $"重新生成后的稿件卡片错误显示为已发布：\n{articleCard.Value}");
+
+        using var publishingPage = await instance.Client.GetAsync("/publishing");
+        var publishingHtml = WebUtility.HtmlDecode(await publishingPage.Content.ReadAsStringAsync());
+        var publishCard = Regex.Match(
+            publishingHtml,
+            "<article class=\"card action-card public-card\">.*?</article>",
+            RegexOptions.Singleline | RegexOptions.CultureInvariant);
+
+        Assert.IsTrue(publishCard.Success, $"发布设置没有渲染今日发布卡片：\n{publishingHtml}");
+        StringAssert.Contains(
+            publishCard.Value,
+            "尚未发布",
+            "旧版本已公开后，新生成的工作版本在发布设置中必须恢复为尚未发布。");
+        Assert.IsFalse(
+            publishCard.Value.Contains("已公开发布", StringComparison.Ordinal),
+            $"发布设置把旧版本的发布状态错误套到了新工作版本：\n{publishCard.Value}");
     }
 
     [TestMethod]

@@ -188,7 +188,10 @@
     }
 
     private void ResetTemplate() => _hexoTemplate = MarkdownTemplate.Default;
-    private PublicationStatus? TodayPublicationStatus() => _recent.FirstOrDefault(item => _reflection is not null && item.Publication.ReflectionId == _reflection.Id)?.Publication.Status;
+    private PublicationStatus? TodayPublicationStatus() => _recent.FirstOrDefault(item =>
+        _reflection?.WorkingVersion is { } workingVersion &&
+        item.Publication.ReflectionId == _reflection.Id &&
+        item.Publication.ReflectionVersionId == workingVersion.Id)?.Publication.Status;
     private string PublicationText() => TodayPublicationStatus() is { } status ? AdminLabels.PublicationText(status) : "尚未发布";
     private string PublicationBadge() => TodayPublicationStatus() is { } status ? AdminLabels.PublicationBadge(status) : "badge-muted";
 
