@@ -13,8 +13,8 @@
 
 <section class="library-summary">
     <div><strong>@_articles.Count</strong><span>全部稿件</span></div>
-    <div><strong>@_articles.Count(article => IsPublished(article.Id))</strong><span>已发布</span></div>
-    <div><strong>@_articles.Count(article => !IsPublished(article.Id))</strong><span>未发布</span></div>
+    <div><strong>@_articles.Count(IsPublished)</strong><span>已发布</span></div>
+    <div><strong>@_articles.Count(article => !IsPublished(article))</strong><span>未发布</span></div>
     <div><strong>@_topics.Count</strong><span>主题</span></div>
 </section>
 
@@ -45,7 +45,7 @@
                         <p>@(string.IsNullOrWhiteSpace(version?.Summary) ? Preview(version?.Body) : version.Summary)</p>
                     </button>
                     <div class="article-meta">
-                        <span class="badge @(IsPublished(article.Id) ? "badge-ok" : "badge-warn")">@(IsPublished(article.Id) ? "已发布" : "未发布")</span>
+                        <span class="badge @(IsPublished(article) ? "badge-ok" : "badge-warn")">@(IsPublished(article) ? "已发布" : "未发布")</span>
                         @foreach (var topic in version?.Topics ?? [])
                         {
                             <span class="topic-chip">@topic.Name</span>
@@ -61,7 +61,7 @@
 {
     <section class="card reader-card">
         <div class="card-head">
-            <div><span class="eyebrow">@selected.ContentDate · @(IsPublished(selected.Id) ? "已发布" : "未发布")</span>
+            <div><span class="eyebrow">@selected.ContentDate · @(IsPublished(selected) ? "已发布" : "未发布")</span>
                 <h2>@(string.IsNullOrWhiteSpace(selected.WorkingVersion?.Title) ? "（无标题）" : selected.WorkingVersion.Title)</h2></div>
             <button class="btn btn-sm" @onclick="CloseArticle">收起</button>
         </div>
@@ -147,7 +147,7 @@
     private const string FilterPublished = "published";
     private readonly List<ReflectionView> _articles = [];
     private readonly List<TopicSummary> _topics = [];
-    private readonly Dictionary<ReflectionId, PublicationStatus> _publicationStatus = [];
+    private readonly HashSet<ReflectionVersionId> _publishedVersionIds = [];
     private readonly List<TopicId> _selectedTopicIds = [];
     private ReflectionView? _selected;
     private ReflectionId? _confirmDeleteArticle;
@@ -172,14 +172,11 @@
             today.AddDays(-36500), today, page: 1, pageSize: 10000, CancellationToken.None);
         _articles.Clear(); _articles.AddRange(page.Items.OrderByDescending(item => item.ContentDate));
 
-        _publicationStatus.Clear();
+        _publishedVersionIds.Clear();
         var publications = await services.GetRequiredService<ListPublicationsUseCase>().ExecuteAsync(2000, CancellationToken.None);
-        foreach (var group in publications.GroupBy(item => item.Publication.ReflectionId))
+        foreach (var item in publications.Where(item => item.Publication.Status == PublicationStatus.Published))
         {
-            var status = group.Any(item => item.Publication.Status == PublicationStatus.Published)
-                ? PublicationStatus.Published
-                : group.First().Publication.Status;
-            _publicationStatus[group.Key] = status;
+            _publishedVersionIds.Add(item.Publication.ReflectionVersionId);
         }
 
         _topics.Clear();
@@ -197,8 +194,8 @@
         var query = _articles.AsEnumerable();
         query = _filter switch
         {
-            FilterPublished => query.Where(article => IsPublished(article.Id)),
-            FilterDraft => query.Where(article => !IsPublished(article.Id)),
+            FilterPublished => query.Where(IsPublished),
+            FilterDraft => query.Where(article => !IsPublished(article)),
             _ => query,
         };
         if (!string.IsNullOrWhiteSpace(_search))
@@ -212,7 +209,8 @@
         return query.ToArray();
     }
 
-    private bool IsPublished(ReflectionId id) => _publicationStatus.GetValueOrDefault(id) == PublicationStatus.Published;
+    private bool IsPublished(ReflectionView article) =>
+        article.WorkingVersion is { } version && _publishedVersionIds.Contains(version.Id);
     private static string Preview(string? body) => string.IsNullOrWhiteSpace(body) ? "暂无正文" : body.Length <= 90 ? body : body[..90] + "…";
     private string FilterClass(string value) => _filter == value ? "active" : string.Empty;
     private void SetFilter(string value) => _filter = value;

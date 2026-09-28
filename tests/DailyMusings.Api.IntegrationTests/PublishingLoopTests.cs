@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.RegularExpressions;
 using DailyMusings.Contracts;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
@@ -88,6 +89,76 @@ public class PublishingLoopTests
         var jobs = await instance.Client.GetFromJsonAsync<JobListResponse>("/api/jobs?limit=50");
         Assert.IsNotNull(jobs);
         Assert.IsFalse(jobs.Items.Any(job => job.JobType == "Notification"));
+    }
+
+    [TestMethod]
+    public async Task A_regenerated_working_version_is_shown_as_unpublished_when_an_older_version_was_published()
+    {
+        await using var model = await StubGenerationEndpoint.StartAsync();
+        var settings = GenerationEnabled(model.BaseUrl);
+        settings["Scheduler:IntervalSeconds"] = "3600";
+        await using var instance = await TestInstance.StartAsync(settings);
+
+        instance.WriteSecret("openai-api-key", "test-api-key");
+        await instance.SignInAsChangedAdministratorAsync();
+        var (_, device) = await instance.PairDeviceAsync();
+
+        using var created = await instance.Client.PostAsJsonAsync(
+            "/api/publish-targets",
+            new CreatePublishTargetRequest("hexo", PublishTargetTypeNames.Markdown, "posts"));
+        var target = await created.Content.ReadFromJsonAsync<PublishTargetDto>();
+
+        var (contentDate, publishedVersionId) = await GenerateAndConfirmAsync(instance, device);
+
+        using var publish = await device.PostAsJsonAsync(
+            $"/api/reflections/{contentDate}/publish/{target!.Id}",
+            new PublishRequest(PublicationVisibilityNames.Public, ReplaceExistingFile: false));
+        publish.EnsureSuccessStatusCode();
+        var publication = await WaitForPublicationAsync(instance, contentDate, PublicationStatusNames.Published);
+        Assert.AreEqual(publishedVersionId, publication.ReflectionVersionId);
+
+        model.State.GroundedSentence = "后来又补充了一条新素材。";
+        model.State.UnsourcedSentence = string.Empty;
+        using var lateInput = await device.PostAsJsonAsync(
+            "/api/inputs/text",
+            new TextInputRequest(
+                model.State.GroundedSentence,
+                DateTimeOffset.UtcNow.ToString("o"),
+                480,
+                "capture-after-publication"));
+        lateInput.EnsureSuccessStatusCode();
+
+        using var regenerate = await instance.Client.PostAsJsonAsync(
+            $"/api/reflections/{contentDate}/regenerate-stale",
+            new GenerateReflectionRequest(false, false));
+        regenerate.EnsureSuccessStatusCode();
+
+        var regenerated = await WaitForNewWorkingVersionAsync(instance.Client, contentDate, publishedVersionId);
+        Assert.AreNotEqual(publishedVersionId, regenerated.WorkingVersionId);
+        Assert.AreEqual(ReflectionStatusNames.ReviewRequired, regenerated.Status);
+        Assert.AreNotEqual(regenerated.WorkingVersionId, publication.ReflectionVersionId);
+
+        using var contentPage = await instance.Client.GetAsync("/content");
+        var html = WebUtility.HtmlDecode(await contentPage.Content.ReadAsStringAsync());
+        Assert.IsTrue(
+            Regex.IsMatch(
+                html,
+                "<strong>0</strong><span>已发布</span>.*?<strong>1</strong><span>未发布</span>",
+                RegexOptions.Singleline | RegexOptions.CultureInvariant),
+            $"内容管理的已发布/未发布汇总没有按当前工作版本统计：\n{html}");
+        var articleCard = Regex.Match(
+            html,
+            "<article class=\"article-card[^\"]*\">.*?</article>",
+            RegexOptions.Singleline | RegexOptions.CultureInvariant);
+
+        Assert.IsTrue(articleCard.Success, $"内容管理没有渲染稿件卡片：\n{html}");
+        StringAssert.Contains(
+            articleCard.Value,
+            "未发布",
+            "旧版本已发布不能让新生成、尚未发布的工作版本显示为已发布。");
+        Assert.IsFalse(
+            articleCard.Value.Contains(">已发布<", StringComparison.Ordinal),
+            $"重新生成后的稿件卡片错误显示为已发布：\n{articleCard.Value}");
     }
 
     [TestMethod]
@@ -347,6 +418,35 @@ public class PublishingLoopTests
         }
 
         Assert.Fail($"The publication never reached {status}. Last seen: {last?.Status ?? "none"}");
+        throw new InvalidOperationException("unreachable");
+    }
+
+    private static async Task<ReflectionDto> WaitForNewWorkingVersionAsync(
+        HttpClient client,
+        string contentDate,
+        string previousVersionId)
+    {
+        var deadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(60);
+        ReflectionDto? last = null;
+
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            using var response = await client.GetAsync($"/api/reflections/{contentDate}");
+            if (response.IsSuccessStatusCode)
+            {
+                last = await response.Content.ReadFromJsonAsync<ReflectionDto>();
+                if (last?.WorkingVersionId is { } versionId &&
+                    versionId != previousVersionId &&
+                    last.Status == ReflectionStatusNames.ReviewRequired)
+                {
+                    return last;
+                }
+            }
+
+            await Task.Delay(250);
+        }
+
+        Assert.Fail($"The regenerated working version was never produced. Last status: {last?.Status ?? "none"}.");
         throw new InvalidOperationException("unreachable");
     }
 
