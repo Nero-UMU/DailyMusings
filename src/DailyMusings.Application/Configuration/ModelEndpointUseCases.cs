@@ -182,7 +182,7 @@ public sealed class UpdateModelEndpointUseCase
 
         if (update.Model is { } model)
         {
-            await SetAsync(ModelSettingKeys.Model(service), ValidateModel(model), cancellationToken).ConfigureAwait(false);
+            await SetAsync(ModelSettingKeys.Model(service), ValidateModel(service, model), cancellationToken).ConfigureAwait(false);
         }
 
         if (update.SecretName is { } secretName)
@@ -289,13 +289,22 @@ public sealed class UpdateModelEndpointUseCase
         return trimmed.TrimEnd('/');
     }
 
-    private static string ValidateModel(string value)
+    private static string ValidateModel(ModelService service, string value)
     {
         var trimmed = value.Trim();
 
         if (trimmed.Length is 0 or > 200)
         {
             throw new UseCaseException("model.name.invalid", "模型名不能为空，也不能超过 200 个字符。");
+        }
+
+        if (service == ModelService.Transcription &&
+            (trimmed.StartsWith("paraformer", StringComparison.OrdinalIgnoreCase) ||
+             trimmed.Contains("filetrans", StringComparison.OrdinalIgnoreCase)))
+        {
+            throw new UseCaseException(
+                "model.transcription.public_url_only",
+                "这个转写模型只接受公网音频地址，不能直接处理手机上传的录音。请改用 qwen3-asr-flash 或兼容 /audio/transcriptions 的模型。");
         }
 
         return trimmed;

@@ -9,7 +9,7 @@
    多出来的那半个格子正好放下内容下方的一行播放条（原生 <audio>：播放/暂停、进度、时长都有了）。 *@
 
 <PageHeader Title="数据管理"
-            Hint="从新到旧列出实例收到的随想，录音与手写同级。一行四项：时间、类型、状态、内容；录音的播放条在内容下方。">
+            Hint="浏览服务器收到的全部随想。可以筛选录音或手写内容、播放录音、修订识别文字并处理失败项。">
     <Actions>
         <button class="btn" @onclick="ReloadAsync" disabled="@_busy">刷新</button>
     </Actions>
@@ -109,7 +109,7 @@ else
                     <span class="badge @AdminLabels.TranscriptionBadge(entry.TranscriptionStatus)">@AdminLabels.TranscriptionText(entry.TranscriptionStatus)</span>
                     @if (item.FailureCode is { Length: > 0 } failureCode)
                     {
-                        <span class="player-meta"><code>@failureCode</code></span>
+                        <span class="player-meta">@AdminLabels.ProcessingFailureText(failureCode)</span>
                     }
 
                     @if (entry.IsDeleted)

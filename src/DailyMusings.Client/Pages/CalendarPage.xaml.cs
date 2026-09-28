@@ -66,17 +66,15 @@ public partial class CalendarPage : ContentPage
 
         _player.PlaybackCompleted += OnPlaybackCompleted;
 
-        InsecureBanner.IsVisible = _settings.IsInsecureConnection;
-
         // Nothing in an async void handler may throw.
         try
         {
             await LoadAsync();
             await BackfillTranscriptsAsync();
         }
-        catch (Exception exception)
+        catch (Exception)
         {
-            StatusLabel.Text = $"本机记录读取失败：{exception.Message}";
+            StatusLabel.Text = "暂时无法读取本机记录，请关闭页面后重试。";
         }
     }
 
@@ -466,9 +464,9 @@ public partial class CalendarPage : ContentPage
         {
             await work();
         }
-        catch (Exception exception)
+        catch (Exception)
         {
-            StatusLabel.Text = $"操作失败：{exception.Message}";
+            StatusLabel.Text = "操作没有完成，请稍后重试。";
         }
         finally
         {

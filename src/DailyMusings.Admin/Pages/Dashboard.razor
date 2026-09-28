@@ -8,7 +8,7 @@
    统计读数是最容易顺手把私人内容泄漏出去的地方（InstanceStatistics 的类型本身就不允许带这些字段）。 *@
 
 <PageHeader Title="状态"
-            Hint="今日采集与稿件、累计数量、队列、设备与能力状态的汇总。外部模型与 SMTP 的连通性故意不参与这里的健康检查，它们各有「测试连接」。">
+            Hint="查看今日素材、稿件、设备、后台任务和存储状态。模型与邮件是否可用，请到对应设置页测试。">
     <Actions>
         <button class="btn" @onclick="RefreshAsync" disabled="@_busy">刷新</button>
         <a class="btn btn-primary" href="/data">去看数据管理</a>
@@ -106,7 +106,7 @@ else
             </div>
 
             <p class="hint">
-                这三项决定「实例现在能做到什么」，与基础健康检查分开：模型或 SMTP 不可用不会让实例显得不健康。
+                这里显示当前可以使用的自动化能力；某项未启用时，可点击说明中的设置页完成配置。
             </p>
 
             <div class="stack">
@@ -186,7 +186,7 @@ else
                     <dd>@ContentSettings.FormatTime(_content.PublishLocalTime)（次日的这个时刻）</dd>
 
                     <dt>执行窗口</dt>
-                    <dd>@_content.PublishWindowMinutes 分钟，超窗转 Expired，不自动补做</dd>
+                    <dd>@_content.PublishWindowMinutes 分钟；超过时间后不会自动补发</dd>
 
                     <dt>录音保留</dt>
                     <dd>@RetentionText(_content.AudioRetentionDays)</dd>
@@ -211,7 +211,7 @@ else
     </div>
 
     <p class="hint">
-        只覆盖本实例能控制的部分：数据库可写、媒体目录可写、后台任务执行器存活，外加已应用的迁移版本。
+        用于确认数据库、录音存储和后台任务是否正常。模型与邮件服务请分别到设置页测试。
     </p>
 
     @if (_health is null)
@@ -235,7 +235,7 @@ else
                     @foreach (var probe in _health.Probes)
                     {
                         <tr>
-                            <td><code>@probe.Name</code></td>
+                            <td>@AdminLabels.HealthProbeText(probe.Name)</td>
                             <td>
                                 <span class="badge @(probe.Healthy ? "badge-ok" : "badge-err")">
                                     @(probe.Healthy ? "通过" : "失败")

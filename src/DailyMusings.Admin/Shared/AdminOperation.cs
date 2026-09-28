@@ -13,9 +13,8 @@ namespace DailyMusings.Admin.Shared;
 /// observes exceptions thrown while rendering, never those thrown by a handler.
 /// </para>
 /// <para>
-/// So every handler body goes through here. Domain and use-case failures carry text that was written for the
-/// operator and is shown as-is; anything else is reported by exception type, so a genuine bug is identifiable
-/// without putting a stack trace in front of the user.
+/// So every handler body goes through here. Domain and use-case failures carry user-facing text and are shown as-is;
+/// technical details stay in the server log.
 /// </para>
 /// </summary>
 public static class AdminOperation
@@ -34,13 +33,11 @@ public static class AdminOperation
         }
         catch (UseCaseException exception)
         {
-            // The stable code is appended because it is what a support request quotes, and what the operator can
-            // search for; the message alone is prose.
-            return $"{exception.Message}（{exception.Code}）";
+            return exception.Message;
         }
         catch (DomainException exception)
         {
-            return $"{exception.Message}（{exception.Code}）";
+            return exception.Message;
         }
         catch (Exception exception)
         {
@@ -48,7 +45,7 @@ public static class AdminOperation
             // where the redaction rules apply (§16).
             logger?.LogError(exception, "An administrator page operation failed.");
 
-            return $"操作失败（{exception.GetType().Name}）。请查看服务端日志了解详情。";
+            return "操作没有完成，请稍后重试；如果问题持续，请查看系统设置中的运行日志。";
         }
     }
 }

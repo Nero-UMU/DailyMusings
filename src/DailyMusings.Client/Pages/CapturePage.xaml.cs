@@ -72,8 +72,6 @@ public partial class CapturePage : ContentPage
         _player.PlaybackCompleted += OnPlaybackCompleted;
 
         TodayLabel.Text = DateTime.Now.ToString("M月d日 dddd", CultureInfo.GetCultureInfo("zh-CN"));
-        InsecureBanner.IsVisible = _settings.IsInsecureConnection;
-
         ApplyMode();
         SizeCircle();
 
@@ -83,9 +81,9 @@ public partial class CapturePage : ContentPage
         {
             await LoadAsync();
         }
-        catch (Exception exception)
+        catch (Exception)
         {
-            UploadStatus.Text = $"本机内容读取失败：{exception.Message}";
+            UploadStatus.Text = "暂时无法读取本机内容，请关闭页面后重试。";
         }
     }
 
@@ -227,9 +225,9 @@ public partial class CapturePage : ContentPage
                 recording.DurationSeconds,
                 CancellationToken.None);
         }
-        catch (Exception exception)
+        catch (Exception)
         {
-            RecordStatus.Text = $"录音没有保存成功：{exception.Message}";
+            RecordStatus.Text = "录音没有保存成功，请检查麦克风权限和本机存储空间后重试。";
             return;
         }
 
@@ -290,9 +288,9 @@ public partial class CapturePage : ContentPage
         {
             capture = await _controller.SaveTextCaptureAsync(text, CancellationToken.None);
         }
-        catch (Exception exception)
+        catch (Exception)
         {
-            ManualStatus.Text = $"保存失败：{exception.Message}";
+            ManualStatus.Text = "文字没有保存成功，请检查本机存储空间后重试。";
             return;
         }
 
@@ -692,9 +690,9 @@ public partial class CapturePage : ContentPage
         {
             await work();
         }
-        catch (Exception exception)
+        catch (Exception)
         {
-            UploadStatus.Text = $"操作失败：{exception.Message}";
+            UploadStatus.Text = "操作没有完成，请稍后重试。";
         }
     }
 
@@ -707,8 +705,11 @@ public partial class CapturePage : ContentPage
         "client.not_paired" => "设备未配对",
         "auth.device_token_rejected" or "auth.unauthenticated" => "设备令牌已失效，需要重新配对",
         "client.audio_missing" => "本地录音已丢失",
+        "transcription.model_requires_public_audio" => "当前转写模型不能直接处理手机录音，请让管理员改用 qwen3-asr-flash 或 Whisper 兼容模型",
+        "transcription.request_rejected" => "转写服务拒绝了录音，请让管理员检查模型名称和接口地址",
+        "transcription.timeout" => "转写服务响应超时，可以稍后重试",
         null => "未知原因",
-        _ => failureCode,
+        _ => "服务器暂时无法完成这个请求",
     };
 
     private static Color ColorFromResource(string key, Color fallback) =>

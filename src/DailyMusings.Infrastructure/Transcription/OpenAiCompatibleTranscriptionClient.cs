@@ -76,7 +76,8 @@ public sealed class ConfigurationTranscriptionSettingsProvider : ITranscriptionS
 /// </summary>
 public sealed class OpenAiCompatibleTranscriptionClient : ITranscriptionClient
 {
-    private const string RelativePath = "audio/transcriptions";
+    private const string WhisperRelativePath = "audio/transcriptions";
+    private const string ChatCompletionsRelativePath = "chat/completions";
 
     private readonly HttpClient _httpClient;
     private readonly ISecretStore _secrets;
@@ -118,7 +119,16 @@ public sealed class OpenAiCompatibleTranscriptionClient : ITranscriptionClient
                 $"The secret '{settings.SecretName}' is not provisioned.");
         }
 
-        using var httpRequest = await BuildRequestAsync(request, settings, apiKey, cancellationToken)
+        if (UsesPublicUrlOnlyProtocol(settings.Model))
+        {
+            throw new PermanentExternalFailureException(
+                "transcription.model_requires_public_audio",
+                "This transcription model only accepts a publicly reachable audio URL. Choose a model that accepts uploaded audio, such as qwen3-asr-flash or whisper-1.");
+        }
+
+        var usesAudioMessage = UsesAudioMessageProtocol(settings.Model);
+
+        using var httpRequest = await BuildRequestAsync(request, settings, apiKey, usesAudioMessage, cancellationToken)
             .ConfigureAwait(false);
 
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -178,7 +188,9 @@ public sealed class OpenAiCompatibleTranscriptionClient : ITranscriptionClient
                     "The transcription endpoint rejected the request.");
             }
 
-            var payload = await ReadPayloadAsync(response, cancellationToken).ConfigureAwait(false);
+            var payload = usesAudioMessage
+                ? await ReadAudioMessagePayloadAsync(response, cancellationToken).ConfigureAwait(false)
+                : await ReadPayloadAsync(response, cancellationToken).ConfigureAwait(false);
 
             if (string.IsNullOrWhiteSpace(payload?.Text))
             {
@@ -222,8 +234,15 @@ public sealed class OpenAiCompatibleTranscriptionClient : ITranscriptionClient
         TranscriptionRequest request,
         TranscriptionSettings settings,
         string apiKey,
+        bool usesAudioMessage,
         CancellationToken cancellationToken)
     {
+        if (usesAudioMessage)
+        {
+            return await BuildAudioMessageRequestAsync(request, settings, apiKey, cancellationToken)
+                .ConfigureAwait(false);
+        }
+
         var content = new MultipartFormDataContent();
         var audio = await request.OpenAudio(cancellationToken).ConfigureAwait(false);
 
@@ -238,7 +257,50 @@ public sealed class OpenAiCompatibleTranscriptionClient : ITranscriptionClient
             content.Add(new StringContent(language), "language");
         }
 
-        var message = new HttpRequestMessage(HttpMethod.Post, BuildEndpoint(settings.BaseUrl))
+        var message = new HttpRequestMessage(HttpMethod.Post, BuildEndpoint(settings.BaseUrl, WhisperRelativePath))
+        {
+            Content = content,
+        };
+
+        message.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+        return message;
+    }
+
+    private static async Task<HttpRequestMessage> BuildAudioMessageRequestAsync(
+        TranscriptionRequest request,
+        TranscriptionSettings settings,
+        string apiKey,
+        CancellationToken cancellationToken)
+    {
+        await using var audio = await request.OpenAudio(cancellationToken).ConfigureAwait(false);
+        using var buffer = new MemoryStream();
+        await audio.CopyToAsync(buffer, cancellationToken).ConfigureAwait(false);
+
+        var dataUri = $"data:{request.ContentType};base64,{Convert.ToBase64String(buffer.ToArray())}";
+        var content = JsonContent.Create(new
+        {
+            model = settings.Model,
+            messages = new[]
+            {
+                new
+                {
+                    role = "user",
+                    content = new[]
+                    {
+                        new
+                        {
+                            type = "input_audio",
+                            input_audio = new { data = dataUri },
+                        },
+                    },
+                },
+            },
+            stream = false,
+        });
+
+        var message = new HttpRequestMessage(
+            HttpMethod.Post,
+            BuildEndpoint(settings.BaseUrl, ChatCompletionsRelativePath))
         {
             Content = content,
         };
@@ -248,14 +310,51 @@ public sealed class OpenAiCompatibleTranscriptionClient : ITranscriptionClient
     }
 
     /// <summary>Joins the base URL and the relative path without dropping or doubling a slash.</summary>
-    private static Uri BuildEndpoint(string baseUrl)
+    private static Uri BuildEndpoint(string baseUrl, string relativePath)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(baseUrl);
 
-        return new Uri($"{baseUrl.TrimEnd('/')}/{RelativePath}", UriKind.Absolute);
+        return new Uri($"{baseUrl.TrimEnd('/')}/{relativePath}", UriKind.Absolute);
+    }
+
+    private static bool UsesAudioMessageProtocol(string model) =>
+        model.StartsWith("qwen3-asr-flash", StringComparison.OrdinalIgnoreCase);
+
+    private static bool UsesPublicUrlOnlyProtocol(string model) =>
+        model.StartsWith("paraformer", StringComparison.OrdinalIgnoreCase) ||
+        model.Contains("filetrans", StringComparison.OrdinalIgnoreCase);
+
+    private static async Task<TranscriptionPayload?> ReadAudioMessagePayloadAsync(
+        HttpResponseMessage response,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var payload = await response.Content
+                .ReadFromJsonAsync<AudioMessageResponse>(cancellationToken)
+                .ConfigureAwait(false);
+
+            var text = payload?.Choices?.FirstOrDefault()?.Message?.Content;
+            return new TranscriptionPayload(text, null);
+        }
+        catch (Exception exception) when (exception is JsonException or NotSupportedException)
+        {
+            throw new PermanentExternalFailureException(
+                "transcription.malformed_response",
+                "The transcription endpoint returned a response that could not be read.");
+        }
     }
 
     private sealed record TranscriptionPayload(
         [property: JsonPropertyName("text")] string? Text,
         [property: JsonPropertyName("language")] string? Language);
+
+    private sealed record AudioMessageResponse(
+        [property: JsonPropertyName("choices")] IReadOnlyList<AudioMessageChoice>? Choices);
+
+    private sealed record AudioMessageChoice(
+        [property: JsonPropertyName("message")] AudioMessage? Message);
+
+    private sealed record AudioMessage(
+        [property: JsonPropertyName("content")] string? Content);
 }

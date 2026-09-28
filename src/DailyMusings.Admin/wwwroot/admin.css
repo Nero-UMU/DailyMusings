@@ -4,10 +4,9 @@
    八个功能分区共用一套设计令牌与语义化类名（.app/.sidebar/.nav/.content/.card/
    .btn/.table/…），页面只组合这些类，不写内联布局。
 
-   三件必须一直成立的事：
-     ① 「未加密连接」提示在任何已登录页面都可见（.notice.error，由 MainLayout 渲染）；
-     ② 危险操作（撤回授权、删除随想、还原备份）与普通操作在视觉上分得开（.btn-danger/.risk）；
-     ③ 窄屏（<900px）侧栏折叠成顶部菜单，而不是把内容挤没。
+   两件必须一直成立的事：
+     ① 危险操作（撤回授权、删除随想、还原备份）与普通操作在视觉上分得开（.btn-danger/.risk）；
+     ② 窄屏（<900px）侧栏折叠成顶部菜单，而不是把内容挤没。
 
    调色板按规格固定：主色 #3B82F6、危险 #EF4444、成功 #10B981、正文 #1F2937、
    次要文字 #6B7280、背景 #F5F7FA、卡片 #FFFFFF。
@@ -309,6 +308,142 @@ pre code {
     margin: 4rem auto;
     max-width: 26rem;
     padding: 1.5rem 1.75rem;
+}
+
+/* 登录页：信息与表单分栏，窄屏时自然收成一张卡片。 */
+.login-page {
+    background: #f8fafc;
+    border-radius: 1.4rem;
+    display: grid;
+    grid-template-columns: minmax(0, 1.08fr) minmax(22rem, 0.92fr);
+    min-height: min(720px, calc(100vh - 5rem));
+    overflow: hidden;
+}
+
+.login-hero {
+    background:
+        radial-gradient(circle at 12% 18%, rgba(147, 197, 253, 0.2), transparent 32%),
+        linear-gradient(145deg, #0f172a, #172554);
+    color: #e2e8f0;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    padding: clamp(2rem, 5vw, 4.75rem);
+}
+
+.login-brand {
+    align-items: center;
+    display: flex;
+    font-size: 1.05rem;
+    font-weight: 700;
+    gap: 0.7rem;
+}
+
+.login-mark {
+    align-items: center;
+    background: #60a5fa;
+    border-radius: 0.8rem;
+    color: #0f172a;
+    display: inline-flex;
+    height: 2.55rem;
+    justify-content: center;
+    width: 2.55rem;
+}
+
+.login-kicker {
+    color: #93c5fd;
+    font-size: 0.72rem;
+    font-weight: 800;
+    letter-spacing: 0.18em;
+}
+
+.login-hero-copy h1 {
+    color: #fff;
+    font-size: clamp(2.15rem, 4vw, 3.65rem);
+    letter-spacing: -0.045em;
+    line-height: 1.12;
+    margin: 1rem 0 1.25rem;
+}
+
+.login-hero-copy p {
+    color: #cbd5e1;
+    font-size: 1rem;
+    max-width: 34rem;
+}
+
+.login-capabilities {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.55rem;
+}
+
+.login-capabilities span {
+    border: 1px solid rgba(226, 232, 240, 0.2);
+    border-radius: 999px;
+    color: #cbd5e1;
+    font-size: 0.8rem;
+    padding: 0.35rem 0.7rem;
+}
+
+.login-panel {
+    align-items: center;
+    display: flex;
+    justify-content: center;
+    padding: clamp(1.5rem, 5vw, 4.75rem);
+}
+
+.login-card {
+    max-width: 25rem;
+    width: 100%;
+}
+
+.login-card-head h2 {
+    font-size: 2rem;
+    letter-spacing: -0.035em;
+    margin: 0.45rem 0 0.35rem;
+}
+
+.login-card-head p,
+.login-footnote {
+    color: var(--muted);
+}
+
+.login-form {
+    gap: 1rem;
+    margin-top: 1.5rem;
+}
+
+.login-form input:not([type="checkbox"]) {
+    height: 3rem;
+}
+
+.login-submit {
+    height: 3rem;
+    margin-top: 0.25rem;
+}
+
+.login-security-warning {
+    background: var(--warn-soft);
+    border: 1px solid #fde68a;
+    border-radius: var(--radius-sm);
+    color: #78350f;
+    padding: 0.75rem 0.85rem;
+}
+
+.login-security-warning p {
+    font-size: 0.82rem;
+    margin: 0.25rem 0 0.6rem;
+}
+
+.login-security-warning .checkbox {
+    color: #78350f;
+    font-size: 0.82rem;
+}
+
+.login-footnote {
+    font-size: 0.78rem;
+    margin-top: 1.25rem;
+    text-align: center;
 }
 
 /* ── 页面标题栏 ──────────────────────────────────────────────────── */
@@ -1120,6 +1255,26 @@ label.checkbox input {
     .shell {
         margin: 1rem;
         padding: 1.25rem;
+    }
+
+    .login-page {
+        background: #f8fafc;
+        grid-template-columns: 1fr;
+        min-height: auto;
+    }
+
+    .login-hero {
+        background: linear-gradient(135deg, #0f172a, #1e3a8a);
+        gap: 2rem;
+        padding: 1.5rem;
+    }
+
+    .login-hero-copy h1 {
+        font-size: 2rem;
+    }
+
+    .login-panel {
+        padding: 2rem 1.25rem;
     }
 }
 

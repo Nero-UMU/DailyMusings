@@ -116,6 +116,9 @@ public class PublishingLoopTests
         publish.EnsureSuccessStatusCode();
         var publication = await WaitForPublicationAsync(instance, contentDate, PublicationStatusNames.Published);
         Assert.AreEqual(publishedVersionId, publication.ReflectionVersionId);
+        var publishedDirectory = Path.Combine(instance.RootPath, "markdown", "posts");
+        var oldFile = Path.Combine(publishedDirectory, publication.RemoteId!);
+        Assert.IsTrue(File.Exists(oldFile));
 
         model.State.GroundedSentence = "后来又补充了一条新素材。";
         model.State.UnsourcedSentence = string.Empty;
@@ -175,6 +178,29 @@ public class PublishingLoopTests
         Assert.IsFalse(
             publishCard.Value.Contains("已公开发布", StringComparison.Ordinal),
             $"发布设置把旧版本的发布状态错误套到了新工作版本：\n{publishCard.Value}");
+
+        await ConfirmExistingAsync(instance, contentDate);
+        using var publishReplacement = await device.PostAsJsonAsync(
+            $"/api/reflections/{contentDate}/publish/{target.Id}",
+            new PublishRequest(PublicationVisibilityNames.Public, ReplaceExistingFile: false));
+        publishReplacement.EnsureSuccessStatusCode();
+
+        var replacement = await WaitForPublishedVersionAsync(instance, contentDate, regenerated.WorkingVersionId!);
+        var afterReplacement = await instance.Client.GetFromJsonAsync<PublicationListResponse>(
+            $"/api/reflections/{contentDate}/publications");
+
+        Assert.AreEqual(
+            1,
+            afterReplacement!.Items.Count(item => item.Status == PublicationStatusNames.Published),
+            "一天只能保留一个已公开发布的稿件记录。");
+        Assert.AreEqual(
+            1,
+            afterReplacement.Items.Count(item => item.Status == PublicationStatusNames.Superseded),
+            "旧版本发布后应标记为已替换，而不是继续显示为已发布。");
+
+        var files = Directory.GetFiles(publishedDirectory, "*.md", SearchOption.TopDirectoryOnly);
+        Assert.AreEqual(1, files.Length, $"重新发布后目录里只能留下当天的新稿件。Found: {string.Join(", ", files)}");
+        Assert.AreEqual(replacement.RemoteId, Path.GetFileName(files[0]));
     }
 
     [TestMethod]
@@ -435,6 +461,54 @@ public class PublishingLoopTests
 
         Assert.Fail($"The publication never reached {status}. Last seen: {last?.Status ?? "none"}");
         throw new InvalidOperationException("unreachable");
+    }
+
+    private static async Task<PublicationDto> WaitForPublishedVersionAsync(
+        TestInstance instance,
+        string contentDate,
+        string versionId)
+    {
+        var deadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(60);
+
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            var listed = await instance.Client.GetFromJsonAsync<PublicationListResponse>(
+                $"/api/reflections/{contentDate}/publications");
+            var publication = listed?.Items.FirstOrDefault(item =>
+                item.ReflectionVersionId == versionId && item.Status == PublicationStatusNames.Published);
+
+            if (publication is not null)
+            {
+                return publication;
+            }
+
+            await Task.Delay(250);
+        }
+
+        Assert.Fail($"Version {versionId} was never published.");
+        throw new InvalidOperationException();
+    }
+
+    private static async Task ConfirmExistingAsync(TestInstance instance, string contentDate)
+    {
+        var deadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(60);
+
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            using var sources = await instance.Client.GetAsync($"/api/reflections/{contentDate}/sources");
+            if (sources.IsSuccessStatusCode &&
+                (await sources.Content.ReadFromJsonAsync<ReflectionSourcesResponse>())?.CheckedAtUtc is not null)
+            {
+                break;
+            }
+
+            await Task.Delay(250);
+        }
+
+        using var confirmed = await instance.Client.PostAsJsonAsync(
+            $"/api/reflections/{contentDate}/confirm",
+            new ConfirmReflectionRequest(AcceptedUnsourcedClaims: true));
+        confirmed.EnsureSuccessStatusCode();
     }
 
     private static async Task<ReflectionDto> WaitForNewWorkingVersionAsync(

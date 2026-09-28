@@ -19,12 +19,13 @@ public sealed class ModelEndpointProbeTests
             new ModelEndpointProbeRequest(
                 ExternalService.Generation,
                 "https://candidate.example/v1",
+                "candidate-model",
                 "saved-key",
                 "typed-key"),
             CancellationToken.None);
 
         Assert.IsTrue(result.Ok);
-        Assert.AreEqual("https://candidate.example/v1/models", handler.LastRequest?.RequestUri?.ToString());
+        Assert.AreEqual("https://candidate.example/v1/chat/completions", handler.LastRequest?.RequestUri?.ToString());
         Assert.AreEqual("Bearer", handler.LastRequest?.Headers.Authorization?.Scheme);
         Assert.AreEqual("typed-key", handler.LastRequest?.Headers.Authorization?.Parameter);
     }
@@ -36,12 +37,33 @@ public sealed class ModelEndpointProbeTests
         var probe = CreateProbe(handler);
 
         var result = await probe.ProbeModelAsync(
-            new ModelEndpointProbeRequest(ExternalService.Generation, "not-a-url", "saved-key"),
+            new ModelEndpointProbeRequest(ExternalService.Generation, "not-a-url", "candidate-model", "saved-key"),
             CancellationToken.None);
 
         Assert.IsFalse(result.Ok);
         Assert.AreEqual("probe.generation.url_invalid", result.Code);
         Assert.IsNull(handler.LastRequest);
+    }
+
+    [TestMethod]
+    public async Task Transcription_probe_calls_the_configured_ASR_contract_instead_of_only_listing_models()
+    {
+        var handler = new RecordingHandler();
+        var probe = CreateProbe(handler);
+
+        var result = await probe.ProbeModelAsync(
+            new ModelEndpointProbeRequest(
+                ExternalService.Transcription,
+                "https://candidate.example/v1",
+                "qwen3-asr-flash",
+                "saved-key",
+                "typed-key"),
+            CancellationToken.None);
+
+        Assert.IsTrue(result.Ok);
+        Assert.AreEqual("https://candidate.example/v1/chat/completions", handler.LastRequest?.RequestUri?.ToString());
+        StringAssert.Contains(handler.LastBody, "qwen3-asr-flash");
+        StringAssert.Contains(handler.LastBody, "data:audio/wav;base64,");
     }
 
     private static ExternalServiceProbe CreateProbe(HttpMessageHandler handler) => new(
@@ -57,10 +79,15 @@ public sealed class ModelEndpointProbeTests
     {
         public HttpRequestMessage? LastRequest { get; private set; }
 
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        public string LastBody { get; private set; } = string.Empty;
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             LastRequest = request;
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK));
+            LastBody = request.Content is null
+                ? string.Empty
+                : await request.Content.ReadAsStringAsync(cancellationToken);
+            return new HttpResponseMessage(HttpStatusCode.OK);
         }
     }
 

@@ -31,17 +31,6 @@ public sealed class ClientSettings
         }
     }
 
-    /// <summary>
-    /// True when the configured server is reached over plain HTTP.
-    /// <para>
-    /// §10.3 requires this state to be visible for as long as it applies, and requires it to be described as a risk
-    /// rather than as something the user accepted. The UI shows it on every screen, and the text never implies that
-    /// confirming it made the connection safe.
-    /// </para>
-    /// </summary>
-    public bool IsInsecureConnection =>
-        ServerBaseUrl is { } url && url.StartsWith("http://", StringComparison.OrdinalIgnoreCase);
-
     public bool IsConfigured => ResolveBaseUri() is not null;
 
     /// <summary>Parses the configured address, or returns <c>null</c> when it is missing or unusable.</summary>

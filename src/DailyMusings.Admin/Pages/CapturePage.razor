@@ -17,8 +17,7 @@
     <div>
         <h1 class="page-title">采集</h1>
         <p class="page-hint">
-            按日期看某一天的随想与当天草稿。只读视图：日常的修订、确认与发布在客户端做，
-            批量浏览与删除在「数据管理」页。
+            按日期核对当天收到的随想和生成的稿件。修订素材请前往「数据管理」，管理稿件请前往「内容管理」。
         </p>
     </div>
     <div class="page-actions">
@@ -85,7 +84,7 @@ else
                     </span>
                     @if (item.FailureCode is { Length: > 0 } failureCode)
                     {
-                        <span class="player-meta"><code>@failureCode</code></span>
+                        <span class="player-meta">@AdminLabels.ProcessingFailureText(failureCode)</span>
                     }
 
                     @if (entry.IsDeleted)
@@ -145,8 +144,8 @@ else
 @if (_reflection is null)
 {
     <p class="notice info">
-        这一天还没有草稿。生成需要当天至少有一条可用的素材（§7 不允许创建空文章）；
-        生成时刻与「哪些日子够格」由<a href="/publishing">发布设置</a>里的时间设置和调度器决定。
+        这一天还没有稿件。请先确保当天至少有一条可用素材，再到<a href="/publishing">发布设置</a>立即生成，
+        或等待设定的自动生成时间。
     </p>
 }
 else
@@ -158,10 +157,9 @@ else
         </div>
 
         <p class="hint">
-            版本 <code>@_reflection.WorkingVersionId</code>
             @if (_reflection.WorkingVersion is { } version)
             {
-                <text> · 生成于 @AdminFormat.When(version.CreatedAtUtc)</text>
+                <text>生成于 @AdminFormat.When(version.CreatedAtUtc)</text>
                 @if (version.ModelName is { Length: > 0 } model)
                 {
                     <text> · 模型 @model</text>

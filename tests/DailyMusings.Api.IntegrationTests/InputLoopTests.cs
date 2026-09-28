@@ -71,6 +71,32 @@ public class InputLoopTests
             "The uploaded blob must be on the media volume. Found: " + DescribeMediaFiles(instance));
     }
 
+    [TestMethod]
+    public async Task A_Qwen_ASR_model_uses_its_OpenAI_compatible_audio_message_contract()
+    {
+        await using var stub = await StubTranscriptionEndpoint.StartAsync();
+        stub.State.RequireChatCompletions = true;
+
+        var settings = TranscriptionEnabled(stub.BaseUrl);
+        settings["Transcription:Model"] = "qwen3-asr-flash";
+
+        await using var instance = await TestInstance.StartAsync(settings);
+        instance.WriteSecret("openai-api-key", "test-api-key");
+        await instance.SignInAsChangedAdministratorAsync();
+        var (_, device) = await instance.PairDeviceAsync();
+
+        using var upload = await UploadVoiceAsync(device, "qwen-asr-contract");
+        upload.EnsureSuccessStatusCode();
+
+        var ingested = await upload.Content.ReadFromJsonAsync<IngestResponse>();
+        Assert.IsNotNull(ingested);
+        Assert.AreEqual(TranscriptionStatusNames.Succeeded, ingested.Input.TranscriptionStatus);
+        Assert.AreEqual(stub.State.ResponseText, ingested.Input.Transcript);
+        Assert.AreEqual("qwen3-asr-flash", stub.State.LastModel);
+        StringAssert.StartsWith(stub.State.LastAudioData, "data:audio/mp4;base64,");
+        Assert.AreEqual("Bearer test-api-key", stub.State.LastAuthorization);
+    }
+
     /// <summary>
     /// §8.2/§20: the inline transcription is a convenience, and a capture must never be lost — or turned into a
     /// failed upload — because the model was unavailable. With the endpoint down the upload still succeeds, the

@@ -99,6 +99,32 @@ public sealed class FileMarkdownWriter : IMarkdownWriter
             : null;
     }
 
+    public async Task<bool> DeleteIfUnchangedAsync(
+        string directory,
+        string fileName,
+        string expectedContentHash,
+        CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(fileName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(expectedContentHash);
+
+        var path = Path.Combine(ResolveDirectory(directory), fileName);
+        if (!File.Exists(path))
+        {
+            return true;
+        }
+
+        var currentHash = await ComputeFileHashAsync(path, cancellationToken).ConfigureAwait(false);
+        if (!string.Equals(currentHash, expectedContentHash, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        File.Delete(path);
+        _logger.LogInformation("Removed superseded published file {FileName}.", fileName);
+        return true;
+    }
+
     private static async Task WriteAtomicallyAsync(string path, string content, CancellationToken cancellationToken)
     {
         var temporary = path + ".partial";

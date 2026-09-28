@@ -182,6 +182,8 @@ public class PhaseOneFlowTests
 
         Assert.AreEqual(HttpStatusCode.OK, response.StatusCode, $"GET /login failed:\n{html}");
         StringAssert.Contains(html, "action=\"/api/admin/sign-in\"", "The sign-in form must be rendered.");
+        StringAssert.Contains(html, "把一天的碎片", "新的登录页应当显示产品说明，而不是只有一张裸表单。");
+        StringAssert.Contains(html, "当前是 HTTP 连接", "HTTP 风险只需要在登录前集中提示一次。");
     }
 
     [TestMethod]
@@ -206,8 +208,11 @@ public class PhaseOneFlowTests
 
         Assert.AreEqual(HttpStatusCode.OK, dashboard.StatusCode, $"GET / failed:\n{dashboardHtml}");
 
-        // The status page lists probe results, so an ASCII probe name is a stable marker for "the page rendered".
-        StringAssert.Contains(dashboardHtml, "database.writable", "The health table must be on the status page.");
+        // The page deliberately translates internal probe keys into user-facing labels.
+        StringAssert.Contains(
+            WebUtility.HtmlDecode(dashboardHtml),
+            "数据库写入",
+            "The health table must be on the status page without exposing internal probe names.");
 
         // Pair a device so the device page has something concrete to render.
         var issued = await instance.PostForJsonAsync<PairingCodeResponse>(ApiRoutes.PairingCodes);

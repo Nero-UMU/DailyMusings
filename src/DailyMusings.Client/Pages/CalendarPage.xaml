@@ -34,13 +34,6 @@
                         Clicked="OnFilterClicked" />
                 </Grid>
 
-                <Border x:Name="InsecureBanner" Style="{StaticResource WarnBanner}" IsVisible="False">
-                    <Label
-                        TextColor="{StaticResource Danger}"
-                        FontSize="12"
-                        Text="当前使用未加密的 HTTP 连接。密码、设备令牌、录音与文章都可能被截获。请改用 HTTPS、局域网或 VPN。确认过风险提示并不等于连接变安全了。" />
-                </Border>
-
                 <Label x:Name="StatusLabel" Style="{StaticResource CaptionLabel}" />
 
                 <CollectionView x:Name="RecordList" SelectionMode="None">

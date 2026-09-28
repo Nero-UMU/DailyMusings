@@ -516,7 +516,7 @@ public static class PublicationStatusTransitions
         // re-entered by the job's own bounded retry, which is not a recovery but the same attempt continuing.
         [PublicationStatus.Failed] = [PublicationStatus.Queued, PublicationStatus.InProgress],
         [PublicationStatus.Expired] = [PublicationStatus.Queued],
-        [PublicationStatus.Published] = [],
+        [PublicationStatus.Published] = [PublicationStatus.Superseded],
         [PublicationStatus.Superseded] = [],
     };
 

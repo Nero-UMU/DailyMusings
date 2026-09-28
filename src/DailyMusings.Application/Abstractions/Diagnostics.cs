@@ -108,6 +108,7 @@ public interface IExternalServiceProbe
 public sealed record ModelEndpointProbeRequest(
     ExternalService Service,
     string BaseUrl,
+    string Model,
     string SecretName,
     string? ApiKey = null);
 

@@ -222,19 +222,6 @@
         <Setter Property="ThumbColor" Value="{StaticResource TextPrimary}" />
     </Style>
 
-    <!-- §10.3's risk banner, on every screen that can be showing an unencrypted address. -->
-    <Style x:Key="WarnBanner" TargetType="Border">
-        <Setter Property="BackgroundColor" Value="{StaticResource DangerSoft}" />
-        <Setter Property="Stroke" Value="{StaticResource Danger}" />
-        <Setter Property="StrokeThickness" Value="1" />
-        <Setter Property="Padding" Value="12" />
-        <Setter Property="StrokeShape">
-            <Setter.Value>
-                <RoundRectangle CornerRadius="12" />
-            </Setter.Value>
-        </Setter>
-    </Style>
-
     <Style TargetType="Shell" ApplyToDerivedTypes="True">
         <Setter Property="Shell.BackgroundColor" Value="{StaticResource Bg}" />
         <Setter Property="Shell.ForegroundColor" Value="{StaticResource TextPrimary}" />

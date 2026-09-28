@@ -482,9 +482,9 @@ public class AdminSurfaceTests
             StringAssert.Contains(homeHtml, label, $"导航里应当有「{label}」。");
         }
 
-        // §10.3: the HTTP warning is on an ordinary signed-in page, not only on the login form. The test instance is
-        // reached over plain HTTP, so the layout has to be showing it.
-        StringAssert.Contains(homeHtml, "当前连接未加密", "未加密连接的提示必须持续显示在管理页上。");
+        Assert.IsFalse(
+            homeHtml.Contains("当前是 HTTP 连接", StringComparison.Ordinal),
+            "连接风险只在提交登录凭据前提示，登录后的每个管理页不应重复占用界面。");
 
         // The two pages the eight-section layout absorbed are gone, not just unlinked. (/inputs is deliberately
         // still routed: it is the per-day capture view, which an existing assertion in this assembly covers.)

@@ -8,25 +8,20 @@
    SMTP 不在这里 —— 它属于「通知管理」。 *@
 
 <PageHeader Title="模型管理"
-            Hint="分别配置 OpenAI 兼容的语音转写、文章生成与可选的 Embedding。保存后下一次调用即生效，不需要重启。">
+            Hint="分别配置语音转写、文章生成与语义检索。保存后立即生效；建议每项保存后都测试一次。">
     <Actions>
         <button class="btn" @onclick="ProbeAllAsync" disabled="@_busy">测试全部连接</button>
     </Actions>
 </PageHeader>
 
 <div class="notice info">
-    <strong>这里只需要填写 API Key，不需要理解或填写内部存储名。</strong>
+    <strong>按服务商提供的地址、模型名和 API Key 填写即可。</strong>
     <p>
-        Key 只写不读：留空表示保持当前值，保存后输入框会立即清空。它会加密存放在实例数据目录之外，
-        不进入配置表、日志、导出或备份。需要由运维系统托管凭据时，也可以改用部署时注入的
-        Docker Secret 或环境变量。
+        API Key 留空表示继续使用已经保存的值。保存后不会回显明文，也不会写入日志、导出或备份。
     </p>
     <p>
-        每个端点右上角的「密钥来源」会告诉你它当前用的是哪一个：后台填写 / Secret 文件 / 环境变量 / 未配置。
-    </p>
-    <p>
-        新实例的文章生成默认填入 DeepSeek（<code>https://api.deepseek.com</code> / <code>deepseek-flash</code>）。
-        DeepSeek 当前不提供语音转写或 Embedding 接口，因此这两项保留为可替换的 OpenAI 兼容端点，不会伪装成 DeepSeek 可用。
+        「测试连接」会真正调用当前模型，而不是只检查地址是否能打开。语音转写使用百炼时，请选择
+        <code>qwen3-asr-flash</code>；<code>paraformer</code> 只接受公网音频地址，无法直接处理手机上传的录音。
     </p>
 </div>
 
@@ -120,8 +115,8 @@ else
                 @if (_probes.TryGetValue(service, out var probe))
                 {
                     <p class="notice @(probe.Ok ? "ok" : "error")">
-                        <strong>@(probe.Ok ? "可达。" : "测试失败。")</strong>
-                        @probe.Detail（<code>@probe.Code</code>）
+                        <strong>@(probe.Ok ? "模型可用。" : "测试失败。")</strong>
+                        @probe.Detail
                     </p>
                 }
 
@@ -129,17 +124,16 @@ else
                     @if (service == "embedding")
                     {
                         <text>
-                            关掉 Embedding 产品照常工作，历史检索退化为主题标签与全文匹配（§8.3）。
-                            更换模型或维度会让旧索引整体失效，语义检索进入「重建中」，重建入口在「系统设置」。
+                            关闭后仍可按主题和文字查找历史内容。更换模型或维度后，请到「系统设置」重建语义索引。
                         </text>
                     }
                     else if (service == "transcription")
                     {
-                        <text>转写关掉后，录音仍会被完整保存，只是不会有文字。</text>
+                        <text>关闭后录音仍会保存，但不会生成识别文字。模型测试成功后再用手机上传录音。</text>
                     }
                     else
                     {
-                        <text>生成关掉时，调度器不会往队列里放生成任务，也就不会有新稿件。</text>
+                        <text>关闭后不会自动或手动生成新稿件，已有稿件不受影响。</text>
                     }
                 </p>
             }
@@ -310,12 +304,13 @@ else
                 new ModelEndpointProbeRequest(
                     ParseService(service),
                     _baseUrls.GetValueOrDefault(service) ?? string.Empty,
+                    _models.GetValueOrDefault(service) ?? string.Empty,
                     _secretNames.GetValueOrDefault(service) ?? string.Empty,
                     _passwords.GetValueOrDefault(service)),
                 CancellationToken.None);
 
         _probes[service] = result;
-        _message = $"已测试{Describe(service)}。";
+        _message = $"{Describe(service)}测试完成，结果显示在本卡片下方。";
     });
 
     private async Task ProbeAllAsync() => await RunAsync(async services =>
@@ -328,12 +323,13 @@ else
                 new ModelEndpointProbeRequest(
                     ParseService(service),
                     _baseUrls.GetValueOrDefault(service) ?? string.Empty,
+                    _models.GetValueOrDefault(service) ?? string.Empty,
                     _secretNames.GetValueOrDefault(service) ?? string.Empty,
                     _passwords.GetValueOrDefault(service)),
                 CancellationToken.None);
         }
 
-        _message = "三个端点都测过了，结果在各块里。";
+        _message = "全部测试完成，结果分别显示在对应卡片下方。";
     });
 
     /// <summary>The three endpoints §8.1 lists, for the settings write path.</summary>

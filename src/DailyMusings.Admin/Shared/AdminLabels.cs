@@ -98,6 +98,31 @@ public static class AdminLabels
     public static string TopicOriginText(TopicOriginValue origin) =>
         origin == TopicOriginValue.Model ? "大模型" : "用户";
 
+    public static string ProcessingFailureText(string? code) => code switch
+    {
+        "transcription.disabled" => "语音转写尚未启用",
+        "transcription.secret_missing" => "语音转写缺少 API Key",
+        "transcription.credentials_rejected" => "语音转写的 API Key 无效",
+        "transcription.network" => "暂时无法连接转写服务",
+        "transcription.timeout" => "转写服务响应超时",
+        "transcription.upstream_unavailable" => "转写服务暂时不可用",
+        "transcription.request_rejected" => "转写服务拒绝了录音，请检查地址和模型",
+        "transcription.model_requires_public_audio" => "当前模型不能直接处理手机录音，请改用 qwen3-asr-flash 或 Whisper 兼容模型",
+        "transcription.empty_result" => "模型没有识别出文字",
+        "transcription.malformed_response" => "转写服务返回了无法识别的结果",
+        null or "" => "处理失败",
+        _ => "处理失败，请到系统设置查看日志",
+    };
+
+    public static string HealthProbeText(string name) => name switch
+    {
+        "database.migrations" => "数据库版本",
+        "database.writable" => "数据库写入",
+        "media.writable" => "录音存储",
+        "jobExecutor.alive" => "后台任务",
+        _ => name,
+    };
+
     /// <summary>
     /// The refusals the publish use cases return, in the operator's language. Falling back to the server's own
     /// sentence is deliberate: an unmapped refusal is more useful shown than hidden.

@@ -99,4 +99,14 @@ public interface IMarkdownWriter
     Task<MarkdownWriteResult> WriteAsync(MarkdownWriteRequest request, CancellationToken cancellationToken);
 
     Task<string?> ReadHashAsync(string directory, string fileName, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Deletes a file only while it still contains exactly what this instance last wrote. A missing file already
+    /// satisfies the request; a changed file returns false and is left untouched.
+    /// </summary>
+    Task<bool> DeleteIfUnchangedAsync(
+        string directory,
+        string fileName,
+        string expectedContentHash,
+        CancellationToken cancellationToken);
 }

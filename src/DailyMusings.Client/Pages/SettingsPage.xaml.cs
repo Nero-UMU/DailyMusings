@@ -10,10 +10,8 @@ namespace DailyMusings.Client.Pages;
 /// 设置 (phone spec §3.4): where the instance is, whether this device is paired, how much room the local archive
 /// takes, and the model names the instance is configured with.
 /// <para>
-/// The risk notice here is not decoration. Saving a plain-HTTP address requires an explicit acknowledgement, the
-/// banner stays visible afterwards, and the text never suggests the acknowledgement improved anything (§10.3).
-/// Notification preferences are gone from this screen with the rest of the reviewed feature set — the admin page
-/// owns them — so what is left is exactly what a phone needs to be set up and to hand its space back.
+/// Notification preferences are owned by the admin page, so what is left is exactly what a phone needs to connect,
+/// pair, inspect the active model names, and manage its local archive.
 /// </para>
 /// </summary>
 public partial class SettingsPage : ContentPage
@@ -62,9 +60,9 @@ public partial class SettingsPage : ContentPage
             await RefreshAsync();
             await RefreshInstanceInfoAsync();
         }
-        catch (Exception exception)
+        catch (Exception)
         {
-            ServerStatus.Text = $"载入失败：{exception.Message}";
+            ServerStatus.Text = "暂时无法载入设置，请关闭页面后重试。";
         }
     }
 
@@ -126,24 +124,6 @@ public partial class SettingsPage : ContentPage
         {
             ServerStatus.Text = "地址需要以 http:// 或 https:// 开头。";
             return;
-        }
-
-        // §10.3: the risk must be stated before the address takes effect, and confirming it is a gate rather than a
-        // mitigation. This is the client-side counterpart of the acknowledgement the admin login page requires.
-        if (uri.Scheme == "http")
-        {
-            var acknowledged = await DisplayAlertAsync(
-                "这是未加密的连接",
-                "通过 HTTP 访问时，密码、设备令牌、录音和文章都可能被同一网络中的其他人截获。\n\n" +
-                "确认本提示不会让连接变安全，它只是说明风险。推荐改用 HTTPS、局域网或 VPN。\n\n仍要继续吗？",
-                "我已了解风险，继续",
-                "取消");
-
-            if (!acknowledged)
-            {
-                ServerStatus.Text = "已取消，地址未改变。";
-                return;
-            }
         }
 
         _settings.ServerBaseUrl = uri.ToString();
@@ -255,8 +235,6 @@ public partial class SettingsPage : ContentPage
 
     private async Task RefreshAsync()
     {
-        InsecureBanner.IsVisible = _settings.IsInsecureConnection;
-
         var paired = await IsPairedAsync();
 
         PairingState.Text = paired
@@ -295,7 +273,7 @@ public partial class SettingsPage : ContentPage
         "auth.device_token_rejected" or "auth.unauthenticated" => "设备令牌已失效，请重新配对。",
         "client.malformed_response" => "服务器返回了读不懂的内容。",
         null => string.Empty,
-        _ => failureCode,
+        _ => "服务器暂时无法完成这个请求，请稍后重试。",
     };
 
     private async Task GuardAsync(Func<Task> work, Label? statusTarget = null)
@@ -311,11 +289,11 @@ public partial class SettingsPage : ContentPage
         {
             await work();
         }
-        catch (Exception exception)
+        catch (Exception)
         {
             // Reported where the user was looking: a failure to clear the archive belongs under 本机记录, not under
             // the server address.
-            (statusTarget ?? ServerStatus).Text = $"操作失败：{exception.Message}";
+            (statusTarget ?? ServerStatus).Text = "操作没有完成，请稍后重试。";
         }
         finally
         {

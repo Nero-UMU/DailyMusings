@@ -8,7 +8,7 @@
 @* 设备分区：配对码、已连接设备、已撤销设备。配对码从状态页搬到了这里 —— 它属于「设备」这件事。 *@
 
 <PageHeader Title="设备"
-            Hint="每台设备用自己独立的令牌访问实例，令牌以哈希保存、可单独轮换或撤回。撤回在下一次请求即生效，不需要重启服务。">
+            Hint="生成配对码以连接手机，并在这里查看、重新授权或移除不再使用的设备。">
     <Actions>
         <button class="btn btn-primary" @onclick="IssueCodeAsync" disabled="@(_busy || _issuingCode)">
             @(_issuingCode ? "正在签发…" : "生成配对码")

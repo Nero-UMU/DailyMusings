@@ -52,6 +52,13 @@ internal sealed class StubTranscriptionEndpoint : IAsyncDisposable
         app.MapPost("/v1/audio/transcriptions", async (HttpContext context) =>
         {
             state.RequestCount++;
+
+            if (state.RequireChatCompletions)
+            {
+                context.Response.StatusCode = StatusCodes.Status404NotFound;
+                return;
+            }
+
             state.LastAuthorization = context.Request.Headers.Authorization.ToString();
 
             var form = await context.Request.ReadFormAsync(context.RequestAborted);
@@ -104,6 +111,35 @@ internal sealed class StubTranscriptionEndpoint : IAsyncDisposable
                 context.RequestAborted);
         }).DisableAntiforgery();
 
+        app.MapPost("/v1/chat/completions", async (HttpContext context) =>
+        {
+            state.RequestCount++;
+            state.LastAuthorization = context.Request.Headers.Authorization.ToString();
+
+            using var payload = await System.Text.Json.JsonDocument.ParseAsync(
+                context.Request.Body,
+                cancellationToken: context.RequestAborted);
+            state.LastModel = payload.RootElement.GetProperty("model").GetString();
+
+            var audio = payload.RootElement
+                .GetProperty("messages")[0]
+                .GetProperty("content")[0]
+                .GetProperty("input_audio")
+                .GetProperty("data")
+                .GetString();
+            state.LastAudioData = audio;
+
+            await context.Response.WriteAsJsonAsync(
+                new
+                {
+                    choices = new[]
+                    {
+                        new { message = new { role = "assistant", content = state.ResponseText } },
+                    },
+                },
+                context.RequestAborted);
+        }).DisableAntiforgery();
+
         await app.StartAsync();
 
         var address = app.Services
@@ -143,6 +179,10 @@ internal sealed class StubTranscriptionEndpoint : IAsyncDisposable
 
         public long LastAudioBytes { get; set; }
 
+        public string? LastAudioData { get; set; }
+
+        public bool RequireChatCompletions { get; set; }
+
         public string ResponseText { get; set; } = "今天走了一条没走过的巷子。";
 
         public string ResponseLanguage { get; set; } = "zh";
@@ -168,6 +208,7 @@ internal sealed class StubTranscriptionEndpoint : IAsyncDisposable
             LastFileName = null;
             LastContentType = null;
             LastAudioBytes = 0;
+            LastAudioData = null;
             FailWithStatusCode = null;
             ResponseDelay = null;
             ResponseBodyOverride = null;

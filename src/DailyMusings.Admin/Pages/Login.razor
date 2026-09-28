@@ -2,54 +2,62 @@
 @attribute [AllowAnonymous]
 @inject IHttpContextAccessor HttpContextAccessor
 
-<div class="shell">
-    <h1>管理员登录</h1>
-    <p class="hint">单用户自托管实例。这台实例只服务你自己。</p>
+<div class="login-page">
+    <section class="login-hero" aria-label="每日随想介绍">
+        <div class="login-brand"><span class="login-mark">每</span><span>每日随想</span></div>
+        <div class="login-hero-copy">
+            <span class="login-kicker">DAILY MUSINGS</span>
+            <h1>把一天的碎片，<br />整理成值得留下的文字。</h1>
+            <p>从录音与随手记，到核验、归类和 Markdown 发布，都在一个安静的个人空间里完成。</p>
+        </div>
+        <div class="login-capabilities"><span>录音转写</span><span>稿件核验</span><span>定时发布</span></div>
+    </section>
 
-    @if (Message is not null)
-    {
-        <p class="notice error">@Message</p>
-    }
-
-    @if (Changed)
-    {
-        <p class="notice ok">凭据已更新，请重新登录。</p>
-    }
-
-    @* A plain browser POST, not an interactive round trip: the cookie can only be issued by an HTTP response, and
-       a Blazor circuit has no way to set one. data-enhance="false" keeps enhanced navigation out of it. *@
-    <form method="post" action="@ApiRoutes.AdminSignIn" data-enhance="false" class="form">
-        @if (IsInsecure)
-        {
-            @* §10.3: the risk must be stated before the credentials are sent, and the user must actively confirm
-               before continuing. This checkbox is a one-time acknowledgement, not a security measure — the text
-               below says so explicitly, so nobody can read it as "confirmed, therefore safe". *@
-            <div class="notice error">
-                <strong>你正在通过未加密的 HTTP 连接访问。</strong>
-                <p>
-                    密码、设备令牌、录音和文章都可能被同一网络中的其他人截获。
-                    请优先使用 HTTPS、局域网或 VPN。
-                </p>
-                <p class="hint">
-                    确认本提示不会使连接变安全，它只是说明风险。管理页会持续显示不安全连接状态。
-                </p>
-                <label class="checkbox">
-                    <input type="checkbox" name="acknowledgeRisk" value="yes" required />
-                    我已了解上述风险，仍要继续
-                </label>
+    <section class="login-panel">
+        <div class="login-card">
+            <div class="login-card-head">
+                <span class="login-kicker">管理后台</span>
+                <h2>欢迎回来</h2>
+                <p>登录后查看今日素材、管理稿件并调整发布计划。</p>
             </div>
-        }
 
-        <label>
-            账号
-            <input name="username" autocomplete="username" required autofocus />
-        </label>
-        <label>
-            密码
-            <input name="password" type="password" autocomplete="current-password" required />
-        </label>
-        <button type="submit" class="btn-primary btn-block">登录</button>
-    </form>
+            @if (Message is not null)
+            {
+                <p class="notice error">@Message</p>
+            }
+
+            @if (Changed)
+            {
+                <p class="notice ok">账号信息已更新，请重新登录。</p>
+            }
+
+            <form method="post" action="@ApiRoutes.AdminSignIn" data-enhance="false" class="form login-form">
+                <label>
+                    账号
+                    <input name="username" autocomplete="username" placeholder="请输入管理员账号" required autofocus />
+                </label>
+                <label>
+                    密码
+                    <input name="password" type="password" autocomplete="current-password" placeholder="请输入密码" required />
+                </label>
+
+                @if (IsInsecure)
+                {
+                    <div class="login-security-warning">
+                        <strong>当前是 HTTP 连接</strong>
+                        <p>登录信息可能被同一网络中的其他人看到。建议通过 HTTPS 或可信的局域网、VPN 访问。</p>
+                        <label class="checkbox">
+                            <input type="checkbox" name="acknowledgeRisk" value="yes" required />
+                            我了解风险并继续登录
+                        </label>
+                    </div>
+                }
+
+                <button type="submit" class="btn-primary btn-block login-submit">登录</button>
+            </form>
+            <p class="login-footnote">这是你的单用户私有实例。</p>
+        </div>
+    </section>
 </div>
 
 @code {

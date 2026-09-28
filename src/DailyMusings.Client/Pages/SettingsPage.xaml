@@ -14,14 +14,6 @@
 
             <Label Text="设置" Style="{StaticResource TitleLabel}" />
 
-            <!-- §10.3: 设置页持续显示不安全连接状态. -->
-            <Border x:Name="InsecureBanner" Style="{StaticResource WarnBanner}" IsVisible="False">
-                <Label
-                    TextColor="{StaticResource Danger}"
-                    FontSize="12"
-                    Text="当前使用未加密的 HTTP 连接。密码、设备令牌、录音与文章都可能被同一网络中的他人截获。请改用 HTTPS、局域网或 VPN。确认过风险提示并不等于连接变安全了。" />
-            </Border>
-
             <Label Text="服务器" Style="{StaticResource SectionLabel}" />
 
             <Border Style="{StaticResource Card}">
@@ -32,7 +24,7 @@
                         Keyboard="Url" />
                     <Label
                         Style="{StaticResource CaptionLabel}"
-                        Text="填写实例的地址，例如 http://192.168.1.10:18321。推荐使用 HTTPS；明文 HTTP 需要你主动确认风险后才会保存。" />
+                        Text="填写每日随想服务端的完整地址，例如 http://192.168.1.10:18321。保存后先测试连接，再进行设备配对。" />
                     <Grid ColumnDefinitions="*,*" ColumnSpacing="10">
                         <Button Text="保存地址" Clicked="OnSaveServerClicked" />
                         <Button

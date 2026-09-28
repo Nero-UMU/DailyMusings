@@ -10,7 +10,7 @@
    密码、SSL、STARTTLS、收件人邮箱，七项都由用户自己填；不再有「安全方式」下拉，也没有常用邮箱预置。 *@
 
 <PageHeader Title="通知管理"
-            Hint="邮件只携带元数据（日期、标题、状态），不含草稿正文（§12）。设备令牌可以读这里的偏好，但只有管理员能改——令牌若能改收件邮箱，就等于能把当天标题发到别人邮箱。">
+            Hint="配置发件邮箱、收件地址和需要提醒的事件。通知只包含日期、标题与状态，不发送稿件正文。">
     <Actions>
         <button class="btn" @onclick="ProbeSmtpAsync" disabled="@_busy">测试连接</button>
         <button class="btn-primary" @onclick="SendTestEmailAsync" disabled="@_busy">发送测试邮件</button>
@@ -45,11 +45,6 @@
             <span>@_test.Detail</span>
             <br />
         }
-        @if (!string.IsNullOrWhiteSpace(_test.Code))
-        {
-            <span>错误码：<code>@_test.Code</code></span>
-            <br />
-        }
         <span class="hint">
             这封信发到：<code>@(_testedTo ?? "（没有收件邮箱）")</code>
             @if (_test.Sent)
@@ -63,8 +58,8 @@
 @if (_probe is not null)
 {
     <p class="notice @(_probe.Ok ? "ok" : "error")">
-        <strong>SMTP 测试连接：@(_probe.Ok ? "可达。" : "失败。")</strong>
-        @_probe.Detail（<code>@_probe.Code</code>）
+        <strong>SMTP 连接测试：@(_probe.Ok ? "服务器有响应。" : "失败。")</strong>
+        @_probe.Detail
         <br />
         <span class="hint">
             只读了服务器的问候语，不代表能发信——要确认能发，用「发送测试邮件」。
@@ -90,8 +85,7 @@ else
         </div>
 
         <p class="hint">
-            下面七项就是别家软件「邮箱通知」里要填的东西，照着填即可：<strong>发件人邮箱同时就是 SMTP 用户名</strong>，
-            所以没有单独的用户名一格。填完先点「保存」，再用「发送测试邮件」真发一封确认。
+            请从邮箱服务商处获取 SMTP 地址、端口和密码。发件人邮箱同时作为登录用户名；保存后发送一封测试邮件确认配置。
         </p>
 
         <div class="form-grid">
@@ -156,15 +150,13 @@ else
         </div>
 
         <p class="hint">
-            <strong>SSL 与 STARTTLS 只能选一个</strong>，两个都勾保存会被拒绝（世界上没有这种发信方式，硬发只会在握手里
-            失败）。<strong>配了密码就必须勾一个</strong>：明文连接会把密码暴露给路上每一个人，所以「有密码 + 两个都不勾」
-            也会被拒绝保存。两个都不勾只适合本机中继（没有密码时）。
-            端口与加密方式要对得上，否则会一直等到超时并报「did not answer in time」——十有八九就是这里不匹配。
+            <strong>SSL 与 STARTTLS 只能选一个。</strong>常见配置为 465 + SSL，或 587 + STARTTLS；请以邮箱服务商提供的信息为准。
+            使用密码时必须选择一种加密方式。
         </p>
 
         <p class="hint">
             <strong>密码输入框只提交、不回显</strong>：保存后页面只会显示「密钥来源」，值本身永远不会回到浏览器，
-            也不会进日志、导出或备份（§10.4）。留空表示不改动已保存的值。
+            也不会进入日志、导出或备份。留空表示继续使用已保存的密码。
         </p>
 
         <div class="actions">
@@ -220,8 +212,7 @@ else
             </p>
 
             <p class="hint">
-                收件邮箱在「邮件」卡片里改，两张卡片写的是同一份设置——这里只显示它，免得两处各改一半。
-                SMTP 地址、端口、发件人邮箱、密码与加密方式也在「邮件」卡片；通知偏好与实例地址在这里。
+                收件地址在上方「邮件」卡片修改；这里选择哪些事件需要通知，并填写邮件中用于返回管理后台的地址。
             </p>
         }
     </div>

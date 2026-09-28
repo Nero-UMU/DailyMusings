@@ -139,6 +139,20 @@ public class ModelAndSmtpSettingsTests
     }
 
     [TestMethod]
+    public async Task A_public_url_only_ASR_model_is_refused_before_it_breaks_phone_recordings()
+    {
+        var update = new UpdateModelEndpointUseCase(new InMemoryAppSettingStore(), new InMemoryUiSecretStore());
+
+        var failure = await Assert.ThrowsExceptionAsync<UseCaseException>(() =>
+            update.ExecuteAsync(
+                ModelService.Transcription,
+                new ModelEndpointUpdate(null, null, "paraformer-v2", null, null, null),
+                CancellationToken.None));
+
+        Assert.AreEqual("model.transcription.public_url_only", failure.Code);
+    }
+
+    [TestMethod]
     public async Task Smtp_settings_are_written_and_validated_the_same_way()
     {
         var store = new InMemoryAppSettingStore();

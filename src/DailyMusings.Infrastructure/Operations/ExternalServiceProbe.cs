@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Net.Http.Headers;
+using System.Net.Http.Json;
 using System.Net.Security;
 using System.Net.Sockets;
 using System.Security.Authentication;
@@ -137,19 +138,19 @@ public sealed class ExternalServiceProbe : IExternalServiceProbe
     {
         var result = service switch
         {
-            ExternalService.Transcription => await ProbeModelAsync(
-                "transcription",
-                (await _transcription.GetAsync(cancellationToken).ConfigureAwait(false)) is { Enabled: true } t ? (t.BaseUrl, t.SecretName) : null,
+            ExternalService.Transcription => await ProbeConfiguredModelAsync(
+                ExternalService.Transcription,
+                (await _transcription.GetAsync(cancellationToken).ConfigureAwait(false)) is { Enabled: true } t ? (t.BaseUrl, t.Model, t.SecretName) : null,
                 cancellationToken).ConfigureAwait(false),
 
-            ExternalService.Generation => await ProbeModelAsync(
-                "generation",
-                (await _generation.GetAsync(cancellationToken).ConfigureAwait(false)) is { Enabled: true } g ? (g.BaseUrl, g.SecretName) : null,
+            ExternalService.Generation => await ProbeConfiguredModelAsync(
+                ExternalService.Generation,
+                (await _generation.GetAsync(cancellationToken).ConfigureAwait(false)) is { Enabled: true } g ? (g.BaseUrl, g.Model, g.SecretName) : null,
                 cancellationToken).ConfigureAwait(false),
 
-            ExternalService.Embedding => await ProbeModelAsync(
-                "embedding",
-                (await _embedding.GetAsync(cancellationToken).ConfigureAwait(false)) is { Enabled: true } e ? (e.BaseUrl, e.SecretName) : null,
+            ExternalService.Embedding => await ProbeConfiguredModelAsync(
+                ExternalService.Embedding,
+                (await _embedding.GetAsync(cancellationToken).ConfigureAwait(false)) is { Enabled: true } e ? (e.BaseUrl, e.Model, e.SecretName) : null,
                 cancellationToken).ConfigureAwait(false),
 
             ExternalService.Smtp => await ProbeSmtpAsync(cancellationToken).ConfigureAwait(false),
@@ -185,6 +186,11 @@ public sealed class ExternalServiceProbe : IExternalServiceProbe
             return ProbeResult.Failure($"probe.{name}.url_invalid", "Base URL 必须是有效的 HTTP 或 HTTPS 地址。");
         }
 
+        if (string.IsNullOrWhiteSpace(request.Model))
+        {
+            return ProbeResult.Failure($"probe.{name}.model_missing", "请填写要测试的模型名。");
+        }
+
         var secret = string.IsNullOrWhiteSpace(request.ApiKey)
             ? _secrets.TryGet(request.SecretName)
             : request.ApiKey.Trim();
@@ -194,58 +200,48 @@ public sealed class ExternalServiceProbe : IExternalServiceProbe
             return ProbeResult.Failure($"probe.{name}.secret_missing", "请填写 API Key，或先保存一个可用的 Key。");
         }
 
-        var modelsUri = new Uri($"{baseUri.ToString().TrimEnd('/')}/models", UriKind.Absolute);
+        if (request.Service == ExternalService.Transcription &&
+            (request.Model.StartsWith("paraformer", StringComparison.OrdinalIgnoreCase) ||
+             request.Model.Contains("filetrans", StringComparison.OrdinalIgnoreCase)))
+        {
+            return ProbeResult.Failure(
+                "probe.transcription.model_requires_public_audio",
+                "这个模型只接受公网音频地址，不能直接处理手机上传的录音。请改用 qwen3-asr-flash 或兼容 /audio/transcriptions 的模型。");
+        }
+
+        using var httpRequest = BuildModelProbeRequest(request, baseUri, secret);
         var result = await SendAsync(
             name,
-            HttpMethod.Get,
-            modelsUri,
-            new AuthenticationHeaderValue("Bearer", secret),
-            $"已连接 {modelsUri.GetLeftPart(UriPartial.Authority)}，并通过 /models 校验。",
+            httpRequest,
+            $"已实际调用 {request.Model}，接口与密钥均可用。",
             cancellationToken).ConfigureAwait(false);
 
         _logger.LogInformation("Test candidate connection for {Service} reported {Outcome}.", request.Service, result.Code);
         return result;
     }
 
-    private async Task<ProbeResult> ProbeModelAsync(
-        string name,
-        (string BaseUrl, string SecretName)? settings,
+    private async Task<ProbeResult> ProbeConfiguredModelAsync(
+        ExternalService service,
+        (string BaseUrl, string Model, string SecretName)? settings,
         CancellationToken cancellationToken)
     {
+        var name = service.ToString().ToLowerInvariant();
         if (settings is not { } config)
         {
             return ProbeResult.Failure($"probe.{name}.disabled", $"No {name} endpoint is configured.");
         }
 
-        var secret = _secrets.TryGet(config.SecretName);
-        if (secret is null)
-        {
-            return ProbeResult.Failure($"probe.{name}.secret_missing", $"The secret '{config.SecretName}' is not provisioned.");
-        }
-
-        // /models is the one endpoint every OpenAI-compatible service implements and that never costs a generation.
-        var uri = new Uri($"{config.BaseUrl.TrimEnd('/')}/models", UriKind.Absolute);
-
-        return await SendAsync(
-            name,
-            HttpMethod.Get,
-            uri,
-            new AuthenticationHeaderValue("Bearer", secret),
-            "The endpoint answered.",
+        return await ProbeModelAsync(
+            new ModelEndpointProbeRequest(service, config.BaseUrl, config.Model, config.SecretName),
             cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<ProbeResult> SendAsync(
         string name,
-        HttpMethod method,
-        Uri uri,
-        AuthenticationHeaderValue credential,
+        HttpRequestMessage request,
         string successDetail,
         CancellationToken cancellationToken)
     {
-        using var request = new HttpRequestMessage(method, uri);
-        request.Headers.Authorization = credential;
-
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(ProbeTimeout);
 
@@ -281,6 +277,107 @@ public sealed class ExternalServiceProbe : IExternalServiceProbe
         {
             return ProbeResult.Failure($"probe.{name}.unreachable", "The service could not be reached.");
         }
+    }
+
+    private static HttpRequestMessage BuildModelProbeRequest(
+        ModelEndpointProbeRequest request,
+        Uri baseUri,
+        string apiKey)
+    {
+        var root = baseUri.ToString().TrimEnd('/');
+        HttpRequestMessage message;
+
+        if (request.Service == ExternalService.Transcription &&
+            request.Model.StartsWith("qwen3-asr-flash", StringComparison.OrdinalIgnoreCase))
+        {
+            var dataUri = $"data:audio/wav;base64,{Convert.ToBase64String(CreateProbeWave())}";
+            message = new HttpRequestMessage(HttpMethod.Post, $"{root}/chat/completions")
+            {
+                Content = JsonContent.Create(new
+                {
+                    model = request.Model,
+                    messages = new[]
+                    {
+                        new
+                        {
+                            role = "user",
+                            content = new[]
+                            {
+                                new
+                                {
+                                    type = "input_audio",
+                                    input_audio = new { data = dataUri },
+                                },
+                            },
+                        },
+                    },
+                    stream = false,
+                }),
+            };
+        }
+        else if (request.Service == ExternalService.Transcription)
+        {
+            var multipart = new MultipartFormDataContent();
+            var audio = new ByteArrayContent(CreateProbeWave());
+            audio.Headers.ContentType = new MediaTypeHeaderValue("audio/wav");
+            multipart.Add(audio, "file", "connection-test.wav");
+            multipart.Add(new StringContent(request.Model), "model");
+
+            message = new HttpRequestMessage(HttpMethod.Post, $"{root}/audio/transcriptions")
+            {
+                Content = multipart,
+            };
+        }
+        else if (request.Service == ExternalService.Generation)
+        {
+            message = new HttpRequestMessage(HttpMethod.Post, $"{root}/chat/completions")
+            {
+                Content = JsonContent.Create(new
+                {
+                    model = request.Model,
+                    messages = new[] { new { role = "user", content = "Reply with OK." } },
+                    max_tokens = 2,
+                    stream = false,
+                }),
+            };
+        }
+        else
+        {
+            message = new HttpRequestMessage(HttpMethod.Post, $"{root}/embeddings")
+            {
+                Content = JsonContent.Create(new { model = request.Model, input = "connection test" }),
+            };
+        }
+
+        message.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+        return message;
+    }
+
+    private static byte[] CreateProbeWave()
+    {
+        const int sampleRate = 8_000;
+        const short channels = 1;
+        const short bitsPerSample = 16;
+        const int sampleCount = 800;
+        var dataSize = sampleCount * channels * bitsPerSample / 8;
+
+        using var stream = new MemoryStream(44 + dataSize);
+        using var writer = new BinaryWriter(stream, Encoding.ASCII, leaveOpen: true);
+        writer.Write(Encoding.ASCII.GetBytes("RIFF"));
+        writer.Write(36 + dataSize);
+        writer.Write(Encoding.ASCII.GetBytes("WAVEfmt "));
+        writer.Write(16);
+        writer.Write((short)1);
+        writer.Write(channels);
+        writer.Write(sampleRate);
+        writer.Write(sampleRate * channels * bitsPerSample / 8);
+        writer.Write((short)(channels * bitsPerSample / 8));
+        writer.Write(bitsPerSample);
+        writer.Write(Encoding.ASCII.GetBytes("data"));
+        writer.Write(dataSize);
+        writer.Write(new byte[dataSize]);
+        writer.Flush();
+        return stream.ToArray();
     }
 
     /// <summary>

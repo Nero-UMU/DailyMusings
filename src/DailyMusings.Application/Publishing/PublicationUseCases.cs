@@ -397,9 +397,37 @@ public sealed class RunPublicationUseCase
 
         var destination = await _destinations.ResolveAsync(target, cancellationToken).ConfigureAwait(false);
         var publishPublicly = intent == PublicationIntent.PublishPublicly;
+        var previousPublications = publishPublicly
+            ? (await _publications.ListByReflectionAsync(reflection.Id, cancellationToken).ConfigureAwait(false))
+                .Where(item =>
+                    item.Id != publication.Id &&
+                    item.PublishTargetId == publication.PublishTargetId &&
+                    item.Status == PublicationStatus.Published)
+                .ToArray()
+            : [];
 
         try
         {
+            foreach (var previous in previousPublications)
+            {
+                if (previous.RemoteId is not { Length: > 0 } previousFile ||
+                    previous.PublishedContentHash is not { Length: > 0 } previousHash)
+                {
+                    continue;
+                }
+
+                var currentHash = await _markdown
+                    .ReadHashAsync(destination.MarkdownDirectory, previousFile, cancellationToken)
+                    .ConfigureAwait(false);
+
+                if (currentHash is not null && !string.Equals(currentHash, previousHash, StringComparison.Ordinal))
+                {
+                    throw new PermanentExternalFailureException(
+                        "markdown.previous_file.modified_externally",
+                        "The previously published file was changed outside the product and was not removed.");
+                }
+            }
+
             var outcome = await PublishMarkdownAsync(
                 publication,
                 version,
@@ -409,6 +437,28 @@ public sealed class RunPublicationUseCase
                 publishPublicly,
                 settings.HexoFrontMatterTemplate,
                 cancellationToken).ConfigureAwait(false);
+
+            foreach (var previous in previousPublications)
+            {
+                if (previous.RemoteId is { Length: > 0 } previousFile &&
+                    previous.PublishedContentHash is { Length: > 0 } previousHash &&
+                    !string.Equals(previousFile, publication.RemoteId, StringComparison.Ordinal))
+                {
+                    var removed = await _markdown
+                        .DeleteIfUnchangedAsync(destination.MarkdownDirectory, previousFile, previousHash, cancellationToken)
+                        .ConfigureAwait(false);
+
+                    if (!removed)
+                    {
+                        throw new PermanentExternalFailureException(
+                            "markdown.previous_file.modified_externally",
+                            "The previously published file was changed outside the product and was not removed.");
+                    }
+                }
+
+                previous.Supersede(_clock.UtcNow);
+                await _publications.UpdateAsync(previous, cancellationToken).ConfigureAwait(false);
+            }
 
             await _publications.UpdateAsync(publication, cancellationToken).ConfigureAwait(false);
             await NotifyAsync(publication, publication.Status, target.Name, publication.ErrorCode, cancellationToken)
