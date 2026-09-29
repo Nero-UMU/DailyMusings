@@ -174,6 +174,34 @@ jobs:
           # 调用方式下会把剩下的脚本吃掉（在真实服务器上踩过一次，脚本静默半途结束、退出码还是 0）。
           docker compose exec -T app cat /proc/1/status </dev/null | grep -q '^Uid:.*1654'
 
+          echo "-- 端口锁真的生效（compose 传进去的 DM_LOCK_LISTENING_PORT 与容器里读的是同一个名字）--"
+          # 这一段是这次改名的验收本体：环境变量名写错时，「锁没生效」不会让别的断言变红。
+          cookie="$(mktemp)"
+          curl -fsS -o /dev/null -c "$cookie" -X POST \
+            -d "username=admin&password=SmokeTestPassword1&acknowledgeRisk=yes" \
+            http://127.0.0.1:18321/api/admin/sign-in
+          # 首次登录强制改密；改密会让旧会话失效，所以下面要重新登录一次。
+          curl -fsS -o /dev/null -b "$cookie" -c "$cookie" -X POST \
+            -d "currentPassword=SmokeTestPassword1&newUsername=owner&newPassword=CorrectHorseBattery1&confirmPassword=CorrectHorseBattery1" \
+            http://127.0.0.1:18321/api/admin/credentials
+          curl -fsS -o /dev/null -c "$cookie" -X POST \
+            -d "username=owner&password=CorrectHorseBattery1&acknowledgeRisk=yes" \
+            http://127.0.0.1:18321/api/admin/sign-in
+
+          port="$(curl -fsS -b "$cookie" http://127.0.0.1:18321/api/system/listening-port)"
+          echo "  $port"
+          echo "$port" | grep -q '"locked":true'
+
+          code="$(curl -s -o /dev/null -w '%{http_code}' -b "$cookie" -X PATCH \
+            -H 'Content-Type: application/json' -d '{"port":19464}' \
+            http://127.0.0.1:18321/api/system/listening-port)"
+          echo "  PATCH 改端口 -> HTTP $code（应当是 409）"
+          [ "$code" = "409" ]
+
+          echo "-- 被拒绝的写入没有在磁盘上留下任何东西 --"
+          docker compose exec -T app sh -c 'test ! -e /var/lib/dailymusings-config/runtime.json' </dev/null
+          rm -f "$cookie"
+
       - name: 把两个目录指到别处再起一次（DM_DATA_DIR / DM_CONFIG_DIR）
         env:
           DM_IMAGE: dailymusings-smoke:local
