@@ -220,15 +220,20 @@ jobs:
             echo "--- apksigner verify --print-certs ---"
             certs="$("$apksigner" verify --print-certs "$apk" 2>&1)"
             echo "$certs"
-            dn="$(printf '%s\n' "$certs" | grep -m1 'Signer #1 certificate DN' | sed 's/.*DN: //')"
-            actual="$(printf '%s\n' "$certs" | grep -m1 'Signer #1 certificate SHA-256 digest' | awk '{print $NF}' | tr 'A-F' 'a-f')"
+
+            # 不要匹配 "Signer #1"：build-tools 37 的 apksigner 把它改成了「V3.0 Signer: certificate ...」，
+            # 而 v3-only 的 APK 只会打印后者。按「certificate DN / certificate SHA-256 digest」这种与
+            # 方案无关的片段来取，两种口径都吃得住（这一次的失败就是踩在这里）。
+            dn="$(printf '%s\n' "$certs" | grep -im1 'certificate DN' | sed 's/.*DN: //')"
+            actual="$(printf '%s\n' "$certs" | grep -im1 'certificate SHA-256 digest' | awk '{print $NF}' | tr -d ':' | tr 'A-F' 'a-f')"
           else
-            # keytool 一定在（setup-java 装了 JDK）：它读的是 v1 JAR 签名证书，够用来比对指纹。
+            # keytool 一定在（setup-java 装了 JDK）。注意它读的是 v1 JAR 签名：只签了 v2/v3 的 APK 会报
+            # 「Not a signed jar file」，所以它只是兜底，不能当主力。
             echo "--- keytool -printcert -jarfile（apksigner 没找到时的兜底）---"
             certs="$(keytool -printcert -jarfile "$apk" 2>&1)"
             echo "$certs"
-            dn="$(printf '%s\n' "$certs" | grep -m1 -i '^Owner:' | sed 's/^Owner: //')"
-            actual="$(printf '%s\n' "$certs" | grep -m1 -i 'SHA256:' | sed 's/.*SHA256: //' | tr -d ':' | tr -d ' ' | tr 'A-F' 'a-f')"
+            dn="$(printf '%s\n' "$certs" | grep -im1 '^Owner:' | sed 's/^Owner: //')"
+            actual="$(printf '%s\n' "$certs" | grep -im1 'SHA256:' | sed 's/.*SHA256: //' | tr -d ':' | tr -d ' ' | tr 'A-F' 'a-f')"
           fi
 
           echo "证书主题   ：${dn:-（读不出）}"
