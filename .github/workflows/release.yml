@@ -83,6 +83,8 @@ jobs:
       - name: 写入发布签名密钥
         env:
           KEYSTORE_BASE64: ${{ secrets.ANDROID_SIGNING_KEYSTORE_BASE64 }}
+          SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_SIGNING_STORE_PASSWORD }}
+          SIGNING_KEY_ALIAS: ${{ secrets.ANDROID_SIGNING_KEY_ALIAS }}
         run: |
           set -euo pipefail
 
@@ -90,13 +92,23 @@ jobs:
           # 于是每次发布的签名都不一样，手机上永远装不上新版本（见 docs/开发指导.md 附录 A.30）。
           # 与其再发出一份装不上的 APK，不如让发布停下来。
           if [ -z "${KEYSTORE_BASE64}" ]; then
-            echo "::error::缺少 ANDROID_SIGNING_KEYSTORE_BASE64。发布 APK 需要一把固定的签名密钥：" \
-                 "在本机跑 tools/release/new-signing-key.ps1，把打印出来的 4 条 Secret 与 1 条 Variable 填进仓库设置。"
+            echo "::error title=缺少签名密钥::ANDROID_SIGNING_KEYSTORE_BASE64 没设置。在本机跑 tools/release/new-signing-key.ps1，把打印出来的 4 条 Secret 与 1 条 Variable 填进仓库设置。"
             exit 1
           fi
 
           printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.keystore"
           echo "keystore 已写入（$(stat -c '%s' "$RUNNER_TEMP/release.keystore") 字节）"
+
+          # 先花 5 秒证明这把 keystore 与口令/别名配得上，而不是等构建跑完 20 分钟才发现打不开。
+          # 任何失败都要写成 ::error:: 注解：注解在公开仓库可读，日志在未登录/限流时读不到，
+          # 而「沉默的失败」正是上一轮卡住的原因。
+          if ! listing="$(keytool -list -keystore "$RUNNER_TEMP/release.keystore" \
+                -storepass "$SIGNING_STORE_PASSWORD" -alias "$SIGNING_KEY_ALIAS" 2>&1)"; then
+            echo "::error title=密钥或口令对不上::keytool 打不开这把 keystore（别名 ${SIGNING_KEY_ALIAS}）。检查 ANDROID_SIGNING_STORE_PASSWORD / ANDROID_SIGNING_KEY_ALIAS / ANDROID_SIGNING_KEYSTORE_BASE64 是否来自同一次脚本输出。keytool 说：$(printf '%s' "$listing" | tail -3 | tr '\n' ' ')"
+            exit 1
+          fi
+
+          echo "keystore 可用：$(printf '%s' "$listing" | grep -m1 -i 'SHA256:' || echo '（keytool 未列出指纹）')"
 
       - name: 由 tag 推导 Android 版本号
         id: version
@@ -160,27 +172,45 @@ jobs:
       # 签名「没报错」不等于「用的是那把密钥」：构建在找不到密钥时会静默退回调试密钥（主题 CN=Android Debug），
       # 而那正是这一版要杜绝的事。所以这里读回证书主题与指纹，和仓库变量比对。
       #
-      # 失败信息刻意写全：证书主题 + 实际指纹 + 期望指纹 + 两种成因各自该怎么办。上一次失败时只有一句
-      # 「不一致」，而 GitHub 的日志在未登录/限流时读不到，定位只能靠猜——这个代价不该再付一次。
+      # 这一步骤刻意**没有** set -e：每个失败分支都必须自己 emit 一条 ::error:: 注解。上一版用 set -e，
+      # apksigner 一旦非零退出就直接结束，连一行输出都没有，于是「哪里错了」只能靠猜（GitHub 的日志在
+      # 未登录/限流时读不到，注解却能被公开读到）。
       - name: 校验签名证书
         env:
           EXPECTED_CERT_SHA256: ${{ vars.ANDROID_SIGNING_CERT_SHA256 }}
         run: |
-          set -euo pipefail
+          set -uo pipefail
+
+          fail() {
+            echo "::error title=$1::$2"
+            {
+              echo "### ❌ $1"
+              echo ""
+              echo '```'
+              echo "$2"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          }
 
           version="${{ steps.version.outputs.name }}"
           [ -n "$version" ] || version="0.0.0-dev"
           apk="DailyMusings-client-${version}-android.apk"
 
+          [ -f "$apk" ] || fail "找不到 APK 产物" "期望 $apk，工作目录里只有：$(ls -1 *.apk 2>/dev/null | tr '\n' ' ')"
+
           apksigner="$(find "${ANDROID_HOME:-/usr/local/lib/android/sdk}/build-tools" -name apksigner -type f 2>/dev/null | sort | tail -1)"
-          if [ -z "$apksigner" ]; then
-            echo "::error::找不到 apksigner，无法校验签名。"
-            exit 1
+          [ -n "$apksigner" ] || fail "找不到 apksigner" "在 ${ANDROID_HOME:-/usr/local/lib/android/sdk}/build-tools 下没有 apksigner，无法校验签名。"
+
+          certs=""
+          if ! certs="$("$apksigner" verify --print-certs "$apk" 2>&1)"; then
+            fail "apksigner 校验失败" "apksigner 对 $apk 的结论：$(printf '%s' "$certs" | tail -5 | tr '\n' ' ')"
           fi
 
-          certs="$("$apksigner" verify --print-certs "$apk")"
           dn="$(printf '%s\n' "$certs" | grep -m1 'Signer #1 certificate DN' | sed 's/.*DN: //')"
           actual="$(printf '%s\n' "$certs" | grep -m1 'Signer #1 certificate SHA-256 digest' | awk '{print $NF}' | tr 'A-F' 'a-f')"
+
+          [ -n "$actual" ] || fail "读不出证书指纹" "apksigner 的输出里没有指纹行：$(printf '%s' "$certs" | tail -5 | tr '\n' ' ')"
 
           echo "证书主题   ：$dn"
           echo "实际指纹   ：$actual"
@@ -195,18 +225,14 @@ jobs:
             echo "- 自查：\`apksigner verify --print-certs $apk\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
-          if [ -z "${EXPECTED_CERT_SHA256}" ]; then
-            echo "::error title=缺少仓库变量::ANDROID_SIGNING_CERT_SHA256 没设置。它是仓库 Variable（不是 Secret），值由 tools/release/new-signing-key.ps1 打印，小写且不含冒号。本次产物是用 $dn 签的，指纹 $actual。"
-            exit 1
-          fi
+          [ -n "${EXPECTED_CERT_SHA256}" ] || fail "缺少仓库变量" "ANDROID_SIGNING_CERT_SHA256 没设置。它是仓库 Variable（不是 Secret），值由 tools/release/new-signing-key.ps1 打印，小写且不含冒号。本次产物是用「$dn」签的，指纹 $actual。"
 
           if [ "$actual" != "$EXPECTED_CERT_SHA256" ]; then
             if printf '%s' "$dn" | grep -qi 'Android Debug'; then
-              echo "::error title=构建没用上发布密钥::产物是调试签名（$dn）。密钥或口令没生效，要修的是构建，不是变量。"
-            else
-              echo "::error title=签名指纹与变量不一致::产物由「$dn」签名，指纹 $actual；变量里是 $EXPECTED_CERT_SHA256。若 $actual 确实是你那把密钥的指纹，把变量改成它：gh variable set ANDROID_SIGNING_CERT_SHA256 -R ${GITHUB_REPOSITORY} --body $actual"
+              fail "构建没用上发布密钥" "产物是调试签名（$dn，指纹 $actual）。密钥或口令没生效，要修的是构建，不是变量。"
             fi
-            exit 1
+
+            fail "签名指纹与变量不一致" "产物由「$dn」签名，指纹 $actual；变量里是 $EXPECTED_CERT_SHA256。若 $actual 确实是你那把密钥的指纹，把变量改成它：gh variable set ANDROID_SIGNING_CERT_SHA256 -R ${GITHUB_REPOSITORY} --body $actual"
           fi
 
           echo "签名校验通过：$dn"
