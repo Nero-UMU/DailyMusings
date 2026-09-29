@@ -26,6 +26,15 @@
 
 **本地验证**：用脚本生成的临时密钥构建一份 APK，`apksigner verify --print-certs` 得到的证书主题从 `CN=Android Debug` 变为 `CN=DailyMusings`，摘要与脚本打印的指纹一字不差（同时踩到并修掉一个坑：PKCS12 只有一个口令，store 与 key 用不同口令会让 `jarsigner` 直接失败，脚本已改为同值）。定案记录见 [`docs/开发指导.md`](docs/开发指导.md) 附录 **A.30**，§5 增加了签名约定，[`docs/发布校验值.md`](docs/发布校验值.md) 增加「APK 签名」一节（含三个旧指纹与自查命令），README 与使用手册都写了「先卸载一次」的说明。
 
+**发布过程中又踩了两个坑，都是 CI 脚本自己的问题（如实记下，因为它们把「一次发布」拖成了五轮）**：
+
+1. **`bash -e` 造成的静默死亡**。GitHub 用 `bash -e {0}` 跑 `run:` 里的脚本，于是**任何一条命令返回非零都会当场结束脚本**。我的 SDK 探测写成了 `apksigner="$(find "$sdk/build-tools" ... | sort | tail -1)"`——路径不存在时 `find` 退出 1，管道赋值非零，脚本在打印任何东西之前就死了。表现是「步骤 1 秒失败、日志里一个字都没有」，而我当时用的两条判断渠道（check-run 注解、check-run 的 `output.summary`）**都不反映步骤的 stdout**，于是连着三次误判成「步骤根本没输出」。修法：步骤开头显式 `set +e`，每一步先打印再判断，失败一律自己 `exit 1` 并说明原因；SDK 探测改成多路径容错 + `keytool` 兜底。
+2. **build-tools 37 的 apksigner 改了口径**。老版打印 `Signer #1 certificate SHA-256 digest:`，新版改成 `V3.0 Signer: certificate SHA-256 digest:`，而这一版 APK 是 **v3-only**，只打印后者——于是我校验用的 `grep 'Signer #1 ...'` 什么也匹配不到，指纹读成空。修法：按与签名方案无关的片段取（`certificate DN` / `certificate SHA-256 digest`），两种口径都能吃住。有意思的是这也解释了「本机通过、CI 失败」：本机 build-tools 是 36.x（老口径），runner 上是 37.0.0。
+
+**为了看清上面这两件事，临时加过一个诊断步骤**：它把关键事实（证书主题、实际指纹、变量值、apksigner 路径与原始输出）写成 `ci-diag.txt` 并提交到一个孤立分支 `ci-diag`——因为未鉴权时 GitHub 的 Actions 日志接口返回 403，`raw.githubusercontent.com` 却不需要鉴权。用它一次就拿到了答案（`V3.0 Signer` 那两行），确认**密钥与仓库变量本来就完全一致、签名一直是对的**；发布变绿后该步骤与那个分支都已删除。这条经验值得留着：**CI 失败时，把诊断送到维护者读得到的地方，而不是留在读不到的日志里。**
+
+**最终验证**：v1.0.6 的 Release 产物下载后本地重算 SHA-256 与发布页一致（`e63a911f…`）；`apksigner verify --print-certs` 读出 `CN=DailyMusings, O=DailyMusings, C=CN` 与指纹 `36787a43…`（与仓库变量相同）；`aapt2 dump badging` 读出 `versionCode=10006`。
+
 ## 2026-09-29（第八轮，随 v1.0.5）自动发布到点不触发 + 篇幅改为区间加公差
 
 这一轮两件事都来自线上实例（`nero@100.64.0.3`，部署于 2026-09-29 23:13）：一个把「自动发布」变成摆设的缺陷，和一次篇幅设置的改版。

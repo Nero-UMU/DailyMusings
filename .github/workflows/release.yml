@@ -278,56 +278,6 @@ jobs:
             echo "- 证书 SHA-256：\`$actual\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      # ⚠ 临时诊断步骤（签名链路确认通过后删除）。
-      #
-      # 存在的理由很具体：本项目的维护流程里**读不到 GitHub 的 Actions 日志**——未鉴权时
-      # `GET /actions/jobs/{id}/logs` 返回 403，`::error::` 也不进 check-run 注解。签名校验连续几次失败，
-      # 每次都知道「失败了」却看不到「为什么」。于是让 CI 自己把关键事实提交到一个孤立分支，
-      # 维护者用 raw.githubusercontent.com 就能读到（那条路不需要鉴权）。
-      - name: 临时诊断：把关键事实提交到 ci-diag 分支
-        if: failure()
-        env:
-          EXPECTED_CERT_SHA256: ${{ vars.ANDROID_SIGNING_CERT_SHA256 }}
-          DIAG_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set +e
-
-          {
-            echo "run=$GITHUB_RUN_ID"
-            echo "sha=$GITHUB_SHA"
-            echo "version=${{ steps.version.outputs.name }}"
-            echo "EXPECTED_CERT_SHA256=${EXPECTED_CERT_SHA256:-（空）}"
-            echo ""
-            echo "--- 工作目录里的 apk ---"
-            ls -la ./*.apk
-            echo ""
-            echo "--- SDK 探测 ---"
-            echo "ANDROID_HOME=${ANDROID_HOME:-（未设置）}"
-            echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT:-（未设置）}"
-            for root in "${ANDROID_HOME:-}" "${ANDROID_SDK_ROOT:-}" /usr/local/lib/android/sdk "$HOME/Android/Sdk"; do
-              if [ -n "$root" ] && [ -d "$root/build-tools" ]; then
-                echo "在 $root/build-tools 下：$(find "$root/build-tools" -name apksigner -type f 2>/dev/null | sort | tail -1)"
-              fi
-            done
-            echo ""
-            echo "--- apksigner verify --print-certs ---"
-            apksigner="$(find "${ANDROID_HOME:-/usr/local/lib/android/sdk}" -name apksigner -type f 2>/dev/null | sort | tail -1)"
-            if [ -n "$apksigner" ]; then "$apksigner" verify --print-certs ./*.apk 2>&1; else echo "（没找到 apksigner）"; fi
-            echo ""
-            echo "--- keytool -printcert -jarfile ---"
-            keytool -printcert -jarfile ./*.apk 2>&1
-          } > ci-diag.txt 2>&1
-
-          cat ci-diag.txt
-
-          git config user.email "ci@users.noreply.github.com"
-          git config user.name "ci"
-          git checkout -q --orphan ci-diag
-          git rm -rq --cached . >/dev/null 2>&1
-          git add -f ci-diag.txt
-          git commit -qm "ci diag for run $GITHUB_RUN_ID"
-          git push -f "https://x-access-token:${DIAG_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" ci-diag
-
       # 即使校验失败也把产物传上来：失败的那次跑最容易需要「它到底被谁签的」，而 GitHub 的日志在未登录或
       # 限流时读不到。产物只是 Actions artifact（不是 Release），会过期，留在那里当证据没有代价。
       - uses: actions/upload-artifact@v4
