@@ -63,6 +63,37 @@ public class ModelSettingsApiTests
     }
 
     [TestMethod]
+    public async Task Transcription_protocol_parameters_round_trip_through_the_admin_API()
+    {
+        await using var instance = await TestInstance.StartAsync();
+        await instance.SignInAsChangedAdministratorAsync();
+        var parameters = new TranscriptionParametersDto(
+            "dashscope-multimodal",
+            "zh,en",
+            EnableItn: false,
+            VocabularyId: "vocabulary-42",
+            SpeakerDiarization: true,
+            KeepDialect: true);
+
+        using var updated = await instance.Client.PatchAsJsonAsync(
+            "/api/system/model-endpoints/transcription",
+            new UpdateModelEndpointRequest(
+                true,
+                "https://workspace.example/compatible-mode/v1",
+                "qwen-audio-3.1-asr-flash",
+                "openai-api-key",
+                120,
+                null,
+                Transcription: parameters));
+
+        updated.EnsureSuccessStatusCode();
+        var endpoint = await updated.Content.ReadFromJsonAsync<ModelEndpointDto>();
+
+        Assert.IsNotNull(endpoint?.Transcription);
+        Assert.AreEqual(parameters, endpoint.Transcription);
+    }
+
+    [TestMethod]
     public async Task A_paired_device_may_see_the_model_names_and_nothing_else()
     {
         await using var instance = await TestInstance.StartAsync();

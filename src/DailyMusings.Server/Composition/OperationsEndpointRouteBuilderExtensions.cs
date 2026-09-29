@@ -358,7 +358,16 @@ public static class OperationsEndpointRouteBuilderExtensions
                         request.TimeoutSeconds,
                         request.Dimensions,
                         request.Password,
-                        request.ClearPassword),
+                        request.ClearPassword,
+                        request.Transcription is null
+                            ? null
+                            : new TranscriptionParameters(
+                                request.Transcription.Protocol,
+                                request.Transcription.LanguageHints,
+                                request.Transcription.EnableItn,
+                                request.Transcription.VocabularyId,
+                                request.Transcription.SpeakerDiarization,
+                                request.Transcription.KeepDialect)),
                     cancellationToken)
                 .ConfigureAwait(false);
         }
@@ -445,7 +454,16 @@ public static class OperationsEndpointRouteBuilderExtensions
         endpoint.TimeoutSeconds,
         endpoint.Dimensions,
         ToWireName(endpoint.PasswordSource),
-        endpoint.HasPassword);
+        endpoint.HasPassword,
+        endpoint.Transcription is null
+            ? null
+            : new TranscriptionParametersDto(
+                endpoint.Transcription.Protocol,
+                endpoint.Transcription.LanguageHints,
+                endpoint.Transcription.EnableItn,
+                endpoint.Transcription.VocabularyId,
+                endpoint.Transcription.SpeakerDiarization,
+                endpoint.Transcription.KeepDialect));
 
     private static SmtpSettingsDto ToDto(SmtpSettingsView settings) => new(
         settings.Enabled,

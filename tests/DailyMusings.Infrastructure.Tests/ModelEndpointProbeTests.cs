@@ -66,6 +66,41 @@ public sealed class ModelEndpointProbeTests
         StringAssert.Contains(handler.LastBody, "data:audio/wav;base64,");
     }
 
+    [TestMethod]
+    public async Task Transcription_probe_honours_the_selected_DashScope_protocol_and_parameters()
+    {
+        var handler = new RecordingHandler();
+        var probe = CreateProbe(handler);
+        var parameters = new TranscriptionParameters(
+            TranscriptionProtocolNames.DashScopeMultimodal,
+            "zh,en",
+            EnableItn: false,
+            VocabularyId: "vocabulary-42",
+            SpeakerDiarization: true,
+            KeepDialect: true);
+
+        var result = await probe.ProbeModelAsync(
+            new ModelEndpointProbeRequest(
+                ExternalService.Transcription,
+                "https://workspace.example/compatible-mode/v1",
+                "qwen-audio-3.1-asr-flash",
+                "saved-key",
+                "typed-key",
+                parameters),
+            CancellationToken.None);
+
+        Assert.IsTrue(result.Ok);
+        Assert.AreEqual(
+            "https://workspace.example/api/v1/services/aigc/multimodal-generation/generation",
+            handler.LastRequest?.RequestUri?.ToString());
+        Assert.IsNotNull(handler.LastRequest);
+        CollectionAssert.Contains(handler.LastRequest.Headers.GetValues("X-DashScope-SSE").ToArray(), "disable");
+        StringAssert.Contains(handler.LastBody, "qwen-audio-3.1-asr-flash");
+        StringAssert.Contains(handler.LastBody, "vocabulary-42");
+        StringAssert.Contains(handler.LastBody, "speaker_diarization_enabled");
+        StringAssert.Contains(handler.LastBody, "data:audio/wav;base64,");
+    }
+
     private static ExternalServiceProbe CreateProbe(HttpMessageHandler handler) => new(
         new HttpClient(handler),
         new SecretStore(),

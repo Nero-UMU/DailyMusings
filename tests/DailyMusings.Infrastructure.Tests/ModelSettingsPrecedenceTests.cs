@@ -98,6 +98,30 @@ public class ModelSettingsPrecedenceTests
     }
 
     [TestMethod]
+    public async Task Transcription_provider_reads_saved_protocol_and_model_parameters()
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        var store = Store(database);
+        var parameters = new TranscriptionParameters(
+            TranscriptionProtocolNames.DashScopeMultimodal,
+            "zh,en",
+            EnableItn: true,
+            VocabularyId: "vocabulary-42",
+            SpeakerDiarization: true,
+            KeepDialect: true);
+
+        await new UpdateModelEndpointUseCase(store, new TestUiSecretStore()).ExecuteAsync(
+            ModelService.Transcription,
+            new ModelEndpointUpdate(null, null, null, null, null, null, Transcription: parameters),
+            CancellationToken.None);
+
+        var settings = await new ConfigurationTranscriptionSettingsProvider(Configuration(), store)
+            .GetAsync(CancellationToken.None);
+
+        Assert.AreEqual(parameters, settings.Parameters);
+    }
+
+    [TestMethod]
     public async Task What_the_admin_page_stored_wins_over_the_deployment_configuration()
     {
         await using var database = await TestDatabase.CreateAsync();

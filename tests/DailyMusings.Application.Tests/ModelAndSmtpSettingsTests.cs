@@ -149,7 +149,33 @@ public class ModelAndSmtpSettingsTests
                 new ModelEndpointUpdate(null, null, "paraformer-v2", null, null, null),
                 CancellationToken.None));
 
-        Assert.AreEqual("model.transcription.public_url_only", failure.Code);
+        Assert.AreEqual("model.transcription.protocol_unsupported", failure.Code);
+    }
+
+    [TestMethod]
+    public async Task Transcription_protocol_and_model_parameters_are_saved_as_structured_settings()
+    {
+        var store = new InMemoryAppSettingStore();
+        var parameters = new TranscriptionParameters(
+            TranscriptionProtocolNames.DashScopeMultimodal,
+            "ZH， en zh",
+            EnableItn: true,
+            VocabularyId: "  vocabulary-42  ",
+            SpeakerDiarization: true,
+            KeepDialect: true);
+
+        await new UpdateModelEndpointUseCase(store, new InMemoryUiSecretStore()).ExecuteAsync(
+            ModelService.Transcription,
+            new ModelEndpointUpdate(null, null, null, null, null, null, Transcription: parameters),
+            CancellationToken.None);
+
+        var written = store.Snapshot();
+        Assert.AreEqual(TranscriptionProtocolNames.DashScopeMultimodal, written[ModelSettingKeys.TranscriptionProtocol]);
+        Assert.AreEqual("zh,en", written[ModelSettingKeys.TranscriptionLanguageHints]);
+        Assert.AreEqual("true", written[ModelSettingKeys.TranscriptionEnableItn]);
+        Assert.AreEqual("vocabulary-42", written[ModelSettingKeys.TranscriptionVocabularyId]);
+        Assert.AreEqual("true", written[ModelSettingKeys.TranscriptionSpeakerDiarization]);
+        Assert.AreEqual("true", written[ModelSettingKeys.TranscriptionKeepDialect]);
     }
 
     [TestMethod]

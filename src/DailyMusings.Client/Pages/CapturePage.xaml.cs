@@ -705,7 +705,7 @@ public partial class CapturePage : ContentPage
         "client.not_paired" => "设备未配对",
         "auth.device_token_rejected" or "auth.unauthenticated" => "设备令牌已失效，需要重新配对",
         "client.audio_missing" => "本地录音已丢失",
-        "transcription.model_requires_public_audio" => "当前转写模型不能直接处理手机录音，请让管理员改用 qwen3-asr-flash 或 Whisper 兼容模型",
+        "transcription.model_requires_public_audio" or "transcription.protocol_unsupported" => "当前转写模型需要实时流或公网文件，请让管理员改用支持文件上传或 Base64 的非实时模型",
         "transcription.request_rejected" => "转写服务拒绝了录音，请让管理员检查模型名称和接口地址",
         "transcription.timeout" => "转写服务响应超时，可以稍后重试",
         null => "未知原因",

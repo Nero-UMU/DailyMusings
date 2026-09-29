@@ -758,6 +758,13 @@ label.checkbox input {
     min-width: 0;
 }
 
+.form-grid label small {
+    color: var(--muted);
+    display: block;
+    line-height: 1.45;
+    margin-top: 0.35rem;
+}
+
 .field-row {
     align-items: center;
     display: flex;

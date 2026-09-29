@@ -6,6 +6,7 @@ using System.Net.Sockets;
 using System.Security.Authentication;
 using System.Text;
 using DailyMusings.Application.Abstractions;
+using DailyMusings.Infrastructure.Transcription;
 using Microsoft.Extensions.Logging;
 
 namespace DailyMusings.Infrastructure.Operations;
@@ -138,10 +139,7 @@ public sealed class ExternalServiceProbe : IExternalServiceProbe
     {
         var result = service switch
         {
-            ExternalService.Transcription => await ProbeConfiguredModelAsync(
-                ExternalService.Transcription,
-                (await _transcription.GetAsync(cancellationToken).ConfigureAwait(false)) is { Enabled: true } t ? (t.BaseUrl, t.Model, t.SecretName) : null,
-                cancellationToken).ConfigureAwait(false),
+            ExternalService.Transcription => await ProbeConfiguredTranscriptionAsync(cancellationToken).ConfigureAwait(false),
 
             ExternalService.Generation => await ProbeConfiguredModelAsync(
                 ExternalService.Generation,
@@ -201,15 +199,15 @@ public sealed class ExternalServiceProbe : IExternalServiceProbe
         }
 
         if (request.Service == ExternalService.Transcription &&
-            (request.Model.StartsWith("paraformer", StringComparison.OrdinalIgnoreCase) ||
-             request.Model.Contains("filetrans", StringComparison.OrdinalIgnoreCase)))
+            TranscriptionProtocolNames.RequiresUnsupportedTransport(request.Model))
         {
             return ProbeResult.Failure(
-                "probe.transcription.model_requires_public_audio",
-                "这个模型只接受公网音频地址，不能直接处理手机上传的录音。请改用 qwen3-asr-flash 或兼容 /audio/transcriptions 的模型。");
+                "probe.transcription.protocol_unsupported",
+                "这个模型需要实时 WebSocket 或公网文件异步任务，当前不能直接处理手机上传的私有录音。");
         }
 
-        using var httpRequest = BuildModelProbeRequest(request, baseUri, secret);
+        using var httpRequest = await BuildModelProbeRequestAsync(request, baseUri, secret, cancellationToken)
+            .ConfigureAwait(false);
         var result = await SendAsync(
             name,
             httpRequest,
@@ -233,6 +231,24 @@ public sealed class ExternalServiceProbe : IExternalServiceProbe
 
         return await ProbeModelAsync(
             new ModelEndpointProbeRequest(service, config.BaseUrl, config.Model, config.SecretName),
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<ProbeResult> ProbeConfiguredTranscriptionAsync(CancellationToken cancellationToken)
+    {
+        var settings = await _transcription.GetAsync(cancellationToken).ConfigureAwait(false);
+        if (!settings.Enabled)
+        {
+            return ProbeResult.Failure("probe.transcription.disabled", "No transcription endpoint is configured.");
+        }
+
+        return await ProbeModelAsync(
+            new ModelEndpointProbeRequest(
+                ExternalService.Transcription,
+                settings.BaseUrl,
+                settings.Model,
+                settings.SecretName,
+                Transcription: settings.Parameters),
             cancellationToken).ConfigureAwait(false);
     }
 
@@ -279,56 +295,35 @@ public sealed class ExternalServiceProbe : IExternalServiceProbe
         }
     }
 
-    private static HttpRequestMessage BuildModelProbeRequest(
+    private static async Task<HttpRequestMessage> BuildModelProbeRequestAsync(
         ModelEndpointProbeRequest request,
         Uri baseUri,
-        string apiKey)
+        string apiKey,
+        CancellationToken cancellationToken)
     {
         var root = baseUri.ToString().TrimEnd('/');
+        if (request.Service == ExternalService.Transcription)
+        {
+            var settings = TranscriptionSettings.Default with
+            {
+                Enabled = true,
+                BaseUrl = root,
+                Model = request.Model,
+                Parameters = request.Transcription ?? TranscriptionParameters.Default,
+            };
+            var audio = CreateProbeWave();
+            return await TranscriptionHttpAdapter.BuildRequestAsync(
+                new TranscriptionRequest(
+                    _ => Task.FromResult<Stream>(new MemoryStream(audio, writable: false)),
+                    "connection-test.wav",
+                    "audio/wav"),
+                settings,
+                apiKey,
+                cancellationToken).ConfigureAwait(false);
+        }
+
         HttpRequestMessage message;
-
-        if (request.Service == ExternalService.Transcription &&
-            request.Model.StartsWith("qwen3-asr-flash", StringComparison.OrdinalIgnoreCase))
-        {
-            var dataUri = $"data:audio/wav;base64,{Convert.ToBase64String(CreateProbeWave())}";
-            message = new HttpRequestMessage(HttpMethod.Post, $"{root}/chat/completions")
-            {
-                Content = JsonContent.Create(new
-                {
-                    model = request.Model,
-                    messages = new[]
-                    {
-                        new
-                        {
-                            role = "user",
-                            content = new[]
-                            {
-                                new
-                                {
-                                    type = "input_audio",
-                                    input_audio = new { data = dataUri },
-                                },
-                            },
-                        },
-                    },
-                    stream = false,
-                }),
-            };
-        }
-        else if (request.Service == ExternalService.Transcription)
-        {
-            var multipart = new MultipartFormDataContent();
-            var audio = new ByteArrayContent(CreateProbeWave());
-            audio.Headers.ContentType = new MediaTypeHeaderValue("audio/wav");
-            multipart.Add(audio, "file", "connection-test.wav");
-            multipart.Add(new StringContent(request.Model), "model");
-
-            message = new HttpRequestMessage(HttpMethod.Post, $"{root}/audio/transcriptions")
-            {
-                Content = multipart,
-            };
-        }
-        else if (request.Service == ExternalService.Generation)
+        if (request.Service == ExternalService.Generation)
         {
             message = new HttpRequestMessage(HttpMethod.Post, $"{root}/chat/completions")
             {

@@ -24,7 +24,18 @@ public sealed record ModelEndpointDto(
     string PasswordSource,
 
     /// <summary>Whether a key resolves at all. The value itself never leaves the instance.</summary>
-    bool HasPassword);
+    bool HasPassword,
+
+    /// <summary>Present only for the transcription endpoint.</summary>
+    TranscriptionParametersDto? Transcription = null);
+
+public sealed record TranscriptionParametersDto(
+    string Protocol,
+    string? LanguageHints,
+    bool EnableItn,
+    string? VocabularyId,
+    bool SpeakerDiarization,
+    bool KeepDialect);
 
 public sealed record ModelEndpointListResponse(IReadOnlyList<ModelEndpointDto> Items);
 
@@ -40,7 +51,10 @@ public sealed record UpdateModelEndpointRequest(
     string? Password = null,
 
     /// <summary>Removes the stored key, falling back to the secret file or the environment.</summary>
-    bool? ClearPassword = null);
+    bool? ClearPassword = null,
+
+    /// <summary>Optional speech-to-text protocol and provider parameters; transcription endpoint only.</summary>
+    TranscriptionParametersDto? Transcription = null);
 
 /// <summary>What a client may see about the instance's models (§8.1): a name, and whether it is switched on.</summary>
 public sealed record ModelNameDto(string Service, string Model, bool Enabled);

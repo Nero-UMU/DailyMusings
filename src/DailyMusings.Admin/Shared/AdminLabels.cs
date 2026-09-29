@@ -107,7 +107,7 @@ public static class AdminLabels
         "transcription.timeout" => "转写服务响应超时",
         "transcription.upstream_unavailable" => "转写服务暂时不可用",
         "transcription.request_rejected" => "转写服务拒绝了录音，请检查地址和模型",
-        "transcription.model_requires_public_audio" => "当前模型不能直接处理手机录音，请改用 qwen3-asr-flash 或 Whisper 兼容模型",
+        "transcription.model_requires_public_audio" or "transcription.protocol_unsupported" => "当前模型需要实时流或公网文件，不能直接处理已上传的私有录音",
         "transcription.empty_result" => "模型没有识别出文字",
         "transcription.malformed_response" => "转写服务返回了无法识别的结果",
         null or "" => "处理失败",

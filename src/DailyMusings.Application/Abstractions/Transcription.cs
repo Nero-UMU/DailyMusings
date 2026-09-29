@@ -13,13 +13,80 @@ public sealed record TranscriptionRequest(
 public sealed record TranscriptionResult(string Text, string? DetectedLanguage, string? ModelName);
 
 /// <summary>
-/// Speech-to-text against a user-supplied, OpenAI-compatible endpoint (docs/开发指导.md §8.1). The project
-/// bundles no model: this port is the only place that knows how to talk to one, and it must never log the audio
-/// or the resulting text (§16).
+/// Speech-to-text against a user-supplied endpoint (docs/开发指导.md §8.1). The project bundles no model:
+/// this port stays independent of the selected provider protocol, and it must never log the audio or the
+/// resulting text (§16).
 /// </summary>
 public interface ITranscriptionClient
 {
     Task<TranscriptionResult> TranscribeAsync(TranscriptionRequest request, CancellationToken cancellationToken);
+}
+
+/// <summary>Stable names persisted by the admin page for the supported speech-to-text wire protocols.</summary>
+public static class TranscriptionProtocolNames
+{
+    public const string Auto = "auto";
+    public const string OpenAiAudioTranscriptions = "openai-audio-transcriptions";
+    public const string QwenAsrChat = "qwen-asr-chat";
+    public const string DashScopeMultimodal = "dashscope-multimodal";
+
+    public static bool IsSupported(string? value) => value is
+        Auto or OpenAiAudioTranscriptions or QwenAsrChat or DashScopeMultimodal;
+
+    /// <summary>
+    /// Resolves the one protocol used for a request. Automatic selection is deliberately concentrated here so
+    /// saving, testing and actual transcription cannot disagree about a model-name heuristic.
+    /// </summary>
+    public static string Resolve(string? configured, string model)
+    {
+        var selected = string.IsNullOrWhiteSpace(configured) ? Auto : configured.Trim().ToLowerInvariant();
+        if (selected != Auto)
+        {
+            return selected;
+        }
+
+        if (model.StartsWith("qwen3-asr-flash", StringComparison.OrdinalIgnoreCase))
+        {
+            return QwenAsrChat;
+        }
+
+        if (model.StartsWith("qwen-audio-3.", StringComparison.OrdinalIgnoreCase) ||
+            model.StartsWith("fun-asr-flash", StringComparison.OrdinalIgnoreCase))
+        {
+            return DashScopeMultimodal;
+        }
+
+        return OpenAiAudioTranscriptions;
+    }
+
+    public static bool RequiresUnsupportedTransport(string model) =>
+        model.StartsWith("paraformer", StringComparison.OrdinalIgnoreCase) ||
+        model.Contains("filetrans", StringComparison.OrdinalIgnoreCase) ||
+        model.Contains("realtime", StringComparison.OrdinalIgnoreCase) ||
+        model.Contains("streaming", StringComparison.OrdinalIgnoreCase) ||
+        (model.StartsWith("fun-asr", StringComparison.OrdinalIgnoreCase) &&
+         !model.StartsWith("fun-asr-flash", StringComparison.OrdinalIgnoreCase));
+}
+
+/// <summary>
+/// Optional transcription knobs shared by configuration, the candidate connection probe and the production
+/// adapter. Unsupported knobs are simply not sent by a protocol; the UI explains which ones apply.
+/// </summary>
+public sealed record TranscriptionParameters(
+    string Protocol,
+    string? LanguageHints,
+    bool EnableItn,
+    string? VocabularyId,
+    bool SpeakerDiarization,
+    bool KeepDialect)
+{
+    public static TranscriptionParameters Default { get; } = new(
+        TranscriptionProtocolNames.Auto,
+        LanguageHints: null,
+        EnableItn: false,
+        VocabularyId: null,
+        SpeakerDiarization: false,
+        KeepDialect: false);
 }
 
 /// <summary>
@@ -32,7 +99,7 @@ public sealed record TranscriptionSettings(
     string Model,
     string SecretName,
     TimeSpan Timeout,
-    string? LanguageHint)
+    TranscriptionParameters Parameters)
 {
     /// <summary>Disabled until an operator configures an endpoint. Nothing is sent anywhere by default.</summary>
     public static TranscriptionSettings Default { get; } = new(
@@ -41,7 +108,7 @@ public sealed record TranscriptionSettings(
         Model: "whisper-1",
         SecretName: "openai-api-key",
         Timeout: TimeSpan.FromMinutes(2),
-        LanguageHint: null);
+        Parameters: TranscriptionParameters.Default);
 }
 
 public interface ITranscriptionSettingsProvider

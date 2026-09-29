@@ -110,7 +110,8 @@ public sealed record ModelEndpointProbeRequest(
     string BaseUrl,
     string Model,
     string SecretName,
-    string? ApiKey = null);
+    string? ApiKey = null,
+    TranscriptionParameters? Transcription = null);
 
 /// <summary>
 /// One line kept by the in-memory log buffer. Deliberately a plain record with no exception object: the operator
