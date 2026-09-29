@@ -31,12 +31,20 @@ public sealed record ContentSettings
     public const string PublishedDirectoryKey = "publish.publishedDirectory";
     public const string HexoTemplateKey = "publish.hexoFrontMatterTemplate";
 
-    // The writing spec (decision A.24). Three keys rather than one blob so that the settings table and a backup
-    // stay readable, and so that "the rules are empty" is distinguishable from "nobody ever set rules" — the
-    // first is a choice the user made, the second is the only case that gets the defaults.
-    public const string WritingTargetCharactersKey = "writing.targetCharacters";
+    // The writing spec (decision A.24, revised by A.28). Separate keys rather than one blob so that the settings
+    // table and a backup stay readable, and so that "the rules are empty" is distinguishable from "nobody ever set
+    // rules" — the first is a choice the user made, the second is the only case that gets the defaults.
+    public const string WritingMinCharactersKey = "writing.minCharacters";
+    public const string WritingMaxCharactersKey = "writing.maxCharacters";
+    public const string WritingToleranceKey = "writing.tolerance";
     public const string WritingPersonKey = "writing.person";
     public const string WritingRulesKey = "writing.rules";
+
+    /// <summary>
+    /// 旧键（单一「目标字数」）。只读，不再写：A.28 把「一个目标值」换成了区间加公差，但已经存过 300 的实例
+    /// 不该在看到新界面时被打回默认值——读到它就把它当作**最多字数**（旧的 300 立刻变成「最少 50、最多 300」）。
+    /// </summary>
+    public const string WritingTargetCharactersKey = "writing.targetCharacters";
 
     public const string DefaultDraftDirectory = "drafts";
     public const string DefaultPublishedDirectory = "posts";
@@ -129,6 +137,28 @@ public sealed record ContentSettings
 
     public ContentCalendar CreateCalendar() => new(ResolveTimeZone());
 
+    /// <summary>
+    /// 某一天的稿件应当在什么时候自动发布（§11.1）。
+    /// <para>
+    /// 规则：发布时刻按**它出现在生成时刻之后的那一次**来解释——发布时间晚于生成时间（例如 23:00 生成、
+    /// 23:16 发布）就是当天；否则（默认 23:00 生成、次日 08:00 发布）算次日。
+    /// </para>
+    /// <para>
+    /// 旧实现无条件按「内容日期 +1 天」计算，于是把「当天晚上发布」这种再自然不过的配置推到了 24 小时之后：
+    /// 用户勾上自动发布、把发布时间设成生成之后十几分钟，到点却什么都不会发生，而页面又从不显示它算出的时刻
+    /// （见 CHANGELOG 2026-09-29 第八轮）。时刻只在这里算一次，调度、提醒与手动入队三条路都用它，否则三条路
+    /// 会各自漂移。
+    /// </para>
+    /// </summary>
+    public DateTimeOffset PublishSlotFor(ContentDate contentDate)
+    {
+        var calendar = CreateCalendar();
+
+        return PublishLocalTime >= GenerationLocalTime
+            ? calendar.AtLocalTime(contentDate, PublishLocalTime)
+            : calendar.AtLocalTime(contentDate.AddDays(1), PublishLocalTime);
+    }
+
     /// <summary>Reads a settings snapshot out of persisted key/value pairs, falling back to the defaults.</summary>
     public static ContentSettings FromValues(IReadOnlyDictionary<string, string> values)
     {
@@ -145,7 +175,9 @@ public sealed record ContentSettings
             Read(values, PublishedDirectoryKey, DefaultPublishedDirectory),
             Read(values, HexoTemplateKey, Domain.Publishing.MarkdownTemplate.Default),
             new WritingSettings(
-                ReadInt(values, WritingTargetCharactersKey, WritingSettings.DefaultTargetCharacters),
+                ReadInt(values, WritingMinCharactersKey, WritingSettings.DefaultMinCharacters),
+                ReadMaxCharacters(values),
+                ReadInt(values, WritingToleranceKey, WritingSettings.DefaultCharacterTolerance),
                 ReadPerson(values),
                 ReadRules(values)));
     }
@@ -161,10 +193,26 @@ public sealed record ContentSettings
         [DraftDirectoryKey] = DraftDirectory,
         [PublishedDirectoryKey] = PublishedDirectory,
         [HexoTemplateKey] = HexoFrontMatterTemplate,
-        [WritingTargetCharactersKey] = Writing.TargetCharacters.ToString(CultureInfo.InvariantCulture),
+        [WritingMinCharactersKey] = Writing.MinCharacters.ToString(CultureInfo.InvariantCulture),
+        [WritingMaxCharactersKey] = Writing.MaxCharacters.ToString(CultureInfo.InvariantCulture),
+        [WritingToleranceKey] = Writing.CharacterTolerance.ToString(CultureInfo.InvariantCulture),
         [WritingPersonKey] = FormatPerson(Writing.Person),
         [WritingRulesKey] = JsonSerializer.Serialize(Writing.Rules, RuleJson),
     };
+
+    /// <summary>
+    /// 最多字数：新键优先，其次读旧的单一目标字数（A.28 的兼容路径），都没有才是默认值。
+    /// </summary>
+    private static int ReadMaxCharacters(IReadOnlyDictionary<string, string> values)
+    {
+        if (values.TryGetValue(WritingMaxCharactersKey, out var raw) &&
+            int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed))
+        {
+            return parsed;
+        }
+
+        return ReadInt(values, WritingTargetCharactersKey, WritingSettings.DefaultMaxCharacters);
+    }
 
     public static string FormatTime(TimeOnly time) => time.ToString("HH:mm", CultureInfo.InvariantCulture);
 

@@ -29,21 +29,36 @@ public sealed record WritingRule(string Title, string Instruction)
 /// The writing spec handed to the model on every generation (docs/开发指导.md §8.4, decision A.24).
 /// <para>
 /// This is a user-owned preference, not a per-day decision: a generation job reads the current spec when it runs,
-/// and the spec that was in force is recorded on the version it produced. The length is a number of Chinese
-/// characters rather than a small/medium/large enum, because "about 300 characters" is what a person actually
-/// wants and an enum only ever approximates it.
+/// and the spec that was in force is recorded on the version it produced. The length is a range of Chinese
+/// characters rather than a small/medium/large enum, because "somewhere between 50 and 300 characters" is what a
+/// person actually wants and an enum only ever approximates it; the optional tolerance lets the material decide
+/// where in (or just outside) that range the article lands (decision A.28).
 /// </para>
 /// </summary>
 public sealed record WritingSettings
 {
-    public const int DefaultTargetCharacters = 300;
-    public const int MinTargetCharacters = 50;
-    public const int MaxTargetCharacters = 5000;
+    /// <summary>字数区间的默认值（附录 A.28）：最少 50、最多 300。</summary>
+    public const int DefaultMinCharacters = 50;
+    public const int DefaultMaxCharacters = 300;
+
+    /// <summary>默认公差 20 个字：允许模型按素材多少在区间外浮动这么多（<c>0</c> = 严格落在区间内）。</summary>
+    public const int DefaultCharacterTolerance = 20;
+
+    public const int MinAllowedCharacters = 1;
+    public const int MaxAllowedCharacters = 5000;
+    public const int MaxAllowedTolerance = 500;
     public const int MaxRules = 20;
 
-    public WritingSettings(int targetCharacters, WritingPerson person, IReadOnlyList<WritingRule>? rules = null)
+    public WritingSettings(
+        int minCharacters,
+        int maxCharacters,
+        int characterTolerance,
+        WritingPerson person,
+        IReadOnlyList<WritingRule>? rules = null)
     {
-        TargetCharacters = targetCharacters;
+        MinCharacters = minCharacters;
+        MaxCharacters = maxCharacters;
+        CharacterTolerance = characterTolerance;
         Person = person;
 
         // Never null: a spec with no rules is a legitimate choice (the user deleted every default), but a null
@@ -51,8 +66,29 @@ public sealed record WritingSettings
         Rules = rules ?? [];
     }
 
-    /// <summary>Target length of the body in Chinese characters, Markdown markers excluded.</summary>
-    public int TargetCharacters { get; init; }
+    /// <summary>Lower bound of the body length in Chinese characters, Markdown markers excluded.</summary>
+    public int MinCharacters { get; init; }
+
+    /// <summary>Upper bound of the body length in Chinese characters, Markdown markers excluded.</summary>
+    public int MaxCharacters { get; init; }
+
+    /// <summary>
+    /// How far outside the range the model may go on purpose; <c>0</c> means the range is strict.
+    /// <para>
+    /// It exists because the material decides how much there is to say: a day with three sentences should not be
+    /// padded out to fit, and a day with a lot in it should not be cut off mid-thought. The range is the intention,
+    /// the tolerance is the slack (decision A.28).
+    /// </para>
+    /// </summary>
+    public int CharacterTolerance { get; init; }
+
+    public bool AllowsTolerance => CharacterTolerance > 0;
+
+    /// <summary>区间加公差之后的真实下限，也就是交给模型的数字。</summary>
+    public int ToleratedMinCharacters => Math.Max(MinAllowedCharacters, MinCharacters - CharacterTolerance);
+
+    /// <summary>区间加公差之后的真实上限，也就是交给模型的数字。</summary>
+    public int ToleratedMaxCharacters => MaxCharacters + CharacterTolerance;
 
     public WritingPerson Person { get; init; }
 
@@ -86,8 +122,12 @@ public sealed record WritingSettings
             "不用「治愈」「赋能」「内耗」「破防」这类被用滥的流行词；不出现 AI 自我介绍，也不称呼读者。"),
     ];
 
-    public static WritingSettings Default { get; } =
-        new(DefaultTargetCharacters, WritingPerson.First, DefaultRules);
+    public static WritingSettings Default { get; } = new(
+        DefaultMinCharacters,
+        DefaultMaxCharacters,
+        DefaultCharacterTolerance,
+        WritingPerson.First,
+        DefaultRules);
 
     /// <summary>
     /// Rejects a spec that cannot be handed to a model. Called where a user-supplied spec enters the system, so a
@@ -95,11 +135,32 @@ public sealed record WritingSettings
     /// </summary>
     public void Validate()
     {
-        if (TargetCharacters is < MinTargetCharacters or > MaxTargetCharacters)
+        if (MinCharacters is < MinAllowedCharacters or > MaxAllowedCharacters)
         {
             throw new DomainException(
-                "writing.length.out_of_range",
-                $"目标字数必须在 {MinTargetCharacters} 到 {MaxTargetCharacters} 之间。");
+                "writing.min.out_of_range",
+                $"最少字数必须在 {MinAllowedCharacters} 到 {MaxAllowedCharacters} 之间。");
+        }
+
+        if (MaxCharacters is < MinAllowedCharacters or > MaxAllowedCharacters)
+        {
+            throw new DomainException(
+                "writing.max.out_of_range",
+                $"最多字数必须在 {MinAllowedCharacters} 到 {MaxAllowedCharacters} 之间。");
+        }
+
+        if (MinCharacters >= MaxCharacters)
+        {
+            throw new DomainException(
+                "writing.range.invalid",
+                $"最少字数必须小于最多字数（现在是 {MinCharacters} 与 {MaxCharacters}）。");
+        }
+
+        if (CharacterTolerance is < 0 or > MaxAllowedTolerance)
+        {
+            throw new DomainException(
+                "writing.tolerance.out_of_range",
+                $"公差必须在 0 到 {MaxAllowedTolerance} 之间（0 表示不允许浮动）。");
         }
 
         if (!Enum.IsDefined(Person))

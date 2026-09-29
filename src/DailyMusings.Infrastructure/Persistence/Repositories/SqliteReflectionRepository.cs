@@ -588,11 +588,11 @@ public sealed class SqliteReflectionRepository : IReflectionRepository
         {
             var settings = JsonSerializer.Deserialize<WritingSettings>(json);
 
-            // A blob written before decision A.24 has the old shape (a length enum, a tone string and a bool).
-            // That deserializes *without* error into a spec with no length and no rules, which is not a spec at
-            // all — so "no target length" is the test for "this is not a spec I can use", and it also covers the
-            // next shape change instead of only this one.
-            return settings is null || settings.TargetCharacters <= 0 ? WritingSettings.Default : settings;
+            // A blob written before decision A.24 has the old shape (a length enum, a tone string and a bool); one
+            // written before A.28 has a single target length instead of a range. Both deserialize *without* error
+            // into something that is not a spec at all — so "no usable range" is the test, and it also covers the
+            // next shape change instead of only the ones that already happened.
+            return settings is null || !IsUsableWritingSettings(settings) ? WritingSettings.Default : settings;
         }
         catch (JsonException)
         {
@@ -601,6 +601,14 @@ public sealed class SqliteReflectionRepository : IReflectionRepository
             return WritingSettings.Default;
         }
     }
+
+    /// <summary>
+    /// A spec is usable only when it describes a range this version understands: a blob from before A.28 (a single
+    /// target length) deserializes into zeros, which must not be handed to a model as if it were a spec.
+    /// </summary>
+    private static bool IsUsableWritingSettings(WritingSettings settings) =>
+        settings.MinCharacters >= WritingSettings.MinAllowedCharacters &&
+        settings.MaxCharacters > settings.MinCharacters;
 
     private static IReadOnlyList<string> ReadStrings(string json)
     {

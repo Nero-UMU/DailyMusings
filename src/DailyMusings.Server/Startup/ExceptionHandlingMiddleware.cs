@@ -40,6 +40,21 @@ public sealed class ExceptionHandlingMiddleware
             await WriteAsync(context, StatusCodes.Status400BadRequest, exception.Code, exception.Message)
                 .ConfigureAwait(false);
         }
+        catch (BadHttpRequestException exception)
+        {
+            // A body the framework could not read (malformed JSON, a missing or unparseable parameter) is the
+            // caller's mistake, not a defect here. It used to fall through to the generic handler: the client got
+            // a 500 and the log got a full stack trace for what is really a 400 — misleading to diagnose from
+            // either end. The body is never echoed back, because it may carry a credential (§10.4).
+            _logger.LogDebug("Rejected a request whose body could not be read ({ErrorType}).", exception.GetType().Name);
+
+            await WriteAsync(
+                context,
+                StatusCodes.Status400BadRequest,
+                ApiErrorCodes.ValidationFailed,
+                "The request body could not be read. Send a JSON object matching the documented shape.")
+                .ConfigureAwait(false);
+        }
         catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
         {
             // The client hung up. Nothing to answer, and not worth an error-level log entry.

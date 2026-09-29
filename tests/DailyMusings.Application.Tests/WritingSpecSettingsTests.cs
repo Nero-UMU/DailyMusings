@@ -19,7 +19,9 @@ public sealed class WritingSpecSettingsTests
     {
         var settings = ContentSettings.FromValues(new Dictionary<string, string>());
 
-        Assert.AreEqual(WritingSettings.DefaultTargetCharacters, settings.Writing.TargetCharacters);
+        Assert.AreEqual(WritingSettings.DefaultMinCharacters, settings.Writing.MinCharacters);
+        Assert.AreEqual(WritingSettings.DefaultMaxCharacters, settings.Writing.MaxCharacters);
+        Assert.AreEqual(WritingSettings.DefaultCharacterTolerance, settings.Writing.CharacterTolerance);
         Assert.AreEqual(WritingPerson.First, settings.Writing.Person);
         Assert.AreEqual(WritingSettings.DefaultRules.Count, settings.Writing.Rules.Count);
     }
@@ -29,12 +31,14 @@ public sealed class WritingSpecSettingsTests
     {
         var saved = ContentSettings.Default with
         {
-            Writing = new WritingSettings(420, WritingPerson.Third, []),
+            Writing = new WritingSettings(120, 420, 30, WritingPerson.Third, []),
         };
 
         var reloaded = ContentSettings.FromValues(saved.ToValues());
 
-        Assert.AreEqual(420, reloaded.Writing.TargetCharacters);
+        Assert.AreEqual(120, reloaded.Writing.MinCharacters);
+        Assert.AreEqual(420, reloaded.Writing.MaxCharacters);
+        Assert.AreEqual(30, reloaded.Writing.CharacterTolerance);
         Assert.AreEqual(WritingPerson.Third, reloaded.Writing.Person);
         Assert.AreEqual(
             0,
@@ -48,7 +52,9 @@ public sealed class WritingSpecSettingsTests
         var saved = ContentSettings.Default with
         {
             Writing = new WritingSettings(
+                80,
                 300,
+                0,
                 WritingPerson.Second,
                 [
                     new WritingRule("第一条", "内容一"),
@@ -80,6 +86,27 @@ public sealed class WritingSpecSettingsTests
             "读不懂的规范不是规范；退回文档写的默认值，总好过让一次生成失败。");
     }
 
+    /// <summary>
+    /// 兼容路径（A.28）：已经存过单一目标字数的实例，读到新界面时不该被打回默认值——旧值当作**最多字数**，
+    /// 于是一个写着 300 的实例开箱就是「最少 50、最多 300」。
+    /// </summary>
+    [TestMethod]
+    public void An_instance_that_saved_the_old_single_target_keeps_it_as_the_maximum()
+    {
+        var values = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [ContentSettings.WritingTargetCharactersKey] = "450",
+        };
+
+        var reloaded = ContentSettings.FromValues(values);
+
+        Assert.AreEqual(450, reloaded.Writing.MaxCharacters, "旧的 450 变成「最多 450 字」。");
+        Assert.AreEqual(
+            WritingSettings.DefaultMinCharacters,
+            reloaded.Writing.MinCharacters,
+            "旧实例没有区间，下限用默认值。");
+    }
+
     [TestMethod]
     public void The_person_is_stored_as_a_readable_name_not_an_ordinal()
     {
@@ -87,7 +114,9 @@ public sealed class WritingSpecSettingsTests
         var values = ContentSettings.Default.ToValues();
 
         Assert.AreEqual("first", values[ContentSettings.WritingPersonKey]);
-        Assert.AreEqual("300", values[ContentSettings.WritingTargetCharactersKey]);
+        Assert.AreEqual("50", values[ContentSettings.WritingMinCharactersKey]);
+        Assert.AreEqual("300", values[ContentSettings.WritingMaxCharactersKey]);
+        Assert.AreEqual("20", values[ContentSettings.WritingToleranceKey]);
         Assert.IsTrue(ContentSettings.TryParsePerson("Third", out var person));
         Assert.AreEqual(WritingPerson.Third, person, "解析要么写死小写，要么大小写无关；这里是后者。");
         Assert.IsFalse(ContentSettings.TryParsePerson("fourth", out _));

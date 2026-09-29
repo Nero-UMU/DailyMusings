@@ -102,7 +102,9 @@ public static class ContentSettingsEndpointRouteBuilderExtensions
                         request.DraftDirectory,
                         request.PublishedDirectory,
                         request.HexoFrontMatterTemplate,
-                        request.WritingTargetCharacters,
+                        request.WritingMinCharacters,
+                        request.WritingMaxCharacters,
+                        request.WritingTolerance,
                         person,
                         rules),
                     cancellationToken)
@@ -140,7 +142,9 @@ public static class ContentSettingsEndpointRouteBuilderExtensions
         settings.DraftDirectory,
         settings.PublishedDirectory,
         settings.HexoFrontMatterTemplate,
-        settings.Writing.TargetCharacters,
+        settings.Writing.MinCharacters,
+        settings.Writing.MaxCharacters,
+        settings.Writing.CharacterTolerance,
         ContentSettings.FormatPerson(settings.Writing.Person),
         settings.Writing.Rules.Select(rule => new WritingRuleDto(rule.Title, rule.Instruction)).ToArray());
 }

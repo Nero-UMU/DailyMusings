@@ -55,6 +55,16 @@
             <label>每日自动发布时间<input type="time" value="@_publishTime" @onchange="e => _publishTime = (string?)e.Value ?? _publishTime" /></label>
             <label>稿件发布目录<input value="@_publishedDirectory" @oninput="e => _publishedDirectory = (string?)e.Value ?? string.Empty" /></label>
         </div>
+
+        @* 调度预览：把服务端算出来的时刻直接写出来。用户勾了自动发布却什么都不发生时，唯一能解释的是这一行——
+           旧版本只显示两个时间输入框，从不说明「哪一天、几点、还差什么」，于是失败只能表现为沉默。 *@
+        <p class="hint schedule-preview">
+            今天（@_today）的自动生成时刻是 <strong>@Local(_generationSlot)</strong>；
+            这一天的稿件在 <strong>@Local(_publishSlot)</strong> 自动发布
+            @(_publishIsSameDay ? "（发布时间晚于生成时间，所以是当天）" : "（发布时间早于生成时间，所以是次日）")。
+        </p>
+        <p class="hint">@AutoPublishStateText()</p>
+
         <p class="notice warn slim">自动发布会按上面的时间，自己把已确认的稿件写成 <code>draft: false</code> 的文件；不会绕过内容核验，也不会公开未经确认的稿件。勾选即生效，保存后立即按新开关执行。</p>
     </section>
 </div>
@@ -68,11 +78,17 @@
         全部删掉也有效，那时只会告诉模型篇幅和人称。</p>
 
     <div class="form-grid compact-grid">
-        <label>目标字数
-            <input type="number" min="@WritingSettings.MinTargetCharacters" max="@WritingSettings.MaxTargetCharacters"
-                   value="@_writingTargetCharacters"
-                   @oninput="e => _writingTargetCharacters = (string?)e.Value ?? string.Empty" />
+        <label>最少字数
+            <input type="number" min="@WritingSettings.MinAllowedCharacters" max="@WritingSettings.MaxAllowedCharacters"
+                   value="@_writingMinCharacters"
+                   @oninput="e => _writingMinCharacters = (string?)e.Value ?? string.Empty" />
             <span class="hint">正文汉字数，不含 Markdown 标记。</span>
+        </label>
+        <label>最多字数
+            <input type="number" min="@WritingSettings.MinAllowedCharacters" max="@WritingSettings.MaxAllowedCharacters"
+                   value="@_writingMaxCharacters"
+                   @oninput="e => _writingMaxCharacters = (string?)e.Value ?? string.Empty" />
+            <span class="hint">必须大于最少字数。</span>
         </label>
         <label>人称
             <select value="@_writingPerson" @onchange="e => _writingPerson = (string?)e.Value ?? ContentSettings.WritingPersonFirst">
@@ -80,6 +96,20 @@
                 <option value="@ContentSettings.WritingPersonSecond">第二人称（你）</option>
                 <option value="@ContentSettings.WritingPersonThird">第三人称（他 / 她）</option>
             </select>
+        </label>
+    </div>
+
+    <div class="form-grid compact-grid">
+        <label class="switch-line">
+            <input type="checkbox" checked="@_writingToleranceEnabled"
+                   @onchange="e => _writingToleranceEnabled = e.Value is true" />
+            允许公差：素材多寡可以决定略微超出区间
+        </label>
+        <label>公差（字）
+            <input type="number" min="0" max="@WritingSettings.MaxAllowedTolerance"
+                   value="@_writingToleranceCharacters" disabled="@(!_writingToleranceEnabled)"
+                   @oninput="e => _writingToleranceCharacters = (string?)e.Value ?? string.Empty" />
+            <span class="hint">勾选后模型可以比最少再少、比最多再多这么多字；取消勾选表示严格落在区间内。</span>
         </label>
     </div>
 
@@ -138,10 +168,16 @@
     private string _timeZoneId = ContentSettings.DefaultTimeZoneId;
     private string _generationTime = "23:00";
     private string _publishTime = "08:00";
+    private DateTimeOffset? _generationSlot;
+    private DateTimeOffset? _publishSlot;
+    private bool _publishIsSameDay = true;
     private string _draftDirectory = ContentSettings.DefaultDraftDirectory;
     private string _publishedDirectory = ContentSettings.DefaultPublishedDirectory;
     private string _hexoTemplate = MarkdownTemplate.Default;
-    private string _writingTargetCharacters = WritingSettings.DefaultTargetCharacters.ToString();
+    private string _writingMinCharacters = WritingSettings.DefaultMinCharacters.ToString(CultureInfo.InvariantCulture);
+    private string _writingMaxCharacters = WritingSettings.DefaultMaxCharacters.ToString(CultureInfo.InvariantCulture);
+    private string _writingToleranceCharacters = WritingSettings.DefaultCharacterTolerance.ToString(CultureInfo.InvariantCulture);
+    private bool _writingToleranceEnabled = true;
     private string _writingPerson = ContentSettings.FormatPerson(WritingSettings.Default.Person);
     private List<WritingRule> _writingRules = [.. WritingSettings.DefaultRules];
     private bool _automaticPublish;
@@ -163,10 +199,18 @@
         _timeZoneId = settings.TimeZoneId;
         _generationTime = ContentSettings.FormatTime(settings.GenerationLocalTime);
         _publishTime = ContentSettings.FormatTime(settings.PublishLocalTime);
+
+        // 调度预览用的两个时刻，按服务端同一套规则算（ContentSettings.PublishSlotFor），页面不自己解释时间。
+        _generationSlot = settings.CreateCalendar().AtLocalTime(_today, settings.GenerationLocalTime);
+        _publishSlot = settings.PublishSlotFor(_today);
+        _publishIsSameDay = settings.PublishLocalTime >= settings.GenerationLocalTime;
         _draftDirectory = settings.DraftDirectory;
         _publishedDirectory = settings.PublishedDirectory;
         _hexoTemplate = settings.HexoFrontMatterTemplate;
-        _writingTargetCharacters = settings.Writing.TargetCharacters.ToString();
+        _writingMinCharacters = settings.Writing.MinCharacters.ToString(CultureInfo.InvariantCulture);
+        _writingMaxCharacters = settings.Writing.MaxCharacters.ToString(CultureInfo.InvariantCulture);
+        _writingToleranceCharacters = settings.Writing.CharacterTolerance.ToString(CultureInfo.InvariantCulture);
+        _writingToleranceEnabled = settings.Writing.AllowsTolerance;
         _writingPerson = ContentSettings.FormatPerson(settings.Writing.Person);
         _writingRules = [.. settings.Writing.Rules];
         var targets = await services.GetRequiredService<ListPublishTargetsUseCase>().ExecuteAsync(CancellationToken.None);
@@ -211,8 +255,18 @@
         var generation = ParseTimeOrThrow(_generationTime, "生成时间");
         var publish = ParseTimeOrThrow(_publishTime, "发布时间");
 
-        if (!int.TryParse(_writingTargetCharacters, out var targetCharacters))
-            throw new UseCaseException("writing.length.invalid", "目标字数必须是数字。");
+        if (!int.TryParse(_writingMinCharacters, out var minCharacters))
+            throw new UseCaseException("writing.min.invalid", "最少字数必须是数字。");
+
+        if (!int.TryParse(_writingMaxCharacters, out var maxCharacters))
+            throw new UseCaseException("writing.max.invalid", "最多字数必须是数字。");
+
+        // 在页面上先说清楚，别等保存时才由领域抛「最少必须小于最多」——那条消息里没有输入框的名字。
+        if (minCharacters >= maxCharacters)
+            throw new UseCaseException("writing.range.invalid", $"最少字数必须小于最多字数（现在是 {minCharacters} 与 {maxCharacters}）。");
+
+        if (!int.TryParse(_writingToleranceCharacters, out var toleranceCharacters))
+            throw new UseCaseException("writing.tolerance.invalid", "公差必须是数字。");
 
         if (!ContentSettings.TryParsePerson(_writingPerson, out var writingPerson))
             throw new UseCaseException("writing.person.invalid", "人称只能是第一、第二或第三人称。");
@@ -220,7 +274,8 @@
         await services.GetRequiredService<UpdateContentSettingsUseCase>().ExecuteAsync(
             new ContentSettingsUpdate(
                 null, generation, publish, null, null, null, _draftDirectory, _publishedDirectory, _hexoTemplate,
-                targetCharacters, writingPerson, CollectWritingRules()),
+                minCharacters, maxCharacters, _writingToleranceEnabled ? toleranceCharacters : 0,
+                writingPerson, CollectWritingRules()),
             CancellationToken.None);
         await EnsurePublicTargetAsync(services);
         await services.GetRequiredService<UpdatePublishTargetUseCase>().ExecuteAsync(
@@ -290,6 +345,32 @@
         item.Publication.ReflectionVersionId == workingVersion.Id)?.Publication.Status;
     private string PublicationText() => TodayPublicationStatus() is { } status ? AdminLabels.PublicationText(status) : "尚未发布";
     private string PublicationBadge() => TodayPublicationStatus() is { } status ? AdminLabels.PublicationBadge(status) : "badge-muted";
+
+    /// <summary>今日稿件在内容时区里的时刻，用来把服务端算出的调度直接写给人看。</summary>
+    private string Local(DateTimeOffset? moment) => moment is { } value
+        ? TimeZoneInfo.ConvertTime(value, ContentTimeZone.FromId(_timeZoneId).TimeZoneInfo)
+            .ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)
+        : "—";
+
+    /// <summary>
+    /// 「为什么到点没有自动发布」的答案：开关状态 + 今天稿件的确认状态 + 今天是否已经发布过。
+    /// <para>
+    /// 自动发布只处理已确认的稿件，这是产品规则而不是故障；但旧页面从不说明这一点，用户看到的就只是沉默。
+    /// </para>
+    /// </summary>
+    private string AutoPublishStateText()
+    {
+        var state = _reflection?.Status switch
+        {
+            null => "今天还没有稿件，先生成并确认它，自动发布才有对象。",
+            not ReflectionStatus.Confirmed =>
+                "今天的稿件还没有确认——自动发布只处理已确认的稿件，它不会替你确认，所以到点也不会有动作。",
+            _ when TodayPublicationStatus() == PublicationStatus.Published => "今天的稿件已确认，而且已经发布过了。",
+            _ => "今天的稿件已确认，到上面的时刻会自动发布。",
+        };
+
+        return (_automaticPublish ? "自动公开：已开启。" : "自动公开：未开启，到点只写草稿（draft: true）。") + state;
+    }
 
     private async Task RunAsync(Func<IServiceProvider, Task> work, string success)
     {

@@ -38,7 +38,9 @@ public sealed class WritingSpecPromptTests
                 Array.Empty<InputEntry>(),
                 Array.Empty<RetrievedMaterial>(),
                 new WritingSettings(
+                    100,
                     420,
+                    20,
                     WritingPerson.Third,
                     [
                         new WritingRule("行文风格", "平实克制，不要升华。"),
@@ -50,7 +52,9 @@ public sealed class WritingSpecPromptTests
 
         var prompt = handler.Prompt;
 
-        StringAssert.Contains(prompt, "约 420 字", "篇幅要按用户填的字数说明，而不是三档枚举。");
+        StringAssert.Contains(prompt, "100 到 420 字", "篇幅要按用户填的区间说明，而不是三档枚举。");
+        StringAssert.Contains(prompt, "短到 80 字", "有公差时要把「可以到多少」说清楚。");
+        StringAssert.Contains(prompt, "长到 440 字", "公差对上限同样生效。");
         StringAssert.Contains(prompt, "第三人称", "人称要跟着用户的选择走。");
         StringAssert.Contains(prompt, "行文风格：平实克制，不要升华。", "用户写的规范要原样进入提示词。");
         StringAssert.Contains(prompt, "用词禁区：不用「总之」。", "每一条规范都要带上，不能只发第一条。");
@@ -83,7 +87,7 @@ public sealed class WritingSpecPromptTests
                 ContentDate.From(new DateOnly(2026, 9, 29)),
                 Array.Empty<InputEntry>(),
                 Array.Empty<RetrievedMaterial>(),
-                new WritingSettings(300, WritingPerson.First, []),
+                new WritingSettings(300, 400, 0, WritingPerson.First, []),
                 "generation-v2",
                 Array.Empty<string>()),
             CancellationToken.None);
@@ -91,7 +95,8 @@ public sealed class WritingSpecPromptTests
         var prompt = handler.Prompt;
 
         // 篇幅和人称仍然要说，否则模型连长度都没有依据；但一条规则都不许被凭空补上。
-        StringAssert.Contains(prompt, "约 300 字");
+        StringAssert.Contains(prompt, "300 到 400 字", "关掉公差时给出的是区间本身。");
+        StringAssert.Contains(prompt, "不要超出这个范围", "关掉公差要把范围说死。");
         StringAssert.Contains(prompt, "第一人称");
         Assert.IsFalse(prompt.Contains("行文风格：", StringComparison.Ordinal), $"删空的清单不该又冒出默认条目：\n{prompt}");
     }

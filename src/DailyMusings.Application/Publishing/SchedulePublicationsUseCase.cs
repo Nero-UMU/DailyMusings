@@ -80,13 +80,12 @@ public sealed class SchedulePublicationsUseCase
         var reflections = await _reflections
             .ListByDateRangeAsync(today.AddDays(-LookBackDays), today, cancellationToken)
             .ConfigureAwait(false);
-        var calendar = settings.CreateCalendar();
         var now = _clock.UtcNow;
 
         foreach (var reflection in reflections.OrderBy(candidate => candidate.ContentDate))
         {
             if (reflection.WorkingVersionId is not { } workingVersionId ||
-                calendar.AtLocalTime(reflection.ContentDate.AddDays(1), settings.PublishLocalTime) > now)
+                settings.PublishSlotFor(reflection.ContentDate) > now)
             {
                 continue;
             }
@@ -144,9 +143,8 @@ public sealed class SchedulePublicationsUseCase
             .Where(candidate => candidate.Status == ReflectionStatus.Confirmed)
             .OrderBy(candidate => candidate.ContentDate))
         {
-            // §11.1: 默认 23:00 生成、次日 08:00 发布. Before that moment there is nothing to do, and the use case
-            // says so rather than this loop guessing.
-            if (calendar.AtLocalTime(reflection.ContentDate.AddDays(1), settings.PublishLocalTime) > now)
+            // §11.1: 默认 23:00 生成、次日 08:00 发布；发布时间晚于生成时间则是当天（见 PublishSlotFor）。
+            if (settings.PublishSlotFor(reflection.ContentDate) > now)
             {
                 continue;
             }

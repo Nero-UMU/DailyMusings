@@ -48,7 +48,9 @@ public sealed class UpdateContentSettingsUseCase
             update.PublishedDirectory ?? current.PublishedDirectory,
             update.HexoFrontMatterTemplate ?? current.HexoFrontMatterTemplate,
             new WritingSettings(
-                update.WritingTargetCharacters ?? current.Writing.TargetCharacters,
+                update.WritingMinCharacters ?? current.Writing.MinCharacters,
+                update.WritingMaxCharacters ?? current.Writing.MaxCharacters,
+                update.WritingTolerance ?? current.Writing.CharacterTolerance,
                 update.WritingPerson ?? current.Writing.Person,
                 update.WritingRules ?? current.Writing.Rules));
 
@@ -130,6 +132,8 @@ public sealed record ContentSettingsUpdate(
     string? DraftDirectory = null,
     string? PublishedDirectory = null,
     string? HexoFrontMatterTemplate = null,
-    int? WritingTargetCharacters = null,
+    int? WritingMinCharacters = null,
+    int? WritingMaxCharacters = null,
+    int? WritingTolerance = null,
     WritingPerson? WritingPerson = null,
     IReadOnlyList<WritingRule>? WritingRules = null);

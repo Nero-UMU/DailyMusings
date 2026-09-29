@@ -174,12 +174,12 @@ public sealed class RequestPublicationUseCase
 
         if (publication is null)
         {
-            // The slot is the configured publication time for the day *after* the content day (§11.1: 默认 23:00
-            // 生成、次日 08:00 发布). A manual request is due immediately: the user is standing there.
+            // The slot comes from one place (ContentSettings.PublishSlotFor): 默认 23:00 生成、次日 08:00 发布，
+            // 而发布时间晚于生成时间时是当天。A manual request is due immediately: the user is standing there.
             var settings = await _settings.GetAsync(cancellationToken).ConfigureAwait(false);
             var scheduledAt = manual
                 ? now
-                : settings.CreateCalendar().AtLocalTime(contentDate.AddDays(1), settings.PublishLocalTime);
+                : settings.PublishSlotFor(contentDate);
 
             if (!manual && scheduledAt > now)
             {

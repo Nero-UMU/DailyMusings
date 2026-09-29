@@ -1,4 +1,6 @@
+using System.Globalization;
 using DailyMusings.Application.Abstractions;
+using DailyMusings.Application.Configuration;
 using DailyMusings.Application.Notifications;
 using DailyMusings.Application.Publishing;
 using DailyMusings.Domain.Common;
@@ -133,6 +135,95 @@ public class PublishingTests
     }
 
     /// <summary>
+    /// 2026-09-29 线上实例的真实配置：生成 23:00、发布 23:16（比生成晚 16 分钟）。旧实现**无条件**按
+    /// 「内容日期 +1 天」算发布时刻，于是「当晚 23:16 发布」被推到了 24 小时之后——用户勾了自动发布、稿子也
+    /// 确认了，到点却什么都不会发生，而页面又从不显示它算出的时刻，失败只能表现为沉默。
+    /// </summary>
+    [TestMethod]
+    public async Task A_publish_time_later_than_the_generation_time_publishes_the_same_evening()
+    {
+        await using var context = await PublishingTestContext.CreateAsync();
+        var target = await context.AddTargetAsync("hexo");
+        target.EnableAutomaticPublish("owner", context.Clock.UtcNow);
+        await context.Targets.UpdateAsync(target, CancellationToken.None);
+
+        context.Content.Settings = WithTimes(context.Content.Settings, "23:00", "23:16");
+
+        var day = Day(context);
+        await context.SeedConfirmedDraftAsync(day);
+
+        var calendar = context.Content.Settings.CreateCalendar();
+        context.Clock.UtcNow = calendar.AtLocalTime(day, new TimeOnly(23, 5));
+
+        Assert.AreEqual(
+            0,
+            (await context.Schedule.ExecuteAsync(CancellationToken.None)).Queued,
+            "23:05 还没到 23:16，这一天不该入队。");
+
+        context.Clock.UtcNow = calendar.AtLocalTime(day, new TimeOnly(23, 17));
+
+        Assert.AreEqual(
+            1,
+            (await context.Schedule.ExecuteAsync(CancellationToken.None)).Queued,
+            "23:16 是当天，过了就该入队。");
+
+        var publication = (await context.Publications.ListOutstandingAsync(50, CancellationToken.None)).Single();
+
+        Assert.AreEqual(PublicationTrigger.Automatic, publication.Trigger);
+        Assert.AreEqual(
+            calendar.AtLocalTime(day, new TimeOnly(23, 16)),
+            publication.ScheduledAtUtc,
+            "发布时刻必须是当天 23:16，而不是次日 23:16。");
+    }
+
+    /// <summary>
+    /// 默认组合（23:00 生成、次日 08:00 发布）不能因为上一条改动而变样：发布时刻早于生成时刻时仍然是次日。
+    /// </summary>
+    [TestMethod]
+    public async Task The_default_pair_still_publishes_the_next_morning()
+    {
+        await using var context = await PublishingTestContext.CreateAsync();
+        await context.AddTargetAsync("hexo");
+
+        context.Content.Settings = WithTimes(context.Content.Settings, "23:00", "08:00");
+
+        var day = Day(context);
+        await context.SeedConfirmedDraftAsync(day);
+
+        var calendar = context.Content.Settings.CreateCalendar();
+        context.Clock.UtcNow = calendar.AtLocalTime(day, new TimeOnly(23, 30));
+
+        Assert.AreEqual(
+            0,
+            (await context.Schedule.ExecuteAsync(CancellationToken.None)).Queued,
+            "当晚 23:30 还没到次日 08:00。");
+
+        context.Clock.UtcNow = calendar.AtLocalTime(day.AddDays(1), new TimeOnly(8, 1));
+
+        Assert.AreEqual(1, (await context.Schedule.ExecuteAsync(CancellationToken.None)).Queued);
+
+        var publication = (await context.Publications.ListOutstandingAsync(50, CancellationToken.None)).Single();
+
+        Assert.AreEqual(
+            calendar.AtLocalTime(day.AddDays(1), new TimeOnly(8, 0)),
+            publication.ScheduledAtUtc,
+            "默认组合仍然是次日 08:00。");
+    }
+
+    /// <summary>同一份设置换两个时刻（ContentSettings 是类而不是 record，所以不能 with）。</summary>
+    private static ContentSettings WithTimes(ContentSettings settings, string generation, string publish) => new(
+        settings.TimeZoneId,
+        TimeOnly.Parse(generation, CultureInfo.InvariantCulture),
+        TimeOnly.Parse(publish, CultureInfo.InvariantCulture),
+        settings.PublishWindowMinutes,
+        settings.AudioRetentionDays,
+        settings.ContentRetentionDays,
+        settings.DraftDirectory,
+        settings.PublishedDirectory,
+        settings.HexoFrontMatterTemplate,
+        settings.Writing);
+
+    /// <summary>
     /// A person asking again for an already-exported draft decides for itself. That record was created by the
     /// scheduler, so without the requeue path marking it manual the planner kept applying the unattended gate and
     /// answered "queued" while quietly exporting another draft.
@@ -202,9 +293,9 @@ public class PublishingTests
     private static void AdvanceToJustAfterThePublishSlot(PublishingTestContext context, ContentDate day)
     {
         var settings = context.Content.Settings;
-        var slot = settings.CreateCalendar().AtLocalTime(day.AddDays(1), settings.PublishLocalTime);
 
-        context.Clock.UtcNow = slot.AddMinutes(1);
+        // 与产品同一套规则（ContentSettings.PublishSlotFor），不在这里重算一遍：重算就会漂移。
+        context.Clock.UtcNow = settings.PublishSlotFor(day).AddMinutes(1);
     }
 
     [DataTestMethod]

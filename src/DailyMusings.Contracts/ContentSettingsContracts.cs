@@ -26,8 +26,17 @@ public sealed record ContentSettingsDto(
     string PublishedDirectory,
     string HexoFrontMatterTemplate,
 
-    /// <summary>Target body length in Chinese characters (decision A.24).</summary>
-    int WritingTargetCharacters,
+    /// <summary>Lower bound of the body length in Chinese characters (decisions A.24, A.28).</summary>
+    int WritingMinCharacters,
+
+    /// <summary>Upper bound of the body length in Chinese characters.</summary>
+    int WritingMaxCharacters,
+
+    /// <summary>
+    /// How far outside that range the model may go on purpose; <c>0</c> means the range is strict. The material
+    /// decides whether the article lands a little short or a little long.
+    /// </summary>
+    int WritingTolerance,
 
     /// <summary><c>first</c>, <c>second</c> or <c>third</c>.</summary>
     string WritingPerson,
@@ -45,7 +54,9 @@ public sealed record UpdateContentSettingsRequest(
     string? DraftDirectory = null,
     string? PublishedDirectory = null,
     string? HexoFrontMatterTemplate = null,
-    int? WritingTargetCharacters = null,
+    int? WritingMinCharacters = null,
+    int? WritingMaxCharacters = null,
+    int? WritingTolerance = null,
     string? WritingPerson = null,
 
     /// <summary>

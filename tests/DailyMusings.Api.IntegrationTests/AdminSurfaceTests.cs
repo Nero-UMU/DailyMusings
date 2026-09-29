@@ -488,7 +488,9 @@ public class AdminSurfaceTests
 
         var initial = await instance.Client.GetFromJsonAsync<ContentSettingsDto>("/api/content-settings");
 
-        Assert.AreEqual(300, initial!.WritingTargetCharacters, "默认 300 字。");
+        Assert.AreEqual(50, initial!.WritingMinCharacters, "默认最少 50 字。");
+        Assert.AreEqual(300, initial.WritingMaxCharacters, "默认最多 300 字。");
+        Assert.AreEqual(20, initial.WritingTolerance, "默认公差 20 字。");
         Assert.AreEqual("first", initial.WritingPerson, "默认第一人称。");
         Assert.IsTrue(initial.WritingRules.Count > 0, "全新实例应当带一份可改的默认规范清单。");
 
@@ -496,14 +498,18 @@ public class AdminSurfaceTests
             "/api/content-settings",
             new UpdateContentSettingsRequest(
                 null, null, null, null, null,
-                WritingTargetCharacters: 450,
+                WritingMinCharacters: 120,
+                WritingMaxCharacters: 450,
+                WritingTolerance: 30,
                 WritingPerson: "third",
                 WritingRules: [new WritingRuleDto("我的风格", "短句为主，不写总结。")]));
 
         updated.EnsureSuccessStatusCode();
 
         var saved = (await updated.Content.ReadFromJsonAsync<ContentSettingsDto>())!;
-        Assert.AreEqual(450, saved.WritingTargetCharacters);
+        Assert.AreEqual(120, saved.WritingMinCharacters);
+        Assert.AreEqual(450, saved.WritingMaxCharacters);
+        Assert.AreEqual(30, saved.WritingTolerance);
         Assert.AreEqual("third", saved.WritingPerson);
         Assert.AreEqual(1, saved.WritingRules.Count);
 
@@ -549,10 +555,33 @@ public class AdminSurfaceTests
 
         using var tooLong = await instance.Client.PatchAsJsonAsync(
             "/api/content-settings",
-            new UpdateContentSettingsRequest(null, null, null, null, null, WritingTargetCharacters: 99999));
+            new UpdateContentSettingsRequest(null, null, null, null, null, WritingMaxCharacters: 99999));
 
         Assert.AreEqual(HttpStatusCode.BadRequest, tooLong.StatusCode);
-        Assert.AreEqual("writing.length.out_of_range", (await tooLong.Content.ReadFromJsonAsync<ApiError>())!.Code);
+        Assert.AreEqual("writing.max.out_of_range", (await tooLong.Content.ReadFromJsonAsync<ApiError>())!.Code);
+
+        // 畸形 JSON 是调用方的错，不是服务端缺陷：必须是 400，绝不能是 500。
+        // 这里只断言状态码：框架自己可能已经写下 400（响应已开始），那时就没有响应体可以再补校验码；
+        // 中间件在异常真的逃逸到它那里的路径上（生产/开发容器里实测过）会补上 validation_failed。
+        using var malformed = await instance.Client.PatchAsync(
+            "/api/content-settings",
+            new StringContent("{publishLocalTime:23:16}", System.Text.Encoding.UTF8, "application/json"));
+
+        Assert.AreEqual(
+            HttpStatusCode.BadRequest,
+            malformed.StatusCode,
+            "读不懂的请求体是 400，不是 500。");
+
+        // 最少不小于最多：用户点名要这条规则，报错也要能指名道姓。
+        using var inverted = await instance.Client.PatchAsJsonAsync(
+            "/api/content-settings",
+            new UpdateContentSettingsRequest(
+                null, null, null, null, null,
+                WritingMinCharacters: 400,
+                WritingMaxCharacters: 300));
+
+        Assert.AreEqual(HttpStatusCode.BadRequest, inverted.StatusCode);
+        Assert.AreEqual("writing.range.invalid", (await inverted.Content.ReadFromJsonAsync<ApiError>())!.Code);
     }
 
     /// <summary>
@@ -574,7 +603,9 @@ public class AdminSurfaceTests
 
         Assert.IsTrue(specAt >= 0, $"发布设置页没有渲染博客生成规范卡片：\n{html}");
         Assert.IsTrue(templateAt > specAt, "写作规范卡必须在 Front matter 模板上方。");
-        StringAssert.Contains(html, "目标字数");
+        StringAssert.Contains(html, "最少字数");
+        StringAssert.Contains(html, "最多字数");
+        StringAssert.Contains(html, "公差");
         StringAssert.Contains(html, "添加一条规范");
     }
 

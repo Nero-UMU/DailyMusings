@@ -469,8 +469,15 @@ public sealed class OpenAiCompatibleGenerationClient : IReflectionGenerationClie
     private static void AppendWritingSettings(StringBuilder builder, WritingSettings settings)
     {
         builder.AppendLine("写作规范（本次成文必须遵守；与系统规则冲突时，以系统规则为准）：");
-        builder.AppendLine(CultureInfo.InvariantCulture,
-            $"- 目标篇幅：约 {settings.TargetCharacters} 字（正文汉字数，不含 Markdown 标记，允许上下浮动两成）。");
+
+        // 篇幅是区间，不是目标值（附录 A.28）。有公差时明确给出「可以到多少」，让素材多少决定落在哪儿；
+        // 没有公差时把范围说死，不给模型自行放宽的余地。
+        builder.AppendLine(settings.AllowsTolerance
+            ? $"- 篇幅：{settings.MinCharacters} 到 {settings.MaxCharacters} 字之间（正文汉字数，不含 Markdown 标记）。"
+              + $"如果当天的素材撑不满或装不下，可以短到 {settings.ToleratedMinCharacters} 字、或长到 "
+              + $"{settings.ToleratedMaxCharacters} 字，由素材多少决定；不要为了凑字数而扩写，也不要为了压字数而删掉具体的事。"
+            : $"- 篇幅：{settings.MinCharacters} 到 {settings.MaxCharacters} 字之间（正文汉字数，不含 Markdown 标记），"
+              + "不要超出这个范围。");
 
         var person = settings.Person switch
         {
