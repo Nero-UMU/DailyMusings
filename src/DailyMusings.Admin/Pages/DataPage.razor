@@ -9,7 +9,7 @@
    多出来的那半个格子正好放下内容下方的一行播放条（原生 <audio>：播放/暂停、进度、时长都有了）。 *@
 
 <PageHeader Title="数据管理"
-            Hint="浏览服务器收到的全部随想。可以筛选录音或手写内容、播放录音、修订识别文字并处理失败项。">
+            Hint="浏览服务器收到的全部随想。可以筛选录音或手写内容、播放录音、修订文字并处理失败项。">
     <Actions>
         <button class="btn" @onclick="ReloadAsync" disabled="@_busy">刷新</button>
     </Actions>
@@ -43,11 +43,6 @@
             <option value="running">转写中</option>
             <option value="failed">转写失败</option>
         </select>
-    </label>
-
-    <label class="checkbox">
-        <input type="checkbox" checked="@_includeDeleted" @onchange="OnIncludeDeletedChanged" />
-        包含已删除（保留策略清理后留下的记录）
     </label>
 
     <div class="actions">
@@ -112,10 +107,6 @@ else
                         <span class="player-meta">@AdminLabels.ProcessingFailureText(failureCode)</span>
                     }
 
-                    @if (entry.IsDeleted)
-                    {
-                        <span class="badge badge-muted">内容已清理</span>
-                    }
                 </div>
 
                 <div class="data-cell">
@@ -179,8 +170,8 @@ else
                     {
                         <div class="stack">
                             <span class="hint">
-                                删除后这条随想不再出现在列表与检索里；历史文章对它的来源引用不会被改写。
-                                录音文件也一并删除。
+                                删除后无法恢复；文字、录音、主题关联、语义索引和文章中的这条来源关系都会一并删除，
+                                已生成的文章正文不会改变。
                             </span>
                             <div class="actions">
                                 <button class="btn-danger btn-sm" @onclick="() => DeleteAsync(entry.Id)" disabled="@_busy">
@@ -193,7 +184,7 @@ else
                     else
                     {
                         <div class="actions">
-                            @if (!entry.IsDeleted && entry.TranscriptionStatus == TranscriptionStatus.Succeeded)
+                            @if (!entry.IsDeleted && entry.TranscriptForGeneration is { Length: > 0 })
                             {
                                 <button class="btn btn-sm" @onclick="() => BeginTranscriptEdit(entry)" disabled="@_busy">修订文字…</button>
                             }
@@ -236,8 +227,6 @@ else
 
     private string _typeFilter = "all";
     private string _statusFilter = "all";
-    private bool _includeDeleted;
-
     private InputEntryId? _expanded;
     private InputEntryId? _confirmingDelete;
     private InputEntryId? _editingTranscript;
@@ -266,7 +255,7 @@ else
                 contentDate: null,
                 Math.Max(1, _pageNumber),
                 PageSize,
-                _includeDeleted,
+                includeDeleted: false,
                 CancellationToken.None);
 
         _pageNumber = _page.Page;
@@ -341,15 +330,6 @@ else
         await LoadAsync();
     });
 
-    private async Task OnIncludeDeletedChanged(ChangeEventArgs args) => await RunAsync(async () =>
-    {
-        _includeDeleted = args.Value is true;
-        _pageNumber = 1;
-        _confirmingDelete = null;
-        CancelTranscriptEdit();
-        await LoadAsync();
-    });
-
     private async Task ToggleExpandAsync(InputEntryId id) => await RunAsync(() =>
     {
         _expanded = _expanded == id ? null : id;
@@ -404,7 +384,7 @@ else
         _confirmingDelete = null;
         await LoadAsync();
 
-        _message = "已删除这条随想（录音一并删除，历史文章的来源引用不改写）。";
+        _message = "已永久删除这条随想及其录音和关联数据；已生成的文章正文未改变。";
     });
 
     private async Task RetryTranscriptionAsync(InputEntryId id) => await RunAsync(async () =>

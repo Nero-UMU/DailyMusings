@@ -252,6 +252,13 @@ public class InputLoopTests
         Assert.AreEqual(TranscriptionStatusNames.NotApplicable, ingested.Input.TranscriptionStatus);
         Assert.AreEqual("随手记一句。", ingested.Input.Transcript);
         Assert.IsNull(ingested.Input.TranscriptionJobStatus, "There is nothing to transcribe.");
+
+        using var dataPage = await instance.Client.GetAsync("/data");
+        var html = WebUtility.HtmlDecode(await dataPage.Content.ReadAsStringAsync());
+
+        dataPage.EnsureSuccessStatusCode();
+        StringAssert.Contains(html, "随手记一句。");
+        StringAssert.Contains(html, "修订文字…", "手写记录也必须提供文字修订入口。");
     }
 
     [TestMethod]
@@ -614,6 +621,9 @@ public class InputLoopTests
         // Deleting the entry is a different operation, and it takes the record with it.
         using var deleteEntry = await device.DeleteAsync($"/api/inputs/{id}");
         Assert.AreEqual(HttpStatusCode.NoContent, deleteEntry.StatusCode);
+
+        using var deletedEntry = await device.GetAsync($"/api/inputs/{id}");
+        Assert.AreEqual(HttpStatusCode.NotFound, deletedEntry.StatusCode, "手动删除必须真正移除记录，而不是留下软删除行。");
 
         var listed = await device.GetFromJsonAsync<InputListResponse>("/api/inputs");
         Assert.AreEqual(0, listed!.Items.Count);

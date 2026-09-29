@@ -215,18 +215,19 @@ public sealed class DeleteInputAudioUseCase
     }
 }
 
-/// <summary>Deletes the whole entry, taking its audio with it.</summary>
+/// <summary>
+/// Permanently deletes a user-selected entry, taking its audio and article source links with it. This is separate
+/// from retention cleanup, which must keep an empty tombstone for provenance after content expires automatically.
+/// </summary>
 public sealed class DeleteInputUseCase
 {
     private readonly IInputEntryRepository _inputs;
     private readonly IAudioStore _audio;
-    private readonly IClock _clock;
 
-    public DeleteInputUseCase(IInputEntryRepository inputs, IAudioStore audio, IClock clock)
+    public DeleteInputUseCase(IInputEntryRepository inputs, IAudioStore audio)
     {
         _inputs = inputs;
         _audio = audio;
-        _clock = clock;
     }
 
     public async Task ExecuteAsync(InputEntryId id, CancellationToken cancellationToken)
@@ -234,13 +235,17 @@ public sealed class DeleteInputUseCase
         var entry = await _inputs.FindByIdAsync(id, cancellationToken).ConfigureAwait(false)
             ?? throw new DomainException("input.unknown", $"No input with id {id}.");
 
-        var path = entry.Delete(_clock.UtcNow);
-        if (path is not null)
+        if (entry.IsDeleted)
+        {
+            throw new DomainException("input.unknown", $"No input with id {id}.");
+        }
+
+        if (entry.AudioPath is { } path)
         {
             await _audio.DeleteAsync(path, cancellationToken).ConfigureAwait(false);
         }
 
-        await _inputs.UpdateAsync(entry, cancellationToken).ConfigureAwait(false);
+        await _inputs.DeleteAsync(id, cancellationToken).ConfigureAwait(false);
 
         // Any queued transcription is deliberately left in place: the handler treats "the entry is gone" as
         // success, which is cheaper and safer than trying to cancel a job that may already be running.

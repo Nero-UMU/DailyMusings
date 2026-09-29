@@ -261,6 +261,28 @@ public sealed class SqliteInputEntryRepository : IInputEntryRepository
     }
 
     /// <summary>
+    /// Removes a user-deleted capture. Source rows cannot cascade because they belong to an article version, so
+    /// they are explicitly detached first; topic assignments and embeddings then follow the input row through
+    /// their schema-level cascades. Both statements commit together, so an article never points at a missing row.
+    /// </summary>
+    public async Task DeleteAsync(InputEntryId id, CancellationToken cancellationToken)
+    {
+        await using var transaction = await _accessor.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+
+        await _accessor.ExecuteAsync(
+            "DELETE FROM source_reference WHERE input_entry_id = $id;",
+            cancellationToken,
+            ("$id", id.ToString())).ConfigureAwait(false);
+
+        await _accessor.ExecuteAsync(
+            "DELETE FROM input_entry WHERE id = $id;",
+            cancellationToken,
+            ("$id", id.ToString())).ConfigureAwait(false);
+
+        await _accessor.CommitAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
     /// Mirrors the entry's secondary topics into the join table.
     /// <para>
     /// Replace rather than merge: the domain value is the whole assignment, so anything the caller removed must

@@ -49,10 +49,8 @@ public interface IInputEntryRepository
     /// <summary>
     /// One page of entries, newest first, for the admin content list.
     /// <para>
-    /// <paramref name="includeDeleted"/> exists because the retention sweep leaves tombstones (the row keeps a
-    /// historical article's provenance alive), and an operator looking for "what happened to that entry" needs
-    /// to be able to see them. The phone never asks for them: a capture the user deleted must not reappear in
-    /// the timeline.
+    /// <paramref name="includeDeleted"/> is retained for internal diagnostics and exports that need to account for
+    /// retention tombstones. The normal data-management page and the phone both pass <c>false</c>.
     /// </para>
     /// </summary>
     Task<IReadOnlyList<InputEntry>> ListPageAsync(
@@ -73,6 +71,12 @@ public interface IInputEntryRepository
     Task AddAsync(InputEntry entry, CancellationToken cancellationToken);
 
     Task UpdateAsync(InputEntry entry, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Permanently removes a user-deleted entry and every dependent source/topic/vector row. Retention cleanup
+    /// deliberately does not call this method: its tombstones preserve provenance after content expires.
+    /// </summary>
+    Task DeleteAsync(InputEntryId id, CancellationToken cancellationToken);
 }
 
 /// <summary>Result of persisting an audio blob.</summary>
