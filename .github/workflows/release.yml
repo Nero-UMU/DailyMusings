@@ -147,7 +147,9 @@ jobs:
           fi
 
           echo "-- 服务进程不是 root（PID 1 的 uid 应当是 1654）--"
-          docker compose exec -T app cat /proc/1/status | grep -q '^Uid:.*1654'
+          # stdin 显式指向 /dev/null：exec 类命令会继承并消费 stdin，在「脚本从 stdin 读入」的
+          # 调用方式下会把剩下的脚本吃掉（在真实服务器上踩过一次，脚本静默半途结束、退出码还是 0）。
+          docker compose exec -T app cat /proc/1/status </dev/null | grep -q '^Uid:.*1654'
 
       - name: 换成宿主机目录再起一次（绑定挂载路径，目录不存在也不预先 chown）
         env:
