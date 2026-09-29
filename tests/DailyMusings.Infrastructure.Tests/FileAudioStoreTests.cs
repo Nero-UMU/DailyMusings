@@ -17,7 +17,7 @@ public class FileAudioStoreTests
     private static async Task<(InstancePaths Paths, FileAudioStore Store, string Root)> ArrangeAsync()
     {
         var root = Path.Combine(Path.GetTempPath(), "dailymusings-audio", Guid.CreateVersion7().ToString("N"));
-        var paths = new InstancePaths(new StorageOptions { RootPath = root, SecretsPath = root });
+        var paths = new InstancePaths(new StorageOptions { RootPath = root});
         paths.EnsureCreated();
 
         await Task.CompletedTask;

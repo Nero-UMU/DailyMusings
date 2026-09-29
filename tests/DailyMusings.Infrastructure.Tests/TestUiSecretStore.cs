@@ -40,10 +40,9 @@ internal sealed class TestUiSecretStore : IUiSecretStore
 /// <summary>
 /// A secret store holding exactly what a test put in it.
 /// <para>
-/// The lookup order between the encrypted page store, a mounted file and the environment is
-/// <see cref="FileSecretStore"/>'s own business (see SmtpUiPasswordTests). What the SMTP settings use case needs to
-/// know is narrower — whether a password exists at all, because that is what decides whether an unencrypted
-/// configuration is refused — so a dictionary is the honest stand-in.
+/// Since appendix A.27 there is only one real source — the encrypted store the admin page writes — so the
+/// question this stand-in has to answer is narrow: does a credential exist at all? That is what decides whether
+/// an unencrypted SMTP configuration is refused, and a dictionary answers it honestly.
 /// </para>
 /// </summary>
 internal sealed class TestSecretStore : ISecretStore
@@ -65,7 +64,7 @@ internal sealed class TestSecretStore : ISecretStore
 
     public IReadOnlyList<string> ListNames() => [.. _values.Keys];
 
-    public SecretSource ResolveSource(string name) => _values.ContainsKey(name) ? SecretSource.File : SecretSource.None;
+    public SecretSource ResolveSource(string name) => _values.ContainsKey(name) ? SecretSource.Ui : SecretSource.None;
 }
 
 /// <summary>Builds an encrypted store over a throwaway instance directory, for the tests that need the real one.</summary>
@@ -76,7 +75,6 @@ internal static class TestUiSecretStoreFactory
         var paths = new InstancePaths(new StorageOptions
         {
             RootPath = rootPath,
-            SecretsPath = Path.Combine(rootPath, "secrets"),
 
             // Beside the instance root, exactly like production: the point of the store is that a backup of the
             // instance cannot carry it.

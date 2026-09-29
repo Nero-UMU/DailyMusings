@@ -1,3 +1,4 @@
+using DailyMusings.Application.Abstractions;
 using DailyMusings.Infrastructure.Security;
 using DailyMusings.Infrastructure.Storage;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
@@ -108,8 +109,14 @@ public class SecurityTests
         }
     }
 
+    /// <summary>
+    /// Appendix A.27: the deployment cannot provide a credential any more. A file where the store used to look,
+    /// and the environment variable it used to read, must both be invisible — otherwise "a key cannot be
+    /// injected through compose" is a claim the code does not keep. The admin page's encrypted store is the one
+    /// route, and it still answers.
+    /// </summary>
     [TestMethod]
-    public void Secrets_are_read_from_files_and_environment_variables_by_name()
+    public async Task A_secret_can_only_come_from_the_admin_pages_encrypted_store()
     {
         var root = Path.Combine(Path.GetTempPath(), "dailymusings-secrets", Guid.CreateVersion7().ToString("N"));
         var secretsDirectory = Path.Combine(root, "secrets");
@@ -120,18 +127,19 @@ public class SecurityTests
             File.WriteAllText(Path.Combine(secretsDirectory, "smtp-password"), "s3cret-from-file\n");
             Environment.SetEnvironmentVariable("DAILYMUSINGS_SECRET_EMBEDDING_API_KEY", "from-env");
 
-            var store = new FileSecretStore(new InstancePaths(new StorageOptions
-            {
-                RootPath = root,
-                SecretsPath = secretsDirectory,
-            }));
+            var store = new EncryptedUiSecretStore(new InstancePaths(new StorageOptions { RootPath = root }));
+            var secrets = (ISecretStore)store;
 
-            // Docker writes a trailing newline; a secret carrying one would break an Authorization header.
-            Assert.AreEqual("s3cret-from-file", store.TryGet("smtp-password"));
-            Assert.AreEqual("from-env", store.TryGet("embedding.api-key"));
-            Assert.IsNull(store.TryGet("openai-api-key"));
-            Assert.IsTrue(store.Exists("smtp-password"));
-            CollectionAssert.Contains(store.ListNames().ToArray(), "smtp-password");
+            Assert.IsNull(secrets.TryGet("smtp-password"), "A mounted file must not be read any more.");
+            Assert.IsNull(secrets.TryGet("embedding-api-key"), "An environment variable must not be read any more.");
+            Assert.AreEqual(SecretSource.None, secrets.ResolveSource("smtp-password"));
+            Assert.IsFalse(secrets.Exists("smtp-password"));
+
+            await ((IUiSecretStore)store).SetAsync("smtp-password", "typed", CancellationToken.None);
+
+            Assert.AreEqual("typed", secrets.TryGet("smtp-password"));
+            Assert.AreEqual(SecretSource.Ui, secrets.ResolveSource("smtp-password"));
+            Assert.IsTrue(secrets.Exists("smtp-password"));
         }
         finally
         {
@@ -141,13 +149,10 @@ public class SecurityTests
     }
 
     [TestMethod]
-    public void A_secret_name_cannot_escape_the_secrets_directory()
+    public void A_secret_name_cannot_escape_the_credential_directory()
     {
-        var store = new FileSecretStore(new InstancePaths(new StorageOptions
-        {
-            RootPath = Path.GetTempPath(),
-            SecretsPath = Path.Combine(Path.GetTempPath(), "nonexistent-secrets"),
-        }));
+        var store = (ISecretStore)new EncryptedUiSecretStore(
+            new InstancePaths(new StorageOptions { RootPath = Path.GetTempPath() }));
 
         Assert.ThrowsException<ArgumentException>(() => store.TryGet("../../etc/passwd"));
         Assert.ThrowsException<ArgumentException>(() => store.TryGet("nested/name"));
@@ -161,7 +166,7 @@ public class SecurityTests
 
         try
         {
-            var paths = new InstancePaths(new StorageOptions { RootPath = root, SecretsPath = root });
+            var paths = new InstancePaths(new StorageOptions { RootPath = root });
             paths.EnsureCreated();
 
             foreach (var directory in paths.ManagedDirectories)

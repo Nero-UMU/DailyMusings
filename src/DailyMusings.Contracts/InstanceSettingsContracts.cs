@@ -62,7 +62,6 @@ public sealed record ListeningPortDto(
     string? UpdatedAtUtc,
     string RuntimeConfigPath,
     string RootPath,
-    string SecretsPath,
     string KeyRingPath);
 
 /// <summary>Sets the listening port, or clears the override when <see cref="Port"/> is <c>null</c>.</summary>

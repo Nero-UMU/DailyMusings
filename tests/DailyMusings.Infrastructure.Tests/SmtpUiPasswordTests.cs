@@ -29,7 +29,7 @@ public class SmtpUiPasswordTests
         var paths = PathsFor(database);
         var settings = new SqliteAppSettingStore(database.Accessor, new TestClock(DateTimeOffset.UtcNow));
         var uiSecrets = new EncryptedUiSecretStore(paths);
-        var secrets = new FileSecretStore(paths, uiSecrets);
+        var secrets = new EncryptedUiSecretStore(paths);
 
         var update = new UpdateSmtpSettingsUseCase(settings, uiSecrets, secrets);
 
@@ -82,16 +82,13 @@ public class SmtpUiPasswordTests
     /// </para>
     /// </summary>
     [TestMethod]
-    public async Task Clearing_the_password_also_overrides_the_mounted_secret_file()
+    public async Task Clearing_the_password_leaves_no_credential_behind()
     {
         await using var database = await TestDatabase.CreateAsync();
         var paths = PathsFor(database);
         var settings = new SqliteAppSettingStore(database.Accessor, new TestClock(DateTimeOffset.UtcNow));
         var uiSecrets = new EncryptedUiSecretStore(paths);
-        var secrets = new FileSecretStore(paths, uiSecrets);
-
-        Directory.CreateDirectory(paths.SecretsPath);
-        await File.WriteAllTextAsync(Path.Combine(paths.SecretsPath, "smtp-password"), "from-the-file");
+        var secrets = new EncryptedUiSecretStore(paths);
 
         var update = new UpdateSmtpSettingsUseCase(settings, uiSecrets, secrets);
 
@@ -108,13 +105,14 @@ public class SmtpUiPasswordTests
 
         Assert.AreEqual(SecretSource.Ui, secrets.ResolveSource(SmtpSettingKeys.PasswordSecretName));
 
-        // Clearing it takes the file's password out of play too. The switch stays where it was, so the save that
-        // clears the password is not also a save that turns encryption off.
+        // Clearing it leaves nothing behind for anything to fall back to (appendix A.27 removed the file and the
+        // environment as sources), and the switches stay where they were — the save that clears the password is
+        // not also a save that turns encryption off.
         await update.ExecuteAsync(
             new SmtpSettingsUpdate(null, null, null, null, null, null, ClearPassword: true),
             CancellationToken.None);
 
-        Assert.IsNull(secrets.TryGet(SmtpSettingKeys.PasswordSecretName), "清除之后文件里的密码不该再被取到");
+        Assert.IsNull(secrets.TryGet(SmtpSettingKeys.PasswordSecretName), "清除之后不该还能取到密码");
         Assert.AreEqual(SecretSource.None, secrets.ResolveSource(SmtpSettingKeys.PasswordSecretName));
 
         var view = await ReadAsync(database, settings, secrets);
@@ -141,7 +139,7 @@ public class SmtpUiPasswordTests
         var paths = PathsFor(database);
         var settings = new SqliteAppSettingStore(database.Accessor, new TestClock(DateTimeOffset.UtcNow));
         var uiSecrets = new EncryptedUiSecretStore(paths);
-        var secrets = new FileSecretStore(paths, uiSecrets);
+        var secrets = new EncryptedUiSecretStore(paths);
         var update = new UpdateSmtpSettingsUseCase(settings, uiSecrets, secrets);
 
         await update.ExecuteAsync(
@@ -171,7 +169,7 @@ public class SmtpUiPasswordTests
         var paths = PathsFor(database);
         var settings = new SqliteAppSettingStore(database.Accessor, new TestClock(DateTimeOffset.UtcNow));
         var uiSecrets = new EncryptedUiSecretStore(paths);
-        var secrets = new FileSecretStore(paths, uiSecrets);
+        var secrets = new EncryptedUiSecretStore(paths);
         var update = new UpdateSmtpSettingsUseCase(settings, uiSecrets, secrets);
 
         await update.ExecuteAsync(
@@ -186,33 +184,36 @@ public class SmtpUiPasswordTests
         Assert.AreEqual(SecretSource.None, view.PasswordSource);
     }
 
+    /// <summary>
+    /// Appendix A.27: the environment is not a source any more. A variable that used to provision the password
+    /// must leave the view saying "no password" — the operator has to type it on the page.
+    /// </summary>
     [TestMethod]
-    public async Task The_environment_is_the_last_resort()
+    public async Task A_password_in_the_environment_is_not_a_password()
     {
         await using var database = await TestDatabase.CreateAsync();
         var paths = PathsFor(database);
         var settings = new SqliteAppSettingStore(database.Accessor, new TestClock(DateTimeOffset.UtcNow));
-        var secrets = new FileSecretStore(paths, new EncryptedUiSecretStore(paths));
+        var secrets = new EncryptedUiSecretStore(paths);
 
-        // The prefix the store reads, in the spelling it derives from a secret name.
         var variable = "DAILYMUSINGS_SECRET_" + EnvironmentSecretName.Replace('-', '_').ToUpperInvariant();
 
         try
         {
             Environment.SetEnvironmentVariable(variable, "from-the-environment");
 
-            Assert.AreEqual(SecretSource.Environment, secrets.ResolveSource(EnvironmentSecretName));
-            Assert.AreEqual("from-the-environment", secrets.TryGet(EnvironmentSecretName));
+            Assert.IsNull(secrets.TryGet(EnvironmentSecretName));
+            Assert.AreEqual(SecretSource.None, secrets.ResolveSource(EnvironmentSecretName));
+
+            var view = await ReadAsync(database, settings, secrets);
+
+            Assert.AreEqual(SecretSource.None, view.PasswordSource);
+            Assert.IsFalse(view.HasPassword);
         }
         finally
         {
             Environment.SetEnvironmentVariable(variable, null);
         }
-
-        Assert.AreEqual(SecretSource.None, secrets.ResolveSource(EnvironmentSecretName));
-
-        await Task.CompletedTask;
-        _ = settings;
     }
 
     private static InstancePaths PathsFor(TestDatabase database)
@@ -220,7 +221,6 @@ public class SmtpUiPasswordTests
         var paths = new InstancePaths(new StorageOptions
         {
             RootPath = database.RootPath,
-            SecretsPath = Path.Combine(database.RootPath, "secrets"),
             KeyRingPath = Path.Combine(database.RootPath, "keys"),
         });
 

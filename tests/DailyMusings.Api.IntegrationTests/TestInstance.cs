@@ -85,7 +85,6 @@ internal sealed class TestInstance : IAsyncDisposable
         var settings = new Dictionary<string, string?>(StringComparer.Ordinal)
         {
             ["Storage:RootPath"] = root,
-            ["Storage:SecretsPath"] = Path.Combine(root, "secrets"),
 
             // Kept beside the instance root, mirroring production: the key ring must outlive a restart but stay
             // out of the backup set.
@@ -161,13 +160,17 @@ internal sealed class TestInstance : IAsyncDisposable
     public void SetAdminCookie(string value) =>
         _cookies.Add(Client.BaseAddress!, new Cookie("dailymusings.admin", value, "/"));
 
-    /// <summary>Provisions a secret the way a mounted Docker secret would appear to the app (§10.4).</summary>
-    public void WriteSecret(string name, string value)
-    {
-        var directory = Path.Combine(RootPath, "secrets");
-        Directory.CreateDirectory(directory);
-        File.WriteAllText(Path.Combine(directory, name), value);
-    }
+    /// <summary>
+    /// Provisions a secret the way an operator does: through the admin page's encrypted store (appendix A.27).
+    /// Before that decision this helper dropped a file into a mounted secrets directory; a deployment can no
+    /// longer provide a credential at all, so a test that needs one has to use the same door.
+    /// </summary>
+    public void WriteSecret(string name, string value) =>
+        _app.Services
+            .GetRequiredService<DailyMusings.Application.Abstractions.IUiSecretStore>()
+            .SetAsync(name, value, CancellationToken.None)
+            .GetAwaiter()
+            .GetResult();
 
     /// <summary>
     /// Pairs a device through the real pairing flow and returns an HTTP client authenticated as that device —

@@ -222,7 +222,7 @@ internal sealed class InMemorySecretStore : ISecretStore
 
     public IReadOnlyList<string> ListNames() => [.. _values.Keys];
 
-    public SecretSource ResolveSource(string name) => _values.ContainsKey(name) ? SecretSource.File : SecretSource.None;
+    public SecretSource ResolveSource(string name) => _values.ContainsKey(name) ? SecretSource.Ui : SecretSource.None;
 }
 
 /// <summary>Builds a use-case graph backed by the in-memory fakes above.</summary>

@@ -6,6 +6,28 @@
 
 ---
 
+## 2026-09-29（第五轮）凭据只能从管理页填：删掉 Docker Secrets 与环境变量两条路
+
+- **两条凭据来源直接删除**：挂到 `/run/secrets` 的文件、`DAILYMUSINGS_SECRET_<名字>` 环境变量。`ISecretStore`
+  现在只有一个实现，就是管理页写入的那个加密存储；`SecretSource` 枚举收敛为 `Ui` / `None`；`Storage:SecretsPath`
+  配置项、`deploy/secrets.example/`、界面上的「密钥来源：后台填写 / Secret 文件 / 环境变量」文案一并消失。
+- **动机**（如实记）：一份能被 compose 注入的密钥，就是一份躺在宿主机上的明文密钥，还会出现在 `docker inspect`
+  的输出里——§10.4 的「密钥不外流」被它自己的部署方式否掉了。三层来源还让「清除已保存的密码」需要解释：写一条
+  空记录本来是为了压住下面那层文件，否则用户刚清掉的密码会被文件「复活」。
+- **代价照旧写清楚**：不能再用 Vault / K8s Secret / CI 变量注入凭据；凭据随配置目录存亡，`reset-instance.ps1`
+  之后要在页面上重填。项目尚无使用者（用户明确确认），所以**不留兼容**：不读旧来源，也不做「首次读到就搬进
+  加密存储」那种迁移——那等于把明文的路又留了一条。
+- **工具跟着改**：验收脚本不再往实例目录里拷密钥文件，改为登录管理页调
+  `PATCH /api/system/model-endpoints/<service>`（`apiKey`）与 `PATCH /api/system/smtp-settings`（`password`）
+  把一次性凭据种进去，也就是走操作员那条路；`compose.verify.yaml` 去掉 docker secrets 声明，
+  `run-restore-verify.sh` 不再需要打开任何 secrets 挂载；`deploy.ps1` 不再打包/恢复 `deploy/secrets`。
+- **测试**：`SecurityTests` 换成「挂载文件与环境变量都必须**读不到**，而页面的加密存储照常工作」；
+  `SmtpUiPasswordTests` 的「清除」与「环境变量」两条用例按新语义重写；`InstanceDataTests` 的「导出与备份不含
+  凭据」改为针对页面保存的那一份；集成测试的 `TestInstance.WriteSecret` 改为写进加密存储（它过去是往挂载目录
+  里丢文件）——那批走真实模型链路的用例因此仍然有意义。
+- 验证：解决方案构建 **0 警告 0 错误**；**579 项测试全绿**（Domain 238 / Application 39 / Infrastructure 177 /
+  Client 48 / Api.Integration 77）。
+
 ## 2026-09-29（第四轮）参数收敛：端口锁改名、compose 不再带注释、参数集中到 README
 
 - **`DAILYMUSINGS_LOCK_LISTENING_PORT` 改名为 `DM_LOCK_LISTENING_PORT`**：用户会改的开关都是 `DM_*`

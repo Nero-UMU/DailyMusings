@@ -462,13 +462,12 @@ public static class OperationsEndpointRouteBuilderExtensions
 
     /// <summary>
     /// The password's origin, in the API's own vocabulary. <c>SecretSource</c> is an application-level enum, and
-    /// the wire spelling is decided here like every other contract value.
+    /// the wire spelling is decided here like every other contract value. Since appendix A.27 there is only one
+    /// real source — the admin page — so this reports "stored" versus "not stored".
     /// </summary>
     private static string ToWireName(SecretSource source) => source switch
     {
         SecretSource.Ui => SecretSourceNames.Ui,
-        SecretSource.File => SecretSourceNames.SecretFile,
-        SecretSource.Environment => SecretSourceNames.Environment,
         _ => SecretSourceNames.None,
     };
 
@@ -810,7 +809,6 @@ public static class OperationsEndpointRouteBuilderExtensions
             current.UpdatedAtUtc?.ToString("o", CultureInfo.InvariantCulture),
             overrides.ConfigPath,
             configuration["Storage:RootPath"] ?? ".",
-            configuration["Storage:SecretsPath"] ?? "/run/secrets",
             configuration["Storage:KeyRingPath"] ?? "keys");
     }
 

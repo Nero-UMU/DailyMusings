@@ -20,7 +20,7 @@ public sealed record ModelEndpointDto(
     int TimeoutSeconds,
     int? Dimensions,
 
-    /// <summary>One of <c>SecretSourceNames</c>: where this endpoint's key comes from.</summary>
+    /// <summary>One of <c>SecretSourceNames</c>: <c>ui</c> when a key is stored, <c>none</c> when it is not.</summary>
     string PasswordSource,
 
     /// <summary>Whether a key resolves at all. The value itself never leaves the instance.</summary>
@@ -42,7 +42,7 @@ public sealed record UpdateModelEndpointRequest(
     /// <summary>Write-only API key. Stored encrypted outside the backup set and never returned.</summary>
     string? ApiKey = null,
 
-    /// <summary>Removes the stored key, falling back to the secret file or the environment.</summary>
+    /// <summary>Removes the stored key.</summary>
     bool? ClearPassword = null,
 
     /// <summary>Speech-to-text protocol selector; transcription endpoint only.</summary>
@@ -56,17 +56,15 @@ public sealed record ModelNameListResponse(IReadOnlyList<ModelNameDto> Items);
 /// <summary>
 /// Where the SMTP password the instance would actually send with comes from. Reported rather than inferred, so
 /// the admin page can say "还差密码" instead of leaving the operator to guess why nothing is delivered.
+/// <para>
+/// There is exactly one source now — the admin page (appendix A.27). The vocabulary is kept rather than collapsed
+/// to a boolean so "never set" and "explicitly cleared" stay distinguishable on the wire.
+/// </para>
 /// </summary>
 public static class SecretSourceNames
 {
     /// <summary>Typed into the admin page and stored encrypted outside the backup set.</summary>
     public const string Ui = "ui";
-
-    /// <summary>A file under the secrets directory (Docker secrets, §10.4).</summary>
-    public const string SecretFile = "secret-file";
-
-    /// <summary>An environment variable.</summary>
-    public const string Environment = "environment";
 
     /// <summary>Nothing provisioned: the password is missing.</summary>
     public const string None = "none";

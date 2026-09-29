@@ -2,9 +2,8 @@
 #
 # 这是本项目在 2026-09-24 之后的部署约定：
 #   1. 把工作树打包送到服务器（不含 bin/obj/.git/artifacts/.tmp-*）；
-#   2. 保留服务器上的 deploy/secrets（那是真实密钥，不进版本库也不进包）；
-#   3. 停容器 → 删掉旧镜像 → 重新构建 → 启动新镜像 → 等健康检查 → 清理悬空镜像。
-# 第 3 步是用户明确要求的：不允许旧镜像留在服务器上，每次部署都以新镜像启动。
+#   2. 停容器 → 删掉旧镜像 → 重新构建 → 启动新镜像 → 等健康检查 → 清理悬空镜像。
+# 第 2 步是用户明确要求的：不允许旧镜像留在服务器上，每次部署都以新镜像启动。
 #
 # 用法：
 #   pwsh -File tools/deploy/deploy.ps1                       # 用默认主机与端口
@@ -29,7 +28,7 @@ Write-Host "== 1. packaging $repo =="
 & tar -czf $tarball `
     --exclude=./.git --exclude=./.vs --exclude=./.tmp-work --exclude=./.tmp-device --exclude=./.tmp-verify `
     --exclude=./artifacts --exclude=./data --exclude=./keys --exclude=./media --exclude=./exports --exclude=./markdown `
-    --exclude='*/bin' --exclude='*/obj' --exclude=./deploy/secrets --exclude=./deploy/.env `
+    --exclude='*/bin' --exclude='*/obj' --exclude=./deploy/.env `
     -C $repo .
 if ($LASTEXITCODE -ne 0) { throw "tar failed" }
 
@@ -99,8 +98,7 @@ CONFIG_DIR=`$(validate_bind_dir DAILYMUSINGS_CONFIG_DIR "`$CONFIG_DIR")
 DATA_DIR=`$(validate_bind_dir DAILYMUSINGS_DATA_DIR "`$DATA_DIR")
 [ "`$CONFIG_DIR" != "`$DATA_DIR" ] || { echo "config and data directories must differ" >&2; exit 2; }
 
-echo "-- keep deployment settings and real secrets out of the source-tree wipe --"
-if [ -d "`$ROOT/deploy/secrets" ]; then cp -a "`$ROOT/deploy/secrets" "`$PRESERVED/secrets"; fi
+echo "-- keep the deployment settings out of the source-tree wipe --"
 if [ -f "`$ROOT/deploy/.env" ]; then cp -a "`$ROOT/deploy/.env" "`$PRESERVED/.env"; fi
 
 echo "-- stop and remove the running instance --"
@@ -162,13 +160,7 @@ echo "-- lay down the new tree --"
 rm -rf "`$ROOT"
 mkdir -p "`$ROOT"
 tar -xzf /tmp/dm-$stamp.tar.gz -C "`$ROOT"
-if [ -d "`$PRESERVED/secrets" ]; then cp -a "`$PRESERVED/secrets" "`$ROOT/deploy/secrets"; fi
-mkdir -p "`$ROOT/deploy/secrets"
-for name in deepseek-api-key openai-api-key embedding-api-key smtp-password; do
-    [ -e "`$ROOT/deploy/secrets/`$name" ] || : > "`$ROOT/deploy/secrets/`$name"
-done
-chmod 700 "`$ROOT/deploy/secrets" 2>/dev/null || true
-chmod 644 "`$ROOT/deploy/secrets/"* 2>/dev/null || true
+# 密钥不再随部署落盘：A.27 起凭据只能从管理页填（见 tools/deploy/README.md）。
 # Always write back the resolved and validated directories. An older .env may contain only the port settings;
 # restoring it verbatim would leave the two required bind sources undefined in the new Compose file.
 # 可选项（初始管理员密码、时区、转写协议默认值）从旧 .env 里原样带过来，不在这里凭空生成。

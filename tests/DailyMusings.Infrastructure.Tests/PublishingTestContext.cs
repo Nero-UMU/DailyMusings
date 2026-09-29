@@ -189,7 +189,6 @@ internal sealed class PublishingTestContext : IAsyncDisposable
         var paths = new InstancePaths(new StorageOptions
         {
             RootPath = database.RootPath,
-            SecretsPath = Path.Combine(database.RootPath, "secrets"),
             KeyRingPath = Path.Combine(database.RootPath, "keys"),
         });
 

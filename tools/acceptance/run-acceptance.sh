@@ -14,18 +14,20 @@ WORK="$ROOT/work"
 INSTANCE="$ROOT/inst-a"
 STATE="$INSTANCE/state"
 
-mkdir -p "$WORK" "$STATE" "$INSTANCE/keys" "$INSTANCE/secrets"
-chmod 777 "$WORK" "$INSTANCE" "$STATE" "$INSTANCE/keys" "$INSTANCE/secrets"
+mkdir -p "$WORK" "$STATE" "$INSTANCE/keys"
+chmod 777 "$WORK" "$INSTANCE" "$STATE" "$INSTANCE/keys"
 
-# The compose file lives next to the driver scripts but resolves ./state, ./keys and ./secrets relative to
-# itself, so it is copied into the instance directory before it is used.
+# The compose file lives next to the driver scripts but resolves ./state and ./keys relative to itself, so it is
+# copied into the instance directory before it is used.
 cp "$VERIFY/compose.verify.yaml" "$INSTANCE/compose.verify.yaml"
 
-# Throwaway secret values for the model endpoints and SMTP.
-cp "$VERIFY/secrets/openai-api-key" "$INSTANCE/secrets/openai-api-key"
-cp "$VERIFY/secrets/embedding-api-key" "$INSTANCE/secrets/embedding-api-key"
-cp "$VERIFY/secrets/smtp-password" "$INSTANCE/secrets/smtp-password"
-chmod 644 "$INSTANCE/secrets/"*
+# Throwaway credentials for the model endpoints and SMTP. Since appendix A.27 the deployment cannot hand the
+# instance a secret any more, so these are passed to acceptance.py, which types them in through the admin API —
+# the same door an operator uses.
+ACCEPTANCE_TRANSCRIPTION_KEY="$(cat "$VERIFY/secrets/openai-api-key")"
+ACCEPTANCE_GENERATION_KEY="$(cat "$VERIFY/secrets/openai-api-key")"
+ACCEPTANCE_EMBEDDING_KEY="$(cat "$VERIFY/secrets/embedding-api-key")"
+ACCEPTANCE_SMTP_PASSWORD="$(cat "$VERIFY/secrets/smtp-password")"
 
 echo "--- model stub ---"
 pkill -f stub_models.py >/dev/null 2>&1
@@ -87,6 +89,10 @@ DM_WORK="$WORK" \
 DM_ADMIN_INITIAL_PASSWORD="$PW" \
 DM_ADMIN_USER=owner \
 DM_ADMIN_PASSWORD="CorrectHorseBattery1" \
+DM_ACCEPTANCE_TRANSCRIPTION_KEY="$ACCEPTANCE_TRANSCRIPTION_KEY" \
+DM_ACCEPTANCE_GENERATION_KEY="$ACCEPTANCE_GENERATION_KEY" \
+DM_ACCEPTANCE_EMBEDDING_KEY="$ACCEPTANCE_EMBEDDING_KEY" \
+DM_ACCEPTANCE_SMTP_PASSWORD="$ACCEPTANCE_SMTP_PASSWORD" \
     python3 acceptance.py 2>&1 | tee "$WORK/acceptance.log"
 
 echo "acceptance exit=${PIPESTATUS[0]}"

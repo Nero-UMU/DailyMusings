@@ -57,40 +57,41 @@ public interface ISecretStore
 
     bool Exists(string name);
 
-    /// <summary>Names of the secrets currently provisioned. Safe to show: names are not secrets.</summary>
-    IReadOnlyList<string> ListNames();
-
     /// <summary>
-    /// Where a resolved value came from. Reported so the admin page can say "this password was typed here" as
-    /// opposed to "this one comes from a mounted file", and so a missing password is distinguishable from an
-    /// empty one — which is the difference between "configure it" and "it is configured".
+    /// Where a resolved value came from. With one source this is nearly a boolean, but it is kept as an enum so
+    /// "there is no such secret" stays distinguishable from "the operator cleared it" — the difference between
+    /// "configure it" and "it is configured".
     /// </summary>
     SecretSource ResolveSource(string name);
 }
 
-/// <summary>Where <see cref="ISecretStore.TryGet"/> found (or failed to find) a value.</summary>
+/// <summary>
+/// Where <see cref="ISecretStore.TryGet"/> found (or failed to find) a value.
+/// <para>
+/// There used to be three sources — the admin page, a mounted secret file, an environment variable. The two
+/// deployment-side ones were removed on purpose: a key that can be injected through compose is a key that ends
+/// up in plain text on a host (or in <c>docker inspect</c>), and this product's promise is that a credential
+/// lives in exactly one place, encrypted. The admin page is now the only way in.
+/// </para>
+/// </summary>
 public enum SecretSource
 {
     None = 0,
 
     /// <summary>Written from the admin page and stored encrypted outside the backup set.</summary>
     Ui = 1,
-
-    /// <summary>A file under the secrets directory (§10.4).</summary>
-    File = 2,
-
-    /// <summary>An environment variable.</summary>
-    Environment = 3,
 }
 
 /// <summary>
-/// Credentials an operator can type into the admin page, encrypted at rest.
+/// Credentials an operator types into the admin page, encrypted at rest. This is the only way a credential
+/// enters the instance.
 /// <para>
-/// This is the deliberate relaxation of §10.4's "secrets come from Docker Secrets": an SMTP password that can
-/// only be provisioned by editing compose and recreating the container is a password most users will not set.
-/// The guarantees that made the file-only rule worth having are kept where they matter — the value is never
-/// returned to a client, never written to a log, and never included in an export or a backup, because the store
-/// lives outside the instance root (the same place, and for the same reason, as the DataProtection key ring).
+/// It began as the deliberate relaxation of §10.4's "secrets come from Docker Secrets" — an SMTP password that
+/// can only be provisioned by editing compose and recreating the container is a password most users will not
+/// set. It is now the only route, and that is strictly stronger: a value injected through compose would sit in
+/// plain text on the host (and in <c>docker inspect</c> output), while this one is never in the configuration,
+/// never in a log, never in an export or a backup, and never returned to a client — the store lives outside the
+/// instance root (the same place, and for the same reason, as the DataProtection key ring).
 /// </para>
 /// </summary>
 public interface IUiSecretStore

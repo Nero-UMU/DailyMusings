@@ -160,7 +160,7 @@ public sealed class TranscriptionProtocolTests
         public string? TryGet(string name) => name == "transcription-key" ? "test-key" : null;
         public bool Exists(string name) => TryGet(name) is not null;
         public IReadOnlyList<string> ListNames() => ["transcription-key"];
-        public SecretSource ResolveSource(string name) => Exists(name) ? SecretSource.Environment : SecretSource.None;
+        public SecretSource ResolveSource(string name) => Exists(name) ? SecretSource.Ui : SecretSource.None;
     }
 
     private sealed class SettingsProvider(TranscriptionSettings settings) : ITranscriptionSettingsProvider

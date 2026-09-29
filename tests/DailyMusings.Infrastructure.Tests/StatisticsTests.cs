@@ -138,7 +138,6 @@ public class StatisticsTests
         var paths = new InstancePaths(new StorageOptions
         {
             RootPath = context.Database.RootPath,
-            SecretsPath = Path.Combine(context.Database.RootPath, "secrets"),
             KeyRingPath = Path.Combine(context.Database.RootPath, "keys"),
         });
 

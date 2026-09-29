@@ -16,30 +16,15 @@ FRESH="$ROOT/inst-b"
 # 所有 compose 调用都用本地构建的镜像；否则根 compose.yaml 会去 ghcr 拉发布版，验的就不是这份源码了。
 export DM_IMAGE="dailymusings/server:local"
 
-echo "--- step 1: a brand-new empty directory with only the compose file and new secrets ---"
+echo "--- step 1: a brand-new empty directory with only the compose file ---"
 rm -rf "${FRESH:?}"
-mkdir -p "$FRESH/secrets"
+mkdir -p "$FRESH"
 cp "$REPO/compose.yaml" "$FRESH/compose.yaml"
 
-# 根 compose.yaml 里没有 secrets 挂载（默认走管理页填密钥），而这一步要验的正是「全新实例 + 新 Secrets」，
-# 所以把那一行插进 volumes 列表。按挂载目标匹配，不依赖文件里有没有注释、缩进有没有变过；
-# 插不进去就直接失败，不要悄悄跑成「Secrets 没挂上」的假通过。
-awk '{ print } /\/var\/lib\/dailymusings-config/ { print "      - ./secrets:/run/secrets:ro" }' \
-    "$FRESH/compose.yaml" > "$FRESH/compose.with-secrets.yaml"
-mv "$FRESH/compose.with-secrets.yaml" "$FRESH/compose.yaml"
-grep -q '^      - \./secrets:/run/secrets:ro' "$FRESH/compose.yaml" || {
-    echo "refusing to continue: could not add the ./secrets mount to the copied compose.yaml" >&2
-    exit 2
-}
-
-# Freshly generated, and deliberately different from instance A's: nothing here may be a leftover.
-for name in openai-api-key embedding-api-key smtp-password; do
-    head -c 24 /dev/urandom | base64 | tr -d '\n=' > "$FRESH/secrets/$name"
-    echo >> "$FRESH/secrets/$name"
-done
-chmod 644 "$FRESH/secrets/"*
+# 这里过去还要「新 Secrets」：把密钥文件挂进 /run/secrets。A.27 起部署侧不能提供密钥——凭据只能从管理页填
+# ——所以这一步不再需要任何密钥文件，恢复验证本身也不调用模型。
 echo "contents of the fresh directory:"
-ls -la "$FRESH" "$FRESH/secrets"
+ls -la "$FRESH"
 
 echo "--- instance A stops first: both instances are the only thing on port 18321 ---"
 docker compose -f "$ROOT/inst-a/compose.verify.yaml" down --remove-orphans >/dev/null 2>&1

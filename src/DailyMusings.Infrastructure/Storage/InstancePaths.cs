@@ -13,9 +13,6 @@ public sealed class StorageOptions
     /// </summary>
     public string RootPath { get; set; } = ".";
 
-    /// <summary>Directory the secret files are mounted into, e.g. <c>/run/secrets</c> (§10.4).</summary>
-    public string SecretsPath { get; set; } = "/run/secrets";
-
     /// <summary>
     /// Where the DataProtection key ring lives.
     /// <para>
@@ -23,6 +20,10 @@ public sealed class StorageOptions
     /// cookies, so it is credential-equivalent material: putting it inside the instance root would mean every
     /// backup carries a way to forge a session, which contradicts §10.4 and decision A.13. It still needs to
     /// outlive a container, because otherwise every redeploy silently logs the operator out.
+    /// </para>
+    /// <para>
+    /// The credentials typed into the admin page live under it too (<see cref="InstancePaths.UiSecretsPath"/>),
+    /// for the same two reasons.
     /// </para>
     /// </summary>
     public string KeyRingPath { get; set; } = "keys";
@@ -56,7 +57,6 @@ public sealed class InstancePaths
         ArgumentNullException.ThrowIfNull(options);
 
         RootPath = Path.GetFullPath(string.IsNullOrWhiteSpace(options.RootPath) ? "." : options.RootPath);
-        SecretsPath = options.SecretsPath;
         KeyRingPath = Path.GetFullPath(string.IsNullOrWhiteSpace(options.KeyRingPath) ? "keys" : options.KeyRingPath);
         RuntimeConfigPath = Path.GetFullPath(
             string.IsNullOrWhiteSpace(options.RuntimeConfigPath) ? "runtime.json" : options.RuntimeConfigPath);
@@ -77,8 +77,6 @@ public sealed class InstancePaths
     }
 
     public string RootPath { get; }
-
-    public string SecretsPath { get; }
 
     public string KeyRingPath { get; }
 

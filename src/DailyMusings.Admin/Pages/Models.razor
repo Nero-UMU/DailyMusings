@@ -257,15 +257,13 @@ else
 
     private string SecretSourceText(string service) => _secretSources.GetValueOrDefault(service) switch
     {
-        SecretSource.Ui => "后台填写",
-        SecretSource.File => "Secret 文件",
-        SecretSource.Environment => "环境变量",
+        SecretSource.Ui => "已保存",
         _ => "未配置",
     };
 
     private string SecretSourceBadge(string service) => _secretSources.GetValueOrDefault(service) switch
     {
-        SecretSource.Ui or SecretSource.File or SecretSource.Environment => "badge-ok",
+        SecretSource.Ui => "badge-ok",
         _ => "badge-warn",
     };
 

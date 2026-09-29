@@ -141,6 +141,37 @@ def main():
     )
     check("sign-in with the new credentials succeeds", sign_in.status in (200, 302), "status=%s" % sign_in.status)
 
+    # Appendix A.27: a credential only ever enters through the admin page, so the harness types it in the same way
+    # an operator does instead of dropping a file into a mounted secrets directory. The values are throwaway ones
+    # from ./secrets/ — the endpoints are stubs and SMTP is Mailpit.
+    for service, variable in (
+        ("transcription", "DM_ACCEPTANCE_TRANSCRIPTION_KEY"),
+        ("generation", "DM_ACCEPTANCE_GENERATION_KEY"),
+        ("embedding", "DM_ACCEPTANCE_EMBEDDING_KEY"),
+    ):
+        value = os.environ.get(variable, "")
+
+        if not value.strip():
+            note("%s: no %s in the environment, leaving that endpoint without a key" % (service, variable))
+            continue
+
+        provisioned = admin.patch_json("/api/system/model-endpoints/%s" % service, {"apiKey": value.strip()})
+        check(
+            "the %s endpoint accepts a key typed on the page (A.27)" % service,
+            provisioned.status == 200,
+            "status=%s body=%s" % (provisioned.status, provisioned.text()[:200]),
+        )
+
+    smtp_password = os.environ.get("DM_ACCEPTANCE_SMTP_PASSWORD", "")
+
+    if smtp_password.strip():
+        saved = admin.patch_json("/api/system/smtp-settings", {"password": smtp_password.strip()})
+        check(
+            "the SMTP password typed on the page is stored (A.27)",
+            saved.status == 200,
+            "status=%s body=%s" % (saved.status, saved.text()[:200]),
+        )
+
     settings = admin.patch_json(
         "/api/content-settings",
         {

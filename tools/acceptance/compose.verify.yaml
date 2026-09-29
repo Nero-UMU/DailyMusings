@@ -16,7 +16,6 @@ services:
       ASPNETCORE_ENVIRONMENT: Production
       ASPNETCORE_URLS: http://127.0.0.1:18321
       Storage__RootPath: /state
-      Storage__SecretsPath: /run/secrets
       Storage__KeyRingPath: /keys
       Scheduler__IntervalSeconds: "5"
       Maintenance__BackupEnabled: "false"
@@ -47,15 +46,4 @@ services:
     volumes:
       - ./state:/state
       - ./keys:/keys
-    secrets:
-      - openai-api-key
-      - embedding-api-key
-      - smtp-password
 
-secrets:
-  openai-api-key:
-    file: ./secrets/openai-api-key
-  embedding-api-key:
-    file: ./secrets/embedding-api-key
-  smtp-password:
-    file: ./secrets/smtp-password

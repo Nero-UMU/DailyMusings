@@ -53,14 +53,11 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddSingleton<ISecretGenerator, CryptoSecretGenerator>();
 
         // Credentials the admin page can write, encrypted with the key ring the host persists outside the
-        // instance root (§10.4, A.14). Registered before the secret store because that store consults it first.
+        // instance root (§10.4, A.14). It is also the application's ISecretStore — there is no file or
+        // environment fallback any more (appendix A.27), so a key cannot arrive through compose.
         services.AddSingleton<EncryptedUiSecretStore>();
         services.AddSingleton<IUiSecretStore>(provider => provider.GetRequiredService<EncryptedUiSecretStore>());
-
-        // Resolution order is the encrypted store, then a mounted secret file, then the environment.
-        services.AddSingleton<ISecretStore>(provider => new FileSecretStore(
-            paths,
-            provider.GetRequiredService<EncryptedUiSecretStore>()));
+        services.AddSingleton<ISecretStore>(provider => provider.GetRequiredService<EncryptedUiSecretStore>());
 
         // The in-memory log buffer is registered three ways on purpose: as the concrete singleton, as the
         // ILoggerProvider the logger factory collects, and as the reader the admin page asks. One instance, so

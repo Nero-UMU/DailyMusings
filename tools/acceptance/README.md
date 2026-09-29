@@ -13,7 +13,7 @@
   ```
   <root>/repo/          仓库源码（docker build 的上下文；不要让它包含实例状态）
   <root>/verify/        本目录（脚本；可放任意位置，`DM_ROOT` 可覆盖 <root>）
-  <root>/inst-a/        验收实例（bind mount 的 state / keys / secrets）
+  <root>/inst-a/        验收实例（bind mount 的 state / keys）
   <root>/inst-b/        §15.2 的全新实例（用仓库根的 `compose.yaml`，数据落在它同级的 `data/` 与 `config/`）
   <root>/work/          证据、日志、报告、待恢复的备份包
   ```
@@ -59,7 +59,7 @@ bash <root>/verify/run-phase5-verification.sh
 - §16 调试模式（未确认风险拒开、上限 4 小时、到期自失效、可关闭）、四项「测试连接」、索引重建；
 - 通知设置：收件地址与「草稿待确认」开关确实生效（后面的邮件检查靠它），以及**部分更新只改它点名的字段**。
 
-`restore_verify.py` 按 §15.2 八步：全新空目录 + 新 Secrets → `docker compose up -d` 自动迁移与管理员初始化 → 上传备份并暂存 → 重启后生效（保留 `pre-restore-*.db`）→ 健康全绿且队列无 `Running` → 草稿可读、三版本位置完整、来源映射 `QuoteHash` 匹配、历史引用仍在 → 录音逐字节一致且可解码、原始转写与修订稿都在 → 整卷扫描不含设备令牌、导出仍完整 → 旧设备令牌 401、重新配对与再次采集成功。
+`restore_verify.py` 按 §15.2 八步：全新空目录（不需要任何密钥文件，A.27）→ `docker compose up -d` 自动迁移与管理员初始化 → 上传备份并暂存 → 重启后生效（保留 `pre-restore-*.db`）→ 健康全绿且队列无 `Running` → 草稿可读、三版本位置完整、来源映射 `QuoteHash` 匹配、历史引用仍在 → 录音逐字节一致且可解码、原始转写与修订稿都在 → 整卷扫描不含设备令牌、导出仍完整 → 旧设备令牌 401、重新配对与再次采集成功。
 
 ## 执行结果
 
@@ -83,12 +83,22 @@ bash <root>/verify/run-phase5-verification.sh
 
 **尚未执行。** 脚本已按 A.17 改写，改动落在：删除 `wp_request` / `wp_reset` / `wp_posts` 与全部 WordPress 判定；不再要求 `DM_WP_APP_PASSWORD`；验收实例的 compose 文件去掉 `Publishing__WordPress__*` 与对应 Secret；S5 整段换成上面写的 Markdown 生命周期，并新增「旧目标类型被拒绝」这条断言。重跑需要一台能跑 Docker 的 Linux 测试主机与一个 Mailpit，因此没有在本机完成；重跑后请把结果补到这一节，并同步更新 [`CHANGELOG.md`](../../CHANGELOG.md) 里的数字。
 
+### 2026-09-29（第二次）：密钥改为从管理页种进去，**仍未重跑**
+
+附录 A.27 删掉了部署侧提供凭据的两条路（挂载文件、`DAILYMUSINGS_SECRET_*`）。验收脚本跟着改：
+
+- `compose.verify.yaml` 不再声明 docker secrets，`run-acceptance.sh` 也不再往实例目录里拷密钥文件；那一组一次性凭据改为通过环境变量交给 `acceptance.py`。
+- `acceptance.py` 在 S0 登录并改密之后，用 `PATCH /api/system/model-endpoints/<service>`（`apiKey`）与 `PATCH /api/system/smtp-settings`（`password`）把凭据种进去——也就是说，**走操作员那条路**，而不是走后门。
+- `run-restore-verify.sh` 不再需要打开任何 secrets 挂载，全新实例目录里只有一份 `compose.yaml`。
+
+同样是**结构上的适配，不是执行证据**：本节写的仍然是「未重跑」。
+
 ### 2026-09-29：脚本已适配「一份 compose + 一个镜像」，但**仍未重跑**
 
 附录 A.26 把对外部署形态换成「仓库根的 `compose.yaml` + 已发布镜像 + 入口脚本纠正属主后降权」。相应地改了 `run-restore-verify.sh`：
 
 - 空目录里放的是**仓库根的** `compose.yaml`（不再是 `deploy/compose.yaml` 那个覆盖文件），并用 `DM_IMAGE=dailymusings/server:local` 指回本地构建的镜像——否则它会去 ghcr 拉发布版，验的就不是这份源码。
-- 那一步还要「新 Secrets」，所以脚本用 `sed` 打开根文件里注释掉的 `./secrets:/run/secrets:ro` 挂载，并且**打不开就直接失败**（否则会静默跑成「Secrets 根本没挂上」的假通过）。
+- 空目录里不再需要任何密钥文件（A.27）。
 - 实例的 state 从「具名卷」变成「compose 同级的 `data/` 目录」（`DM_STATE` 两者都接受）；空目录里会多出 `data/` 与 `config/` 两个目录，那是容器建的。
 
 这些是**结构上的适配，不是执行证据**：本节写的仍然是「未重跑」，跑之前不要引用上面的旧结果。

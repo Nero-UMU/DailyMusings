@@ -27,8 +27,12 @@ namespace DailyMusings.Infrastructure.Storage;
 /// another instance. That is the same trade A.13 and A.14 already made for device tokens and the admin cookie —
 /// credentials are not content, and backups carry content.
 /// </para>
+/// <para>
+/// This is also the <see cref="ISecretStore"/> the application resolves credentials through (appendix A.27):
+/// there is no file or environment fallback any more, so a key cannot be smuggled in through compose.
+/// </para>
 /// </summary>
-public sealed class EncryptedUiSecretStore : IUiSecretStore
+public sealed class EncryptedUiSecretStore : IUiSecretStore, ISecretStore
 {
     /// <summary>
     /// The file format's first byte. A stored value is re-read by a later version of this code, so the layout is
@@ -112,12 +116,27 @@ public sealed class EncryptedUiSecretStore : IUiSecretStore
     public async Task<bool> ExistsAsync(string name, CancellationToken cancellationToken) =>
         await GetAsync(name, cancellationToken).ConfigureAwait(false) is not null;
 
+    // ISecretStore's synchronous members. The port is synchronous on purpose: every model call resolves a secret
+    // name through it, and this is a small file read plus a decrypt with nothing to await.
+
     /// <summary>
-    /// The synchronous form, used by <see cref="FileSecretStore"/>, whose port is synchronous by design because
-    /// every model call resolves a secret name through it. Nothing here blocks on I/O that another thread owns:
-    /// it is a small file read plus a decrypt.
+    /// The value, or <c>null</c> when there is no credential to use — which covers both "never stored here" and
+    /// "the operator cleared it" (that writes an empty record).
     /// </summary>
-    internal bool TryGet(string name, out string? value)
+    public string? TryGet(string name) =>
+        TryReadRaw(name, out var value) && !string.IsNullOrEmpty(value) ? value : null;
+
+    public bool Exists(string name) => TryGet(name) is not null;
+
+    public SecretSource ResolveSource(string name) =>
+        TryGet(name) is null ? SecretSource.None : SecretSource.Ui;
+
+    /// <summary>
+    /// The raw read: <c>true</c> means "this store has something to say about that name", and the value may be
+    /// an empty string — which is what "清除已保存的密码" writes, and which must stay distinguishable from "never
+    /// set here". <see cref="TryGet(string)"/> treats that empty string as "no credential".
+    /// </summary>
+    internal bool TryReadRaw(string name, out string? value)
     {
         if (TryRead(name, out var found))
         {
@@ -262,9 +281,8 @@ public sealed class EncryptedUiSecretStore : IUiSecretStore
     private static byte[] AssociatedData(string name) => Encoding.UTF8.GetBytes(name);
 
     /// <summary>
-    /// Maps a secret name to a file name. The name comes from a settings row, so it is validated the same way
-    /// <see cref="FileSecretStore"/> validates one: a name containing a path separator would otherwise decide
-    /// where this instance writes.
+    /// Maps a secret name to a file name. The name comes from a settings row, so it is validated here: a name
+    /// containing a path separator would otherwise decide where this instance writes.
     /// </summary>
     private string PathFor(string name)
     {

@@ -1,7 +1,9 @@
-# DailyMusings destructive instance reset.
+﻿# DailyMusings destructive instance reset.
 #
 # Deletes all persisted application data and runtime configuration, including legacy named volumes, then starts
-# the existing Compose image as a brand-new instance. Deployment source and deploy/secrets are intentionally kept.
+# the existing Compose image as a brand-new instance. The deployment source is intentionally kept. Credentials are
+# not part of that picture any more (appendix A.27): they live encrypted under the config directory, which this
+# script empties — so after a reset the operator types the keys in again on the admin page.
 param(
     [string]$Server = "nero@100.64.0.3",
     [int]$Port = 18321,

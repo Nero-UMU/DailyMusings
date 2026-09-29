@@ -33,7 +33,6 @@ public class InstanceDataTests
     private static InstancePaths PathsFor(TestDatabase database) => new(new StorageOptions
     {
         RootPath = database.RootPath,
-        SecretsPath = Path.Combine(database.RootPath, "secrets"),
         KeyRingPath = Path.Combine(database.RootPath, "keys"),
     });
 
@@ -135,12 +134,8 @@ public class InstanceDataTests
         var migrator = new SqliteMigrator(database.Accessor, NullLogger<SqliteMigrator>.Instance);
         var audio = new FileAudioStore(paths);
 
-        // A secret on disk, exactly where the secret store looks. Nothing in these packages may contain its value.
-        Directory.CreateDirectory(paths.SecretsPath);
-        await File.WriteAllTextAsync(Path.Combine(paths.SecretsPath, "openai-api-key"), "sk-do-not-export-me-000000000000");
-
-        // And one the operator typed into the admin page, which is the new way a credential can exist. It is
-        // stored encrypted outside the backup set, so this is the assertion §10.4 now needs in two places.
+        // A credential the operator typed into the admin page — the only way one can exist since A.27. It is
+        // stored encrypted outside the backup set, so nothing in these packages may contain its value.
         var uiSecrets = new EncryptedUiSecretStore(paths);
         await uiSecrets.SetAsync("smtp-password", "smtp-do-not-export-me-000000000000", CancellationToken.None);
 
@@ -159,8 +154,8 @@ public class InstanceDataTests
             var text = System.Text.Encoding.UTF8.GetString(bytes);
 
             Assert.IsFalse(
-                text.Contains("sk-do-not-export-me", StringComparison.Ordinal),
-                $"{Path.GetFileName(path)} contains secret material (§10.4).");
+                text.Contains("smtp-do-not-export-me", StringComparison.Ordinal),
+                $"{Path.GetFileName(path)} contains a credential the admin page stored (§10.4).");
         }
 
         var backupWriter = new ZipBackupWriter(paths, new SqliteDatabaseSnapshotter(database.Accessor, NullLogger<SqliteDatabaseSnapshotter>.Instance), Configuration(), NullLogger<ZipBackupWriter>.Instance);
@@ -175,10 +170,6 @@ public class InstanceDataTests
             await stream.CopyToAsync(buffer);
 
             var text = System.Text.Encoding.UTF8.GetString(buffer.ToArray());
-
-            Assert.IsFalse(
-                text.Contains("sk-do-not-export-me", StringComparison.Ordinal),
-                $"{entry.FullName} contains secret material (§10.4).");
 
             Assert.IsFalse(
                 text.Contains("smtp-do-not-export-me", StringComparison.Ordinal),
@@ -548,7 +539,6 @@ public class InstanceDataTests
 
         var configuration = Configuration(
             ("Storage:RootPath", targetPaths.RootPath),
-            ("Storage:SecretsPath", targetPaths.SecretsPath),
             ("Storage:KeyRingPath", targetPaths.KeyRingPath));
 
         var stager = new StagedRestoreService(targetPaths, NullLogger<StagedRestoreService>.Instance);

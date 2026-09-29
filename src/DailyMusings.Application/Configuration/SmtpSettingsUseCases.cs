@@ -238,9 +238,11 @@ public sealed class UpdateSmtpSettingsUseCase
         // page can reach, so it is stored through the encrypted store (outside the instance root, and therefore
         // outside every export and backup) rather than in the settings table.
         //
-        // Clearing writes an explicit empty record rather than deleting the record: a password that also exists as
-        // a Docker secret file has to be switchable off from this page, otherwise the operator reads「清空密码」
-        // in the refusal message and has no way to do it. An empty record outranks the file (see FileSecretStore).
+        // Clearing writes an explicit empty record rather than deleting the record: the page has to be able to say
+        // "the operator cleared this" as opposed to "nothing was ever stored here", and the refusal message that
+        // demands a password must have a way out. Since appendix A.27 there is no file underneath to fall back to,
+        // but the distinction is still what the view reports (SecretSource.None on both counts, an empty record on
+        // the cleared one), and "有密码就必须加密" is decided by whether a value exists.
         if (update.ClearPassword == true)
         {
             await _uiSecrets.SetAsync(SmtpSettingKeys.PasswordSecretName, string.Empty, cancellationToken)

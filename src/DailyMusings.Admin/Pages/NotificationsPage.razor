@@ -284,15 +284,13 @@ else
 
     private string PasswordSourceText() => _smtp?.PasswordSource switch
     {
-        SecretSource.Ui => "后台填写",
-        SecretSource.File => "Secret 文件",
-        SecretSource.Environment => "环境变量",
+        SecretSource.Ui => "已保存",
         _ => "未配置（本机中继可以没有密码）",
     };
 
     private string PasswordSourceBadge() => _smtp?.PasswordSource switch
     {
-        SecretSource.Ui or SecretSource.File or SecretSource.Environment => "badge-ok",
+        SecretSource.Ui => "badge-ok",
         _ => "badge-muted",
     };
 

@@ -122,9 +122,11 @@ DM_PORT=8080 docker compose up -d
 
 **想把数据放到别处**（例如 NAS 共享目录）：`DM_DATA_DIR=/srv/dm/data DM_CONFIG_DIR=/srv/dm/config docker compose up -d`。
 
-**想从文件给 API Key**（而不是在管理页里填）：在 compose 的 `volumes:` 下加一行 `- ./secrets:/run/secrets:ro`，把文件放进 `./secrets/`——文件名固定为 `deepseek-api-key`、`openai-api-key`、`embedding-api-key`、`smtp-password`，内容就是纯文本值，权限 644。解析顺序是「管理页填的 → Secret 文件 → 环境变量」。
-
 **想用命名卷而不是宿主机目录**：把那两行挂载换成 `dm-data:/var/lib/dailymusings` 与 `dm-config:/var/lib/dailymusings-config`，并在文件末尾补上 `volumes:` 和这两个卷名。
+
+> **部署参数里没有、也不会有 API Key。** 模型密钥与 SMTP 密码只能登录管理页填（加密存放在配置目录里）：
+> 一份能被 compose 注入的密钥，就是一份躺在宿主机上、还会出现在 `docker inspect` 里的明文密钥。
+> 见下面的「配置模型与邮件」。
 
 ## 手机端
 
@@ -136,11 +138,9 @@ DM_PORT=8080 docker compose up -d
 
 需要生成文章时，在后台「模型管理」填一个生成模型的 API Key（新实例默认 DeepSeek）；转写与 Embedding 同理；邮件在「通知管理」里填。**保存即生效，不需要重启容器**。
 
-密钥有三种给法，解析顺序是「管理页填的 → Secret 文件 → 环境变量」：
+Base URL、模型名和 API Key 都由你自己指定——项目不捆绑任何模型，也没有厂商白名单；转写还要显式选一个 API 类型（`openai_transcription` / `openai_chat_audio` / `dashscope_async`），因为各家即使地址写着兼容、协议也不同，实现不按地址猜协议。三个能力（转写 / 生成 / Embedding）的配置相互独立。
 
-1. **管理页里填**（推荐）：加密保存在配置目录的 `keys/` 下，不进配置表、不进日志、不进导出、不进备份，页面也读不回明文，只告诉你「有没有、来自哪里」。
-2. **文件**：把 `deepseek-api-key`、`openai-api-key`、`embedding-api-key`、`smtp-password` 放进一个目录并挂到 `/run/secrets`（权限 644），见 [`deploy/secrets.example/`](deploy/secrets.example/README.md)。
-3. **环境变量**：`DAILYMUSINGS_SECRET_<名字>`。
+**密钥只有一种给法：在管理页里填。** 值加密保存在配置目录的 `keys/` 下，不进配置表、不进日志、不进导出、不进备份，页面也读不回明文，只告诉你「已保存 / 未配置」。部署配置（compose、环境变量、挂载文件）**不能**提供密钥——这是有意的：能被部署注入的密钥就是宿主机上的明文。
 
 ## 备份、恢复与升级
 
@@ -173,10 +173,10 @@ dotnet test                                      # 全量测试：579 项
 Generation__Enabled=true \
 Generation__BaseUrl=https://api.deepseek.com \
 Generation__Model=deepseek-flash \
-Generation__SecretName=deepseek-api-key \
-Storage__SecretsPath=/run/secrets \
 dotnet run --project src/DailyMusings.Server
 ```
+
+启动后在管理页「模型管理」里粘贴 API Key（A.27 起密钥只能从页面填，`Generation__SecretName` 只是它存进哪个槽位的名字，默认不用改）。
 
 Android 客户端（需要 `maui-android` 工作负载与 Android SDK；**必须 Release**，Debug 版依赖 Fast Deployment，单独安装会以「No assemblies found」启动失败）：
 
@@ -202,7 +202,7 @@ src/          Domain → Application → Infrastructure → Server / Admin（依
               Client.Core → Client（客户端逻辑与 MAUI 界面分离；客户端只有 Android 目标）
 tests/        Domain / Application / Infrastructure / Client / Api.IntegrationTests
 tools/        deploy/：部署与部署后自检脚本；acceptance/：端到端与恢复验证脚本
-deploy/       Dockerfile、docker-entrypoint.sh、compose.yaml（从源码构建的覆盖文件）、.env.example、secrets.example/
+deploy/       Dockerfile、docker-entrypoint.sh、compose.yaml（从源码构建的覆盖文件）、.env.example
 docs/         开发指导.md（唯一事实源）、快速部署.md、使用手册.md、发布校验值.md
 ```
 

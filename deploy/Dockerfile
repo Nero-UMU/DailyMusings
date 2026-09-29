@@ -66,7 +66,6 @@ ENV ASPNETCORE_URLS=http://+:18321 \
     DOTNET_NOLOGO=true \
     DOTNET_CLI_TELEMETRY_OPTOUT=true \
     Storage__RootPath=/var/lib/dailymusings \
-    Storage__SecretsPath=/run/secrets \
     Storage__KeyRingPath=/var/lib/dailymusings-config/keys \
     Storage__RuntimeConfigPath=/var/lib/dailymusings-config/runtime.json
 

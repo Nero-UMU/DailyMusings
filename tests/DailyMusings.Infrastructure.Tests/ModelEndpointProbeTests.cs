@@ -118,7 +118,7 @@ public sealed class ModelEndpointProbeTests
         public string? TryGet(string name) => name == "saved-key" ? "stored-key" : null;
         public bool Exists(string name) => TryGet(name) is not null;
         public IReadOnlyList<string> ListNames() => ["saved-key"];
-        public SecretSource ResolveSource(string name) => Exists(name) ? SecretSource.Environment : SecretSource.None;
+        public SecretSource ResolveSource(string name) => Exists(name) ? SecretSource.Ui : SecretSource.None;
     }
 
     private sealed class StaticTranscriptionSettings : ITranscriptionSettingsProvider
