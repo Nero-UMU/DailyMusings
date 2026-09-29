@@ -240,12 +240,19 @@ public sealed class DeleteInputUseCase
             throw new DomainException("input.unknown", $"No input with id {id}.");
         }
 
-        if (entry.AudioPath is { } path)
+        var audioPath = entry.AudioPath;
+
+        // The row goes first, and the order matters. The row is the record of truth and the audio is a blob it
+        // points at, so the only drift worth designing against is a live row whose blob is already gone. An
+        // orphan blob left behind by a failed cleanup is inert, invisible and reclaimable; a row pointing at
+        // nothing is neither. The audio store is best-effort by contract (it swallows IO failures), so a
+        // completed delete can never be turned into a failed request by this step.
+        await _inputs.DeleteAsync(id, cancellationToken).ConfigureAwait(false);
+
+        if (audioPath is { } path)
         {
             await _audio.DeleteAsync(path, cancellationToken).ConfigureAwait(false);
         }
-
-        await _inputs.DeleteAsync(id, cancellationToken).ConfigureAwait(false);
 
         // Any queued transcription is deliberately left in place: the handler treats "the entry is gone" as
         // success, which is cheaper and safer than trying to cancel a job that may already be running.

@@ -89,9 +89,11 @@ public class AudioRetentionTests
         var policy = new AudioRetentionPolicy(0);
         var confirmed = TestFactory.Noon;
 
-        var deleted = TestFactory.TranscribedVoice();
-        deleted.Delete(TestFactory.Noon);
-        Assert.IsFalse(AudioCleanupPolicy.IsCleanable(deleted, confirmed, policy, confirmed));
+        // The retention sweep is what reaches the deleted state in production, and it takes the audio with it,
+        // so both cases below land on the same guard. The assertions pin the outcome, not two separate branches.
+        var purged = TestFactory.TranscribedVoice();
+        purged.PurgeContent(TestFactory.Noon);
+        Assert.IsFalse(AudioCleanupPolicy.IsCleanable(purged, confirmed, policy, confirmed));
 
         var silent = TestFactory.TranscribedVoice();
         silent.DeleteAudio(TestFactory.Noon);

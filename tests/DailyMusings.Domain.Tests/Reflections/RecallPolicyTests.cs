@@ -41,7 +41,10 @@ public class RecallPolicyTests
     {
         var articleDay = TestFactory.Day(10);
         var entry = TestFactory.TextEntry(TestFactory.Day(9));
-        entry.Delete(TestFactory.Noon);
+
+        // Reached the way production reaches it: the retention sweep retires the entry. It also strips the text,
+        // so this asserts the outcome for a retired entry rather than isolating one guard.
+        entry.PurgeContent(TestFactory.Noon);
 
         Assert.AreEqual(0, RecallPolicy.SelectRecallable([entry], articleDay).Count);
     }

@@ -5,7 +5,7 @@ namespace DailyMusings.Domain.Tests.Inputs;
 
 /// <summary>
 /// docs/开发指导.md §6.1, §7 and §17.1: transcripts and revisions are kept apart, and deleting the audio
-/// is a different operation from deleting the record.
+/// is a different operation from retiring the entry.
 /// </summary>
 [TestClass]
 public class InputEntryTests
@@ -61,7 +61,7 @@ public class InputEntryTests
         Assert.AreEqual("随手记一句。", entry.TranscriptForGeneration);
     }
 
-    /// <summary>§17.1: deleting audio and deleting the record are different operations.</summary>
+    /// <summary>§17.1: 删除音频与删除整条记录的不同语义 —— 音频消失，记录和转写都还在。</summary>
     [TestMethod]
     public void Deleting_audio_keeps_the_entry_and_its_transcript()
     {
@@ -82,18 +82,6 @@ public class InputEntryTests
     }
 
     [TestMethod]
-    public void Deleting_the_record_detaches_its_audio_and_asks_the_caller_to_purge_it()
-    {
-        var entry = TestFactory.TranscribedVoice();
-
-        var pathToPurge = entry.Delete(TestFactory.Noon);
-
-        Assert.AreEqual("media/2026/03/a.m4a", pathToPurge);
-        Assert.IsTrue(entry.IsDeleted);
-        Assert.IsFalse(entry.HasAudio);
-    }
-
-    [TestMethod]
     public void Deleting_audio_twice_is_harmless_so_a_retried_request_cannot_fail()
     {
         var entry = TestFactory.TranscribedVoice();
@@ -106,7 +94,7 @@ public class InputEntryTests
     public void A_deleted_entry_refuses_further_mutation()
     {
         var entry = TestFactory.TextEntry();
-        entry.Delete(TestFactory.Noon);
+        entry.PurgeContent(TestFactory.Noon);
 
         TestFactory.ThrowsDomain("input.deleted", () => entry.SetAllowFutureRecall(false));
         TestFactory.ThrowsDomain("input.deleted", () => entry.ReviseTranscript("太晚了。"));

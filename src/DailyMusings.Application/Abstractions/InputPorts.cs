@@ -49,8 +49,11 @@ public interface IInputEntryRepository
     /// <summary>
     /// One page of entries, newest first, for the admin content list.
     /// <para>
-    /// <paramref name="includeDeleted"/> is retained for internal diagnostics and exports that need to account for
-    /// retention tombstones. The normal data-management page and the phone both pass <c>false</c>.
+    /// <paramref name="includeDeleted"/> exists so that retention tombstones stay reachable when they are asked
+    /// for (§10.3). A tombstone is a row whose content expired automatically but which a historical article's
+    /// source map still points at (§15.1), so it must remain findable by an operator even though nobody should
+    /// stumble over it. The data-management page and the phone both pass <c>false</c>; a capture the user deleted
+    /// by hand is not in the table at all, so it can never reappear here either way.
     /// </para>
     /// </summary>
     Task<IReadOnlyList<InputEntry>> ListPageAsync(
@@ -59,7 +62,7 @@ public interface IInputEntryRepository
         bool includeDeleted,
         CancellationToken cancellationToken);
 
-    /// <summary>How many entries a page of the same shape would have in total.</summary>
+    /// <summary>How many entries a page of the same shape would have in total. Must use the same filter.</summary>
     Task<int> CountAsync(bool includeDeleted, CancellationToken cancellationToken);
 
     /// <summary>

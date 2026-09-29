@@ -297,8 +297,12 @@ public sealed class InputEntry
     }
 
     /// <summary>
-    /// Purges only the audio blob. The entry, its transcripts and its source-mapping role all survive —
-    /// this is deliberately different from <see cref="Delete"/> (§17.1).
+    /// Purges only the audio blob. The entry, its transcripts and its source-mapping role all survive.
+    /// <para>
+    /// Two other operations also touch the audio but mean something else entirely: the retention sweep clears it
+    /// together with the text (<c>PurgeContent</c>), and a manual delete removes the whole row. This one leaves
+    /// the entry usable, so a retry or a later revision still works (§6.1, §15.1, §17.1).
+    /// </para>
     /// </summary>
     /// <returns>The audio path the caller must delete from storage, or <c>null</c> if there was none.</returns>
     public string? DeleteAudio(DateTimeOffset at)
@@ -315,35 +319,6 @@ public sealed class InputEntry
     }
 
     /// <summary>
-    /// Soft-deletes the whole entry and detaches its audio. The caller is responsible for purging the
-    /// returned blob path, so that record state and blob storage cannot drift apart.
-    /// </summary>
-    /// <returns>The audio path the caller must delete from storage, or <c>null</c> if there was none.</returns>
-    public string? Delete(DateTimeOffset at)
-    {
-        if (IsDeleted)
-        {
-            return null; // idempotent
-        }
-
-        var path = AudioPath;
-        DeletedAtUtc = at;
-        AudioPath = null;
-        AudioDuration = null;
-        AudioDeletedAtUtc = path is null ? AudioDeletedAtUtc : at;
-        return path;
-    }
-
-    /// <summary>Restores a soft-deleted entry (the audio cannot come back).</summary>
-    public void Restore()
-    {
-        if (IsDeleted)
-        {
-            DeletedAtUtc = null;
-        }
-    }
-
-    /// <summary>
     /// Strips everything the content-retention sweep removes and leaves the row in place as a tombstone.
     /// <para>
     /// A soft delete rather than a real one, and that is the whole point of doing it here rather than in SQL:
@@ -351,6 +326,11 @@ public sealed class InputEntry
     /// provenance dangling (and the schema would refuse it). The entry therefore keeps its identity, its content
     /// day and its place in the source map, while the text and the recording are gone for good — which is
     /// exactly what the user asked the retention window to mean.
+    /// </para>
+    /// <para>
+    /// This is the <em>only</em> transition that sets the tombstone. A user-initiated delete does not come through
+    /// here: it removes the input row and its source links outright (§15.1), because the user asked for the entry
+    /// to be gone rather than for its content to expire.
     /// </para>
     /// </summary>
     /// <returns>The audio path the caller must delete from storage, or <c>null</c> if there was none.</returns>

@@ -201,7 +201,7 @@ public class GenerationRulesTests
 
         Assert.IsTrue(GenerationRules.HasBlockingTranscriptionFailures([failed]));
 
-        failed.Delete(TestFactory.Noon);
+        failed.PurgeContent(TestFactory.Noon);
         Assert.IsFalse(
             GenerationRules.HasBlockingTranscriptionFailures([failed]),
             "A deleted entry is not part of the material set at all.");
@@ -220,7 +220,7 @@ public class GenerationRulesTests
         var earlier = TestFactory.TextEntryAt(TestFactory.Utc(2026, 3, 10, 1, 0), day, "先说的");
         var awaiting = TestFactory.VoiceEntry(day);
         var deleted = TestFactory.TextEntryAt(TestFactory.Utc(2026, 3, 10, 2, 0), day, "删掉的");
-        deleted.Delete(TestFactory.Noon);
+        deleted.PurgeContent(TestFactory.Noon);
 
         var material = GenerationRules.SelectDayMaterial([later, awaiting, deleted, earlier]);
 

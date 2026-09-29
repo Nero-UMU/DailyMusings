@@ -125,6 +125,35 @@ public class ContentRetentionTests
         Assert.IsTrue(await audio.ExistsAsync(stored.RelativePath, CancellationToken.None));
     }
 
+    /// <summary>
+    /// A retention tombstone is invisible to the normal listing but reachable when it is asked for explicitly
+    /// (§10.3: <c>GET /api/inputs?includeDeleted=true</c>). §15.1 keeps the row so a historical article's source
+    /// map still resolves, which means "the user cannot see it" and "it is not there" have to be different things.
+    /// </summary>
+    [TestMethod]
+    public async Task A_tombstone_is_hidden_from_the_normal_list_but_reachable_on_request()
+    {
+        await using var context = await ReflectionTestContext.CreateAsync(
+            content: ContentSettings.Default with { ContentRetentionDays = 0 });
+
+        await context.CaptureTextAsync("会过期的内容。");
+        await context.SeedDraftAsync(context.Today, ReflectionStatus.Confirmed);
+
+        await Cleanup(context).ExecuteAsync(CancellationToken.None);
+
+        var visible = await context.Inputs.ListPageAsync(0, 50, includeDeleted: false, CancellationToken.None);
+        var withTombstones = await context.Inputs.ListPageAsync(0, 50, includeDeleted: true, CancellationToken.None);
+
+        Assert.AreEqual(0, visible.Count, "The data-management page and the phone must not see a tombstone.");
+        Assert.AreEqual(1, withTombstones.Count, "Asking for tombstones explicitly has to return them.");
+
+        Assert.AreEqual(0, await context.Inputs.CountAsync(includeDeleted: false, CancellationToken.None));
+        Assert.AreEqual(
+            1,
+            await context.Inputs.CountAsync(includeDeleted: true, CancellationToken.None),
+            "The total must agree with the page, or the admin list renders an empty last page.");
+    }
+
     private static RunContentCleanupUseCase Cleanup(ReflectionTestContext context, FileAudioStore? audio = null)
     {
         var paths = new InstancePaths(new StorageOptions
