@@ -25,7 +25,7 @@ public sealed record ModelEndpointView(
     int TimeoutSeconds,
     int? Dimensions,
     SecretSource PasswordSource,
-    TranscriptionParameters? Transcription = null)
+    string? ApiType = null)
 {
     /// <summary>
     /// Whether a key resolves at all. Reported rather than inferred: "配置好了但发不出去" and "还没填密钥" are
@@ -52,7 +52,7 @@ public sealed record ModelEndpointUpdate(
     int? Dimensions,
     string? Password = null,
     bool? ClearPassword = null,
-    TranscriptionParameters? Transcription = null);
+    string? ApiType = null);
 
 /// <summary>
 /// The one place the model endpoints' stored settings live (docs/开发指导.md §8.1, §10.4).
@@ -78,12 +78,7 @@ public static class ModelSettingKeys
     public static string SecretName(ModelService service) => Prefix(service) + ".secretName";
     public static string TimeoutSeconds(ModelService service) => Prefix(service) + ".timeoutSeconds";
     public static string Dimensions(ModelService service) => Prefix(service) + ".dimensions";
-    public static string TranscriptionProtocol => "model.transcription.protocol";
-    public static string TranscriptionLanguageHints => "model.transcription.languageHints";
-    public static string TranscriptionEnableItn => "model.transcription.enableItn";
-    public static string TranscriptionVocabularyId => "model.transcription.vocabularyId";
-    public static string TranscriptionSpeakerDiarization => "model.transcription.speakerDiarization";
-    public static string TranscriptionKeepDialect => "model.transcription.keepDialect";
+    public static string TranscriptionApiType => "model.transcription.apiType";
 }
 
 /// <summary>
@@ -126,7 +121,7 @@ public sealed class ReadModelEndpointsUseCase
                 (int)transcription.Timeout.TotalSeconds,
                 null,
                 Resolve(transcription.SecretName),
-                transcription.Parameters),
+                transcription.ApiType),
             new ModelEndpointView(
                 "generation",
                 generation.Enabled,
@@ -191,7 +186,7 @@ public sealed class UpdateModelEndpointUseCase
 
         if (update.Model is { } model)
         {
-            await SetAsync(ModelSettingKeys.Model(service), ValidateModel(service, model), cancellationToken).ConfigureAwait(false);
+            await SetAsync(ModelSettingKeys.Model(service), ValidateModel(model), cancellationToken).ConfigureAwait(false);
         }
 
         if (update.SecretName is { } secretName)
@@ -245,22 +240,19 @@ public sealed class UpdateModelEndpointUseCase
                 cancellationToken).ConfigureAwait(false);
         }
 
-        if (update.Transcription is { } transcription)
+        if (update.ApiType is { } apiType)
         {
             if (service != ModelService.Transcription)
             {
                 throw new UseCaseException(
-                    "model.transcription.parameters_not_applicable",
-                    "只有语音转写模型可以设置转写协议和识别参数。");
+                    "model.transcription.api_type_not_applicable",
+                    "只有语音转写模型可以设置 API 类型。");
             }
 
-            var validated = ValidateTranscriptionParameters(transcription);
-            await SetAsync(ModelSettingKeys.TranscriptionProtocol, validated.Protocol, cancellationToken).ConfigureAwait(false);
-            await SetAsync(ModelSettingKeys.TranscriptionLanguageHints, validated.LanguageHints ?? string.Empty, cancellationToken).ConfigureAwait(false);
-            await SetAsync(ModelSettingKeys.TranscriptionEnableItn, validated.EnableItn ? "true" : "false", cancellationToken).ConfigureAwait(false);
-            await SetAsync(ModelSettingKeys.TranscriptionVocabularyId, validated.VocabularyId ?? string.Empty, cancellationToken).ConfigureAwait(false);
-            await SetAsync(ModelSettingKeys.TranscriptionSpeakerDiarization, validated.SpeakerDiarization ? "true" : "false", cancellationToken).ConfigureAwait(false);
-            await SetAsync(ModelSettingKeys.TranscriptionKeepDialect, validated.KeepDialect ? "true" : "false", cancellationToken).ConfigureAwait(false);
+            await SetAsync(
+                ModelSettingKeys.TranscriptionApiType,
+                ValidateApiType(apiType),
+                cancellationToken).ConfigureAwait(false);
         }
 
         if (update.Enabled is { } enabled)
@@ -316,21 +308,13 @@ public sealed class UpdateModelEndpointUseCase
         return trimmed.TrimEnd('/');
     }
 
-    private static string ValidateModel(ModelService service, string value)
+    private static string ValidateModel(string value)
     {
         var trimmed = value.Trim();
 
         if (trimmed.Length is 0 or > 200)
         {
             throw new UseCaseException("model.name.invalid", "模型名不能为空，也不能超过 200 个字符。");
-        }
-
-        if (service == ModelService.Transcription &&
-            TranscriptionProtocolNames.RequiresUnsupportedTransport(trimmed))
-        {
-            throw new UseCaseException(
-                "model.transcription.protocol_unsupported",
-                "这个模型需要实时 WebSocket 或公网文件异步任务，当前不能直接处理手机上传的私有录音。请选择非实时且支持 Base64/文件上传的模型。");
         }
 
         return trimmed;
@@ -365,49 +349,16 @@ public sealed class UpdateModelEndpointUseCase
             ? throw new UseCaseException("model.dimensions.out_of_range", "Embedding 维度需要介于 1 与 4096 之间。")
             : dimensions;
 
-    private static TranscriptionParameters ValidateTranscriptionParameters(TranscriptionParameters value)
+    private static string ValidateApiType(string value)
     {
-        var protocol = string.IsNullOrWhiteSpace(value.Protocol)
-            ? TranscriptionProtocolNames.Auto
-            : value.Protocol.Trim().ToLowerInvariant();
-        if (!TranscriptionProtocolNames.IsSupported(protocol))
+        var apiType = value.Trim().ToLowerInvariant();
+        if (!TranscriptionApiTypes.IsSupported(apiType))
         {
-            throw new UseCaseException("model.transcription.protocol_invalid", "请选择页面提供的转写调用协议。");
+            throw new UseCaseException(
+                "model.transcription.api_type_invalid",
+                "API 类型必须是 openai_transcription、openai_chat_audio 或 dashscope_async。");
         }
 
-        var languageHints = NormalizeCsv(value.LanguageHints, 4, 12, "model.transcription.language_hints_invalid");
-        var vocabularyId = string.IsNullOrWhiteSpace(value.VocabularyId) ? null : value.VocabularyId.Trim();
-        if (vocabularyId?.Length > 200)
-        {
-            throw new UseCaseException("model.transcription.vocabulary_id_invalid", "热词表 ID 不能超过 200 个字符。");
-        }
-
-        return value with
-        {
-            Protocol = protocol,
-            LanguageHints = languageHints,
-            VocabularyId = vocabularyId,
-        };
-    }
-
-    private static string? NormalizeCsv(string? value, int maximumItems, int maximumItemLength, string errorCode)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return null;
-        }
-
-        var items = value
-            .Split([',', '，', ';', '；', ' '], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Select(item => item.ToLowerInvariant())
-            .Distinct(StringComparer.Ordinal)
-            .ToArray();
-
-        if (items.Length > maximumItems || items.Any(item => item.Length > maximumItemLength || item.Any(character => !char.IsLetter(character) && character != '-')))
-        {
-            throw new UseCaseException(errorCode, $"语言代码最多填写 {maximumItems} 个，请使用 zh、en 这类代码并用逗号分隔。");
-        }
-
-        return string.Join(',', items);
+        return apiType;
     }
 }

@@ -20,8 +20,8 @@
         API Key 留空表示继续使用已经保存的值。保存后不会回显明文，也不会写入日志、导出或备份。
     </p>
     <p>
-        「测试连接」会按所选协议真正调用当前模型。语音转写可选择自动识别、Whisper 文件上传、
-        百炼 Qwen3-ASR 或百炼 DashScope 多模态；实时和 Filetrans 模型仍需要不同的流式或公网文件方案。
+        语音转写只需填写 Base URL、API Key、API 类型和模型名。系统严格按 API 类型调用，
+        不会根据地址、厂商或模型名称猜测协议。
     </p>
 </div>
 
@@ -44,10 +44,6 @@ else
     @foreach (var service in Services)
     {
         var endpoint = _endpoints.FirstOrDefault(item => item.Service == service);
-        var effectiveTranscriptionProtocol = service == "transcription"
-            ? TranscriptionProtocolNames.Resolve(_transcriptionProtocol, _models.GetValueOrDefault(service) ?? string.Empty)
-            : string.Empty;
-
         <div class="card">
             <div class="card-head">
                 <h2>@Describe(service)</h2>
@@ -70,63 +66,40 @@ else
             else
             {
                 <div class="form-grid">
-                    <label class="checkbox">
-                        <input type="checkbox" checked="@_enabled.GetValueOrDefault(service)"
-                               @onchange="e => SetEnabled(service, e.Value is true)" />
-                        启用
-                    </label>
+                    @if (service != "transcription")
+                    {
+                        <label class="checkbox">
+                            <input type="checkbox" checked="@_enabled.GetValueOrDefault(service)"
+                                   @onchange="e => SetEnabled(service, e.Value is true)" />
+                            启用
+                        </label>
+                    }
                     <label>
                         Base URL
                         <input value="@_baseUrls.GetValueOrDefault(service)" @oninput="e => SetBaseUrl(service, (string?)e.Value)" />
                     </label>
-                    <label>
-                        模型名
-                        <input value="@_models.GetValueOrDefault(service)" @oninput="e => SetModel(service, (string?)e.Value)" />
-                    </label>
                     @if (service == "transcription")
                     {
                         <label>
-                            调用协议
-                            <select value="@_transcriptionProtocol" @onchange="e => SetTranscriptionProtocol((string?)e.Value)">
-                                <option value="@TranscriptionProtocolNames.Auto">自动识别（推荐）</option>
-                                <option value="@TranscriptionProtocolNames.OpenAiAudioTranscriptions">Whisper / OpenAI 文件上传</option>
-                                <option value="@TranscriptionProtocolNames.QwenAsrChat">百炼 Qwen3-ASR</option>
-                                <option value="@TranscriptionProtocolNames.DashScopeMultimodal">百炼 DashScope 多模态 ASR</option>
+                            API 类型
+                            <select value="@_transcriptionApiType" @onchange="e => SetTranscriptionApiType((string?)e.Value)">
+                                <option value="@TranscriptionApiTypes.OpenAiTranscription">openai_transcription</option>
+                                <option value="@TranscriptionApiTypes.OpenAiChatAudio">openai_chat_audio</option>
+                                <option value="@TranscriptionApiTypes.DashScopeAsync">dashscope_async</option>
                             </select>
-                            <small>自动模式会根据模型名选择协议；手动选择可接入名称不同但协议兼容的模型。</small>
+                            <small>必须明确选择协议；系统不会自动判断。</small>
                         </label>
                         <label>
-                            语言代码（可选）
-                            <input placeholder="例如 zh，DashScope 可填 zh,en" value="@_transcriptionLanguageHints"
-                                   @oninput="e => SetTranscriptionLanguageHints((string?)e.Value)" />
-                            <small>留空时由模型自动识别；多个代码使用逗号分隔，最多四个。</small>
+                            模型名
+                            <input value="@_models.GetValueOrDefault(service)" @oninput="e => SetModel(service, (string?)e.Value)" />
                         </label>
-                        @if (effectiveTranscriptionProtocol == TranscriptionProtocolNames.QwenAsrChat)
-                        {
-                            <label class="checkbox">
-                                <input type="checkbox" checked="@_transcriptionEnableItn"
-                                       @onchange="e => SetTranscriptionEnableItn(e.Value is true)" />
-                                启用数字、日期和标点规范化（ITN）
-                            </label>
-                        }
-                        @if (effectiveTranscriptionProtocol == TranscriptionProtocolNames.DashScopeMultimodal)
-                        {
-                            <label>
-                                百炼热词表 ID（可选）
-                                <input placeholder="vocabulary_id" value="@_transcriptionVocabularyId"
-                                       @oninput="e => SetTranscriptionVocabularyId((string?)e.Value)" />
-                            </label>
-                            <label class="checkbox">
-                                <input type="checkbox" checked="@_transcriptionSpeakerDiarization"
-                                       @onchange="e => SetTranscriptionSpeakerDiarization(e.Value is true)" />
-                                区分说话人（仅支持的模型生效）
-                            </label>
-                            <label class="checkbox">
-                                <input type="checkbox" checked="@_transcriptionKeepDialect"
-                                       @onchange="e => SetTranscriptionKeepDialect(e.Value is true)" />
-                                保留方言表达（仅支持的模型生效）
-                            </label>
-                        }
+                    }
+                    else
+                    {
+                        <label>
+                            模型名
+                            <input value="@_models.GetValueOrDefault(service)" @oninput="e => SetModel(service, (string?)e.Value)" />
+                        </label>
                     }
                     <label>
                         API Key（留空表示不改）
@@ -134,7 +107,7 @@ else
                                value="@_passwords.GetValueOrDefault(service)"
                                @oninput="e => SetPassword(service, (string?)e.Value)" />
                     </label>
-                    @if (_secretSources.GetValueOrDefault(service) == SecretSource.Ui)
+                    @if (service != "transcription" && _secretSources.GetValueOrDefault(service) == SecretSource.Ui)
                     {
                         <label class="checkbox">
                             <input type="checkbox" checked="@_clearPassword.GetValueOrDefault(service)"
@@ -142,10 +115,13 @@ else
                             清除在管理页保存的 API Key
                         </label>
                     }
-                    <label>
-                        超时（秒，5–600）
-                        <input type="number" value="@_timeouts.GetValueOrDefault(service)" @onchange="e => SetTimeout(service, (string?)e.Value)" />
-                    </label>
+                    @if (service != "transcription")
+                    {
+                        <label>
+                            超时（秒，5–600）
+                            <input type="number" value="@_timeouts.GetValueOrDefault(service)" @onchange="e => SetTimeout(service, (string?)e.Value)" />
+                        </label>
+                    }
                     @if (service == "embedding")
                     {
                         <label>
@@ -177,7 +153,9 @@ else
                     }
                     else if (service == "transcription")
                     {
-                        <text>关闭后录音仍会保存，但不会生成识别文字。模型测试成功后再用手机上传录音。</text>
+                        <text>
+                            dashscope_async 需要公网可访问的音频 URL；当前手机录音仅存于实例内部，因此会明确报告“不具备公网音频 URL”，不会提交本地路径。
+                        </text>
                     }
                     else
                     {
@@ -212,12 +190,7 @@ else
     private readonly Dictionary<string, string?> _secretNames = [];
     private readonly Dictionary<string, string?> _timeouts = [];
     private string? _dimensions;
-    private string _transcriptionProtocol = TranscriptionProtocolNames.Auto;
-    private string? _transcriptionLanguageHints;
-    private bool _transcriptionEnableItn;
-    private string? _transcriptionVocabularyId;
-    private bool _transcriptionSpeakerDiarization;
-    private bool _transcriptionKeepDialect;
+    private string _transcriptionApiType = TranscriptionApiTypes.OpenAiTranscription;
 
     // 密码只进不出：输入框永远从空开始，提交后立刻清空，页面上不保留也不回显任何已存的值。
     private readonly Dictionary<string, string?> _passwords = [];
@@ -267,14 +240,8 @@ else
             .Dimensions?
             .ToString(CultureInfo.InvariantCulture);
 
-        var transcription = endpoints.FirstOrDefault(endpoint => endpoint.Service == "transcription")?.Transcription
-            ?? TranscriptionParameters.Default;
-        _transcriptionProtocol = transcription.Protocol;
-        _transcriptionLanguageHints = transcription.LanguageHints;
-        _transcriptionEnableItn = transcription.EnableItn;
-        _transcriptionVocabularyId = transcription.VocabularyId;
-        _transcriptionSpeakerDiarization = transcription.SpeakerDiarization;
-        _transcriptionKeepDialect = transcription.KeepDialect;
+        _transcriptionApiType = endpoints.FirstOrDefault(endpoint => endpoint.Service == "transcription")?.ApiType
+            ?? TranscriptionApiTypes.OpenAiTranscription;
     }
 
     private static string Describe(string service) => service switch
@@ -316,18 +283,10 @@ else
 
     private void SetDimensions(string? value) => _dimensions = value;
 
-    private void SetTranscriptionProtocol(string? value) =>
-        _transcriptionProtocol = string.IsNullOrWhiteSpace(value) ? TranscriptionProtocolNames.Auto : value;
-
-    private void SetTranscriptionLanguageHints(string? value) => _transcriptionLanguageHints = value;
-
-    private void SetTranscriptionEnableItn(bool value) => _transcriptionEnableItn = value;
-
-    private void SetTranscriptionVocabularyId(string? value) => _transcriptionVocabularyId = value;
-
-    private void SetTranscriptionSpeakerDiarization(bool value) => _transcriptionSpeakerDiarization = value;
-
-    private void SetTranscriptionKeepDialect(bool value) => _transcriptionKeepDialect = value;
+    private void SetTranscriptionApiType(string? value) =>
+        _transcriptionApiType = string.IsNullOrWhiteSpace(value)
+            ? TranscriptionApiTypes.OpenAiTranscription
+            : value;
 
     private async Task SaveEndpointAsync(string service) => await RunAsync(async services =>
     {
@@ -354,17 +313,17 @@ else
             .ExecuteAsync(
                 ParseModelService(service),
                 new ModelEndpointUpdate(
-                    _enabled.GetValueOrDefault(service),
+                    service == "transcription" ? true : _enabled.GetValueOrDefault(service),
                     _baseUrls.GetValueOrDefault(service),
                     _models.GetValueOrDefault(service),
                     // The storage name is an implementation detail. It is sent only when the write-only key is
                     // changing, so an ordinary settings save does not freeze a deployment-provided name in the DB.
                     password is not null || clearPassword ? _secretNames.GetValueOrDefault(service) : null,
-                    timeout,
+                    service == "transcription" ? null : timeout,
                     dimensions,
                     Password: password,
                     ClearPassword: clearPassword ? true : null,
-                    Transcription: service == "transcription" ? CurrentTranscriptionParameters() : null),
+                    ApiType: service == "transcription" ? _transcriptionApiType : null),
                 CancellationToken.None);
 
         await LoadAsync();
@@ -384,7 +343,7 @@ else
                     _models.GetValueOrDefault(service) ?? string.Empty,
                     _secretNames.GetValueOrDefault(service) ?? string.Empty,
                     _passwords.GetValueOrDefault(service),
-                    service == "transcription" ? CurrentTranscriptionParameters() : null),
+                    service == "transcription" ? _transcriptionApiType : null),
                 CancellationToken.None);
 
         _probes[service] = result;
@@ -404,20 +363,12 @@ else
                     _models.GetValueOrDefault(service) ?? string.Empty,
                     _secretNames.GetValueOrDefault(service) ?? string.Empty,
                     _passwords.GetValueOrDefault(service),
-                    service == "transcription" ? CurrentTranscriptionParameters() : null),
+                    service == "transcription" ? _transcriptionApiType : null),
                 CancellationToken.None);
         }
 
         _message = "全部测试完成，结果分别显示在对应卡片下方。";
     });
-
-    private TranscriptionParameters CurrentTranscriptionParameters() => new(
-        _transcriptionProtocol,
-        _transcriptionLanguageHints,
-        _transcriptionEnableItn,
-        _transcriptionVocabularyId,
-        _transcriptionSpeakerDiarization,
-        _transcriptionKeepDialect);
 
     /// <summary>The three endpoints §8.1 lists, for the settings write path.</summary>
     private static ModelService ParseModelService(string service) => service switch

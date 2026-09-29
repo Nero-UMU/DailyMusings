@@ -98,27 +98,27 @@ public class ModelSettingsPrecedenceTests
     }
 
     [TestMethod]
-    public async Task Transcription_provider_reads_saved_protocol_and_model_parameters()
+    public async Task Transcription_provider_reads_the_explicit_saved_api_type()
     {
         await using var database = await TestDatabase.CreateAsync();
         var store = Store(database);
-        var parameters = new TranscriptionParameters(
-            TranscriptionProtocolNames.DashScopeMultimodal,
-            "zh,en",
-            EnableItn: true,
-            VocabularyId: "vocabulary-42",
-            SpeakerDiarization: true,
-            KeepDialect: true);
 
         await new UpdateModelEndpointUseCase(store, new TestUiSecretStore()).ExecuteAsync(
             ModelService.Transcription,
-            new ModelEndpointUpdate(null, null, null, null, null, null, Transcription: parameters),
+            new ModelEndpointUpdate(
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                ApiType: TranscriptionApiTypes.DashScopeAsync),
             CancellationToken.None);
 
         var settings = await new ConfigurationTranscriptionSettingsProvider(Configuration(), store)
             .GetAsync(CancellationToken.None);
 
-        Assert.AreEqual(parameters, settings.Parameters);
+        Assert.AreEqual(TranscriptionApiTypes.DashScopeAsync, settings.ApiType);
     }
 
     [TestMethod]

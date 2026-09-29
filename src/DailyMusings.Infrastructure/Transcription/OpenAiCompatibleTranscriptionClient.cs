@@ -10,15 +10,7 @@ using Microsoft.Extensions.Logging;
 
 namespace DailyMusings.Infrastructure.Transcription;
 
-/// <summary>
-/// Reads the transcription endpoint's configuration (docs/开发指导.md §8.1). Disabled unless an operator turns it on,
-/// so a fresh instance never sends audio anywhere by accident.
-/// <para>
-/// The settings table comes first — the admin page writes there — and the deployment configuration is the fallback,
-/// so an instance can be configured either way. The read happens per call so a saved change takes effect on the next
-/// transcription instead of the next restart.
-/// </para>
-/// </summary>
+/// <summary>Reads the four speech-model settings used by the transcription module.</summary>
 public sealed class ConfigurationTranscriptionSettingsProvider : ITranscriptionSettingsProvider
 {
     public const string SectionName = "Transcription";
@@ -35,10 +27,8 @@ public sealed class ConfigurationTranscriptionSettingsProvider : ITranscriptionS
     public async Task<TranscriptionSettings> GetAsync(CancellationToken cancellationToken)
     {
         var stored = await _settings.GetAllAsync(cancellationToken).ConfigureAwait(false);
-
         var section = _configuration.GetSection(SectionName);
         var defaults = TranscriptionSettings.Default;
-        var defaultParameters = defaults.Parameters;
         var service = DailyMusings.Application.Configuration.ModelService.Transcription;
 
         return new TranscriptionSettings(
@@ -62,41 +52,16 @@ public sealed class ConfigurationTranscriptionSettingsProvider : ITranscriptionS
                 stored,
                 DailyMusings.Application.Configuration.ModelSettingKeys.TimeoutSeconds(service),
                 section.GetValue("TimeoutSeconds", (int)defaults.Timeout.TotalSeconds))),
-            Parameters: new TranscriptionParameters(
-                Protocol: StoredSettings.String(
-                    stored,
-                    DailyMusings.Application.Configuration.ModelSettingKeys.TranscriptionProtocol,
-                    section.GetValue("Protocol", defaultParameters.Protocol)) ?? defaultParameters.Protocol,
-                LanguageHints: StoredSettings.Username(
-                    stored,
-                    DailyMusings.Application.Configuration.ModelSettingKeys.TranscriptionLanguageHints,
-                    section.GetValue<string?>("LanguageHints") ?? section.GetValue<string?>("LanguageHint")),
-                EnableItn: StoredSettings.Boolean(
-                    stored,
-                    DailyMusings.Application.Configuration.ModelSettingKeys.TranscriptionEnableItn,
-                    section.GetValue("EnableItn", defaultParameters.EnableItn)),
-                VocabularyId: StoredSettings.Username(
-                    stored,
-                    DailyMusings.Application.Configuration.ModelSettingKeys.TranscriptionVocabularyId,
-                    section.GetValue<string?>("VocabularyId")),
-                SpeakerDiarization: StoredSettings.Boolean(
-                    stored,
-                    DailyMusings.Application.Configuration.ModelSettingKeys.TranscriptionSpeakerDiarization,
-                    section.GetValue("SpeakerDiarization", defaultParameters.SpeakerDiarization)),
-                KeepDialect: StoredSettings.Boolean(
-                    stored,
-                    DailyMusings.Application.Configuration.ModelSettingKeys.TranscriptionKeepDialect,
-                    section.GetValue("KeepDialect", defaultParameters.KeepDialect))));
+            ApiType: StoredSettings.String(
+                stored,
+                DailyMusings.Application.Configuration.ModelSettingKeys.TranscriptionApiType,
+                section.GetValue("ApiType", defaults.ApiType)) ?? defaults.ApiType);
     }
 }
 
 /// <summary>
-/// Speech-to-text through the configured protocol adapter (docs/开发指导.md §8.1, §8.2).
-/// <para>
-/// Two rules govern this class. It never logs the audio or the resulting text — §16 keeps content out of the
-/// default log, and a transcript is the most private thing the product holds. And it classifies every failure as
-/// transient or permanent, because that classification is what decides whether §14 retries or gives up.
-/// </para>
+/// Deep transcription module. Callers submit one recording and receive text; explicit <c>api_type</c> dispatch,
+/// provider request shapes, asynchronous task polling and response parsing remain inside this implementation.
 /// </summary>
 public sealed class OpenAiCompatibleTranscriptionClient : ITranscriptionClient
 {
@@ -124,12 +89,19 @@ public sealed class OpenAiCompatibleTranscriptionClient : ITranscriptionClient
         ArgumentNullException.ThrowIfNull(request);
 
         var settings = await _settings.GetAsync(cancellationToken).ConfigureAwait(false);
-
         if (!settings.Enabled)
         {
             throw new PermanentExternalFailureException(
                 "transcription.disabled",
                 "No transcription endpoint is configured.");
+        }
+
+        var apiType = settings.ApiType.Trim().ToLowerInvariant();
+        if (!TranscriptionApiTypes.IsSupported(apiType))
+        {
+            throw new PermanentExternalFailureException(
+                "transcription.api_type_invalid",
+                "The transcription api_type is not supported.");
         }
 
         var apiKey = _secrets.TryGet(settings.SecretName);
@@ -140,31 +112,44 @@ public sealed class OpenAiCompatibleTranscriptionClient : ITranscriptionClient
                 $"The secret '{settings.SecretName}' is not provisioned.");
         }
 
-        if (TranscriptionProtocolNames.RequiresUnsupportedTransport(settings.Model))
-        {
-            throw new PermanentExternalFailureException(
-                "transcription.protocol_unsupported",
-                "This transcription model requires a realtime stream or a publicly reachable file URL.");
-        }
-
-        var protocol = TranscriptionProtocolNames.Resolve(settings.Parameters.Protocol, settings.Model);
-
-        using var httpRequest = await TranscriptionHttpAdapter.BuildRequestAsync(request, settings, apiKey, cancellationToken)
-            .ConfigureAwait(false);
-
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(settings.Timeout);
 
-        HttpResponseMessage response;
         try
         {
-            response = await _httpClient
-                .SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, timeout.Token)
-                .ConfigureAwait(false);
+            TranscriptionHttpAdapter.TranscriptionPayload? payload;
+            if (apiType == TranscriptionApiTypes.DashScopeAsync)
+            {
+                payload = await TranscriptionHttpAdapter
+                    .TranscribeDashScopeAsync(_httpClient, request, settings, apiKey, timeout.Token)
+                    .ConfigureAwait(false);
+            }
+            else
+            {
+                using var httpRequest = await TranscriptionHttpAdapter
+                    .BuildRequestAsync(request, settings, apiKey, timeout.Token)
+                    .ConfigureAwait(false);
+                using var response = await _httpClient
+                    .SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, timeout.Token)
+                    .ConfigureAwait(false);
+
+                EnsureSuccessfulResponse(response);
+                payload = await TranscriptionHttpAdapter
+                    .ReadPayloadAsync(response, apiType, timeout.Token)
+                    .ConfigureAwait(false);
+            }
+
+            if (string.IsNullOrWhiteSpace(payload?.Text))
+            {
+                throw new PermanentExternalFailureException(
+                    "transcription.empty_result",
+                    "The transcription endpoint returned no text.");
+            }
+
+            return new TranscriptionResult(payload.Text, payload.Language, settings.Model);
         }
         catch (TaskCanceledException exception) when (!cancellationToken.IsCancellationRequested)
         {
-            // Distinguish "our deadline elapsed" from "the caller gave up": only the former is retryable.
             throw new TransientExternalFailureException(
                 "transcription.timeout",
                 "The transcription endpoint did not answer in time.",
@@ -177,64 +162,48 @@ public sealed class OpenAiCompatibleTranscriptionClient : ITranscriptionClient
                 "The transcription endpoint could not be reached.",
                 exception);
         }
-
-        using (response)
-        {
-            // Only the status code is logged; never the audio, the payload or the transcript.
-            if (!response.IsSuccessStatusCode)
-            {
-                _logger.LogWarning(
-                    "Transcription endpoint answered {StatusCode}.",
-                    (int)response.StatusCode);
-            }
-
-            if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
-            {
-                throw new PermanentExternalFailureException(
-                    "transcription.credentials_rejected",
-                    "The transcription endpoint rejected the configured credentials.");
-            }
-
-            if (response.StatusCode == HttpStatusCode.TooManyRequests || (int)response.StatusCode >= 500)
-            {
-                throw new TransientExternalFailureException(
-                    "transcription.upstream_unavailable",
-                    "The transcription endpoint is temporarily unavailable.");
-            }
-
-            if (!response.IsSuccessStatusCode)
-            {
-                throw new PermanentExternalFailureException(
-                    "transcription.request_rejected",
-                    "The transcription endpoint rejected the request.");
-            }
-
-            var payload = await TranscriptionHttpAdapter
-                .ReadPayloadAsync(response, protocol, cancellationToken)
-                .ConfigureAwait(false);
-
-            if (string.IsNullOrWhiteSpace(payload?.Text))
-            {
-                throw new PermanentExternalFailureException(
-                    "transcription.empty_result",
-                    "The transcription endpoint returned no text.");
-            }
-
-            return new TranscriptionResult(payload.Text, payload.Language, settings.Model);
-        }
     }
 
+    private void EnsureSuccessfulResponse(HttpResponseMessage response)
+    {
+        if (!response.IsSuccessStatusCode)
+        {
+            _logger.LogWarning("Transcription endpoint answered {StatusCode}.", (int)response.StatusCode);
+        }
+
+        if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
+        {
+            throw new PermanentExternalFailureException(
+                "transcription.credentials_rejected",
+                "The transcription endpoint rejected the configured credentials.");
+        }
+
+        if (response.StatusCode == HttpStatusCode.TooManyRequests || (int)response.StatusCode >= 500)
+        {
+            throw new TransientExternalFailureException(
+                "transcription.upstream_unavailable",
+                "The transcription endpoint is temporarily unavailable.");
+        }
+
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new PermanentExternalFailureException(
+                "transcription.request_rejected",
+                "The transcription endpoint rejected the request.");
+        }
+    }
 }
 
 /// <summary>
-/// The deep protocol module behind both production transcription and the admin connection probe. Callers provide
-/// one ordinary recording and settings; endpoint selection, provider payloads and response shapes stay local here.
+/// Internal protocol adapter shared by real transcription and connection testing. It dispatches only on the
+/// configured <c>api_type</c>; neither URL contents nor model names influence protocol selection.
 /// </summary>
 internal static class TranscriptionHttpAdapter
 {
-    private const string WhisperRelativePath = "audio/transcriptions";
-    private const string ChatCompletionsRelativePath = "chat/completions";
-    private const string DashScopeRelativePath = "api/v1/services/aigc/multimodal-generation/generation";
+    private const string TranscriptionRelativePath = "audio/transcriptions";
+    private const string ChatRelativePath = "chat/completions";
+    private const string DashScopeSubmitRelativePath = "services/audio/asr/transcription";
+    private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(1);
 
     public static async Task<HttpRequestMessage> BuildRequestAsync(
         TranscriptionRequest request,
@@ -242,43 +211,45 @@ internal static class TranscriptionHttpAdapter
         string apiKey,
         CancellationToken cancellationToken)
     {
-        var protocol = TranscriptionProtocolNames.Resolve(settings.Parameters.Protocol, settings.Model);
-        if (protocol == TranscriptionProtocolNames.QwenAsrChat)
+        return settings.ApiType.Trim().ToLowerInvariant() switch
         {
-            return await BuildQwenAsrRequestAsync(request, settings, apiKey, cancellationToken)
-                .ConfigureAwait(false);
-        }
+            TranscriptionApiTypes.OpenAiTranscription =>
+                await BuildOpenAiTranscriptionRequestAsync(request, settings, apiKey, cancellationToken)
+                    .ConfigureAwait(false),
+            TranscriptionApiTypes.OpenAiChatAudio =>
+                await BuildOpenAiChatAudioRequestAsync(request, settings, apiKey, cancellationToken)
+                    .ConfigureAwait(false),
+            TranscriptionApiTypes.DashScopeAsync => throw PublicAudioUrlRequired(),
+            _ => throw new PermanentExternalFailureException(
+                "transcription.api_type_invalid",
+                "The transcription api_type is not supported."),
+        };
+    }
 
-        if (protocol == TranscriptionProtocolNames.DashScopeMultimodal)
-        {
-            return await BuildDashScopeRequestAsync(request, settings, apiKey, cancellationToken)
-                .ConfigureAwait(false);
-        }
-
+    private static async Task<HttpRequestMessage> BuildOpenAiTranscriptionRequestAsync(
+        TranscriptionRequest request,
+        TranscriptionSettings settings,
+        string apiKey,
+        CancellationToken cancellationToken)
+    {
         var content = new MultipartFormDataContent();
         var audio = await request.OpenAudio(cancellationToken).ConfigureAwait(false);
-
         var fileContent = new StreamContent(audio);
         fileContent.Headers.ContentType = new MediaTypeHeaderValue(request.ContentType);
         content.Add(fileContent, "file", request.FileName);
         content.Add(new StringContent(settings.Model), "model");
 
-        var language = request.LanguageHint ?? Languages(settings.Parameters.LanguageHints).FirstOrDefault();
-        if (!string.IsNullOrWhiteSpace(language))
-        {
-            content.Add(new StringContent(language), "language");
-        }
-
-        var message = new HttpRequestMessage(HttpMethod.Post, BuildEndpoint(settings.BaseUrl, WhisperRelativePath))
+        var message = new HttpRequestMessage(
+            HttpMethod.Post,
+            BuildEndpoint(settings.BaseUrl, TranscriptionRelativePath))
         {
             Content = content,
         };
-
         message.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
         return message;
     }
 
-    private static async Task<HttpRequestMessage> BuildQwenAsrRequestAsync(
+    private static async Task<HttpRequestMessage> BuildOpenAiChatAudioRequestAsync(
         TranscriptionRequest request,
         TranscriptionSettings settings,
         string apiKey,
@@ -288,16 +259,6 @@ internal static class TranscriptionHttpAdapter
         using var buffer = new MemoryStream();
         await audio.CopyToAsync(buffer, cancellationToken).ConfigureAwait(false);
 
-        var dataUri = $"data:{request.ContentType};base64,{Convert.ToBase64String(buffer.ToArray())}";
-        var options = new Dictionary<string, object>
-        {
-            ["enable_itn"] = settings.Parameters.EnableItn,
-        };
-        if ((request.LanguageHint ?? Languages(settings.Parameters.LanguageHints).FirstOrDefault()) is { } language)
-        {
-            options["language"] = language;
-        }
-
         var content = JsonContent.Create(new
         {
             model = settings.Model,
@@ -306,133 +267,44 @@ internal static class TranscriptionHttpAdapter
                 new
                 {
                     role = "user",
-                    content = new[]
+                    content = new object[]
                     {
+                        new { type = "text", text = "Transcribe this audio and return only the transcript." },
                         new
                         {
                             type = "input_audio",
-                            input_audio = new { data = dataUri },
-                        },
-                    },
-                },
-            },
-            stream = false,
-            asr_options = options,
-        });
-
-        var message = new HttpRequestMessage(
-            HttpMethod.Post,
-            BuildEndpoint(settings.BaseUrl, ChatCompletionsRelativePath))
-        {
-            Content = content,
-        };
-
-        message.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
-        return message;
-    }
-
-    private static async Task<HttpRequestMessage> BuildDashScopeRequestAsync(
-        TranscriptionRequest request,
-        TranscriptionSettings settings,
-        string apiKey,
-        CancellationToken cancellationToken)
-    {
-        var dataUri = await DataUriAsync(request, cancellationToken).ConfigureAwait(false);
-        var parameters = new Dictionary<string, object>
-        {
-            ["format"] = AudioFormat(request),
-        };
-
-        // Some DashScope models reject parameters they do not implement, even when the value is false.
-        // Only send optional switches the user actually enabled.
-        if (settings.Parameters.SpeakerDiarization)
-        {
-            parameters["speaker_diarization_enabled"] = true;
-        }
-
-        if (settings.Parameters.KeepDialect)
-        {
-            parameters["keep_dialect"] = true;
-        }
-
-        var languages = Languages(settings.Parameters.LanguageHints);
-        if (request.LanguageHint is { Length: > 0 } requestLanguage)
-        {
-            languages = [requestLanguage.Trim().ToLowerInvariant()];
-        }
-
-        if (languages.Length > 0)
-        {
-            parameters["language_hints"] = languages;
-        }
-
-        if (!string.IsNullOrWhiteSpace(settings.Parameters.VocabularyId))
-        {
-            parameters["vocabulary_id"] = settings.Parameters.VocabularyId.Trim();
-        }
-
-        var content = JsonContent.Create(new
-        {
-            model = settings.Model,
-            input = new
-            {
-                messages = new[]
-                {
-                    new
-                    {
-                        role = "user",
-                        content = new[]
-                        {
-                            new
+                            input_audio = new
                             {
-                                type = "input_audio",
-                                input_audio = new { data = dataUri },
+                                data = Convert.ToBase64String(buffer.ToArray()),
+                                format = AudioFormat(request),
                             },
                         },
                     },
                 },
             },
-            parameters,
         });
 
-        var message = new HttpRequestMessage(HttpMethod.Post, BuildDashScopeEndpoint(settings.BaseUrl))
+        var message = new HttpRequestMessage(HttpMethod.Post, BuildEndpoint(settings.BaseUrl, ChatRelativePath))
         {
             Content = content,
         };
         message.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
-        message.Headers.TryAddWithoutValidation("X-DashScope-SSE", "disable");
         return message;
     }
 
     public static async Task<TranscriptionPayload?> ReadPayloadAsync(
         HttpResponseMessage response,
-        string protocol,
+        string apiType,
         CancellationToken cancellationToken)
     {
         try
         {
-            if (protocol == TranscriptionProtocolNames.QwenAsrChat)
+            if (apiType == TranscriptionApiTypes.OpenAiChatAudio)
             {
-                var chat = await response.Content
-                    .ReadFromJsonAsync<AudioMessageResponse>(cancellationToken)
-                    .ConfigureAwait(false);
-                return new TranscriptionPayload(chat?.Choices?.FirstOrDefault()?.Message?.Content, null);
-            }
-
-            if (protocol == TranscriptionProtocolNames.DashScopeMultimodal)
-            {
-                var dashScope = await response.Content
-                    .ReadFromJsonAsync<DashScopeResponse>(cancellationToken)
-                    .ConfigureAwait(false);
-                var text = dashScope?.Output?.Text;
-                if (string.IsNullOrWhiteSpace(text) && dashScope?.Output?.Sentences is { Count: > 0 } sentences)
-                {
-                    text = string.Join('\n', sentences
-                        .Select(sentence => sentence.Text)
-                        .Where(sentence => !string.IsNullOrWhiteSpace(sentence)));
-                }
-
-                return new TranscriptionPayload(text, null);
+                using var document = await JsonDocument.ParseAsync(
+                    await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false),
+                    cancellationToken: cancellationToken).ConfigureAwait(false);
+                return new TranscriptionPayload(ExtractChatText(document.RootElement), null);
             }
 
             return await response.Content
@@ -447,25 +319,220 @@ internal static class TranscriptionHttpAdapter
         }
     }
 
-    /// <summary>Joins the base URL and the relative path without dropping or doubling a slash.</summary>
+    public static async Task<TranscriptionPayload?> TranscribeDashScopeAsync(
+        HttpClient httpClient,
+        TranscriptionRequest request,
+        TranscriptionSettings settings,
+        string apiKey,
+        CancellationToken cancellationToken)
+    {
+        if (request.PublicAudioUrl is not { IsAbsoluteUri: true } publicUrl ||
+            publicUrl.Scheme is not ("http" or "https"))
+        {
+            throw PublicAudioUrlRequired();
+        }
+
+        using var submitRequest = new HttpRequestMessage(
+            HttpMethod.Post,
+            BuildEndpoint(settings.BaseUrl, DashScopeSubmitRelativePath))
+        {
+            Content = JsonContent.Create(new
+            {
+                model = settings.Model,
+                input = new { file_urls = new[] { publicUrl.ToString() } },
+            }),
+        };
+        submitRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+        submitRequest.Headers.TryAddWithoutValidation("X-DashScope-Async", "enable");
+
+        var submitted = await SendDashScopeRequestAsync(httpClient, submitRequest, cancellationToken)
+            .ConfigureAwait(false);
+        var taskId = submitted.Output?.TaskId;
+        if (string.IsNullOrWhiteSpace(taskId))
+        {
+            throw MalformedDashScopeResponse();
+        }
+
+        while (true)
+        {
+            using var statusRequest = new HttpRequestMessage(
+                HttpMethod.Get,
+                BuildEndpoint(settings.BaseUrl, $"tasks/{Uri.EscapeDataString(taskId)}"));
+            statusRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+
+            var status = await SendDashScopeRequestAsync(httpClient, statusRequest, cancellationToken)
+                .ConfigureAwait(false);
+            var taskStatus = status.Output?.TaskStatus?.Trim().ToUpperInvariant();
+
+            if (taskStatus == "SUCCEEDED")
+            {
+                var text = await ReadDashScopeResultAsync(httpClient, status.Output!, cancellationToken)
+                    .ConfigureAwait(false);
+                return new TranscriptionPayload(text, null);
+            }
+
+            if (taskStatus is "FAILED" or "CANCELED" or "UNKNOWN")
+            {
+                throw new PermanentExternalFailureException(
+                    "transcription.task_failed",
+                    "The asynchronous transcription task failed.");
+            }
+
+            if (taskStatus is not ("PENDING" or "RUNNING"))
+            {
+                throw MalformedDashScopeResponse();
+            }
+
+            await Task.Delay(PollInterval, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private static async Task<DashScopeTaskResponse> SendDashScopeRequestAsync(
+        HttpClient httpClient,
+        HttpRequestMessage request,
+        CancellationToken cancellationToken)
+    {
+        using var response = await httpClient
+            .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
+            .ConfigureAwait(false);
+        EnsureDashScopeSuccess(response);
+
+        try
+        {
+            return await response.Content
+                .ReadFromJsonAsync<DashScopeTaskResponse>(cancellationToken)
+                .ConfigureAwait(false) ?? throw MalformedDashScopeResponse();
+        }
+        catch (Exception exception) when (exception is JsonException or NotSupportedException)
+        {
+            throw MalformedDashScopeResponse();
+        }
+    }
+
+    private static async Task<string?> ReadDashScopeResultAsync(
+        HttpClient httpClient,
+        DashScopeTaskOutput output,
+        CancellationToken cancellationToken)
+    {
+        if (!string.IsNullOrWhiteSpace(output.Text))
+        {
+            return output.Text;
+        }
+
+        var parts = new List<string>();
+        foreach (var result in output.Results ?? [])
+        {
+            if (!string.IsNullOrWhiteSpace(result.Text))
+            {
+                parts.Add(result.Text);
+                continue;
+            }
+
+            if (!Uri.TryCreate(result.TranscriptionUrl, UriKind.Absolute, out var resultUrl) ||
+                resultUrl.Scheme is not ("http" or "https"))
+            {
+                continue;
+            }
+
+            using var resultResponse = await httpClient
+                .GetAsync(resultUrl, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
+                .ConfigureAwait(false);
+            EnsureDashScopeSuccess(resultResponse);
+
+            DashScopeTranscriptDocument? document;
+            try
+            {
+                document = await resultResponse.Content
+                    .ReadFromJsonAsync<DashScopeTranscriptDocument>(cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is JsonException or NotSupportedException)
+            {
+                throw MalformedDashScopeResponse();
+            }
+
+            foreach (var transcript in document?.Transcripts ?? [])
+            {
+                if (!string.IsNullOrWhiteSpace(transcript.Text))
+                {
+                    parts.Add(transcript.Text);
+                }
+                else
+                {
+                    parts.AddRange((transcript.Sentences ?? [])
+                        .Select(sentence => sentence.Text)
+                        .Where(text => !string.IsNullOrWhiteSpace(text))!);
+                }
+            }
+        }
+
+        return parts.Count == 0 ? null : string.Join('\n', parts);
+    }
+
+    private static string? ExtractChatText(JsonElement root)
+    {
+        if (!root.TryGetProperty("choices", out var choices) ||
+            choices.ValueKind != JsonValueKind.Array ||
+            choices.GetArrayLength() == 0 ||
+            !choices[0].TryGetProperty("message", out var message))
+        {
+            return null;
+        }
+
+        if (message.TryGetProperty("content", out var content))
+        {
+            if (content.ValueKind == JsonValueKind.String)
+            {
+                return content.GetString();
+            }
+
+            if (content.ValueKind == JsonValueKind.Array)
+            {
+                var parts = content.EnumerateArray()
+                    .Where(item => item.TryGetProperty("text", out var text) && text.ValueKind == JsonValueKind.String)
+                    .Select(item => item.GetProperty("text").GetString())
+                    .Where(text => !string.IsNullOrWhiteSpace(text));
+                return string.Join('\n', parts!);
+            }
+        }
+
+        return message.TryGetProperty("audio", out var audio) &&
+               audio.TryGetProperty("transcript", out var transcript) &&
+               transcript.ValueKind == JsonValueKind.String
+            ? transcript.GetString()
+            : null;
+    }
+
+    private static void EnsureDashScopeSuccess(HttpResponseMessage response)
+    {
+        if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
+        {
+            throw new PermanentExternalFailureException(
+                "transcription.credentials_rejected",
+                "The transcription endpoint rejected the configured credentials.");
+        }
+
+        if (response.StatusCode == HttpStatusCode.TooManyRequests || (int)response.StatusCode >= 500)
+        {
+            throw new TransientExternalFailureException(
+                "transcription.upstream_unavailable",
+                "The transcription endpoint is temporarily unavailable.");
+        }
+
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new PermanentExternalFailureException(
+                "transcription.request_rejected",
+                "The transcription endpoint rejected the request.");
+        }
+    }
+
+    /// <summary>Joins the user-supplied base URL and relative path without duplicate slashes.</summary>
     private static Uri BuildEndpoint(string baseUrl, string relativePath)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(baseUrl);
-
-        return new Uri($"{baseUrl.TrimEnd('/')}/{relativePath}", UriKind.Absolute);
+        return new Uri($"{baseUrl.TrimEnd('/')}/{relativePath.TrimStart('/')}", UriKind.Absolute);
     }
-
-    private static async Task<string> DataUriAsync(TranscriptionRequest request, CancellationToken cancellationToken)
-    {
-        await using var audio = await request.OpenAudio(cancellationToken).ConfigureAwait(false);
-        using var buffer = new MemoryStream();
-        await audio.CopyToAsync(buffer, cancellationToken).ConfigureAwait(false);
-        return $"data:{request.ContentType};base64,{Convert.ToBase64String(buffer.ToArray())}";
-    }
-
-    private static string[] Languages(string? value) => string.IsNullOrWhiteSpace(value)
-        ? []
-        : value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
     private static string AudioFormat(TranscriptionRequest request)
     {
@@ -486,39 +553,35 @@ internal static class TranscriptionHttpAdapter
         };
     }
 
-    private static Uri BuildDashScopeEndpoint(string baseUrl)
-    {
-        var root = baseUrl.TrimEnd('/');
-        const string compatibleSuffix = "/compatible-mode/v1";
-        if (root.EndsWith(compatibleSuffix, StringComparison.OrdinalIgnoreCase))
-        {
-            root = root[..^compatibleSuffix.Length];
-        }
-        else if (root.EndsWith("/api/v1", StringComparison.OrdinalIgnoreCase))
-        {
-            root = root[..^"/api/v1".Length];
-        }
+    private static PermanentExternalFailureException PublicAudioUrlRequired() => new(
+        "transcription.public_audio_url_required",
+        "dashscope_async requires a publicly reachable HTTP(S) audio URL; the current recording is local only.");
 
-        return BuildEndpoint(root, DashScopeRelativePath);
-    }
+    private static PermanentExternalFailureException MalformedDashScopeResponse() => new(
+        "transcription.malformed_response",
+        "The transcription endpoint returned a response that could not be read.");
 
     internal sealed record TranscriptionPayload(
         [property: JsonPropertyName("text")] string? Text,
         [property: JsonPropertyName("language")] string? Language);
 
-    private sealed record AudioMessageResponse(
-        [property: JsonPropertyName("choices")] IReadOnlyList<AudioMessageChoice>? Choices);
+    private sealed record DashScopeTaskResponse(
+        [property: JsonPropertyName("output")] DashScopeTaskOutput? Output);
 
-    private sealed record AudioMessageChoice(
-        [property: JsonPropertyName("message")] AudioMessage? Message);
+    private sealed record DashScopeTaskOutput(
+        [property: JsonPropertyName("task_id")] string? TaskId,
+        [property: JsonPropertyName("task_status")] string? TaskStatus,
+        [property: JsonPropertyName("text")] string? Text,
+        [property: JsonPropertyName("results")] IReadOnlyList<DashScopeTaskResult>? Results);
 
-    private sealed record AudioMessage(
-        [property: JsonPropertyName("content")] string? Content);
+    private sealed record DashScopeTaskResult(
+        [property: JsonPropertyName("transcription_url")] string? TranscriptionUrl,
+        [property: JsonPropertyName("text")] string? Text);
 
-    private sealed record DashScopeResponse(
-        [property: JsonPropertyName("output")] DashScopeOutput? Output);
+    private sealed record DashScopeTranscriptDocument(
+        [property: JsonPropertyName("transcripts")] IReadOnlyList<DashScopeTranscript>? Transcripts);
 
-    private sealed record DashScopeOutput(
+    private sealed record DashScopeTranscript(
         [property: JsonPropertyName("text")] string? Text,
         [property: JsonPropertyName("sentences")] IReadOnlyList<DashScopeSentence>? Sentences);
 

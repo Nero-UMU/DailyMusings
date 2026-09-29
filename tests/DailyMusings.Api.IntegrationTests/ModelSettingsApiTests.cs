@@ -63,17 +63,10 @@ public class ModelSettingsApiTests
     }
 
     [TestMethod]
-    public async Task Transcription_protocol_parameters_round_trip_through_the_admin_API()
+    public async Task Transcription_api_type_round_trips_through_the_admin_API()
     {
         await using var instance = await TestInstance.StartAsync();
         await instance.SignInAsChangedAdministratorAsync();
-        var parameters = new TranscriptionParametersDto(
-            "dashscope-multimodal",
-            "zh,en",
-            EnableItn: false,
-            VocabularyId: "vocabulary-42",
-            SpeakerDiarization: true,
-            KeepDialect: true);
 
         using var updated = await instance.Client.PatchAsJsonAsync(
             "/api/system/model-endpoints/transcription",
@@ -84,13 +77,19 @@ public class ModelSettingsApiTests
                 "openai-api-key",
                 120,
                 null,
-                Transcription: parameters));
+                ApiKey: "typed-transcription-key",
+                ApiType: "openai_chat_audio"));
 
         updated.EnsureSuccessStatusCode();
-        var endpoint = await updated.Content.ReadFromJsonAsync<ModelEndpointDto>();
+        var raw = await updated.Content.ReadAsStringAsync();
+        Assert.IsFalse(raw.Contains("typed-transcription-key", StringComparison.Ordinal));
+        var endpoint = System.Text.Json.JsonSerializer.Deserialize<ModelEndpointDto>(
+            raw,
+            new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
 
-        Assert.IsNotNull(endpoint?.Transcription);
-        Assert.AreEqual(parameters, endpoint.Transcription);
+        Assert.AreEqual("openai_chat_audio", endpoint?.ApiType);
+        Assert.IsTrue(endpoint?.HasPassword);
+        Assert.AreEqual(SecretSourceNames.Ui, endpoint?.PasswordSource);
     }
 
     [TestMethod]

@@ -123,7 +123,9 @@ internal sealed class StubTranscriptionEndpoint : IAsyncDisposable
 
             var audio = payload.RootElement
                 .GetProperty("messages")[0]
-                .GetProperty("content")[0]
+                .GetProperty("content")
+                .EnumerateArray()
+                .Single(item => item.GetProperty("type").GetString() == "input_audio")
                 .GetProperty("input_audio")
                 .GetProperty("data")
                 .GetString();

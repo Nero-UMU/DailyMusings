@@ -24,6 +24,7 @@ public class InputLoopTests
         ["Transcription:Model"] = "test-whisper",
         ["Transcription:SecretName"] = "openai-api-key",
         ["Transcription:TimeoutSeconds"] = "30",
+        ["Transcription:ApiType"] = "openai_transcription",
     };
 
     [TestMethod]
@@ -79,6 +80,7 @@ public class InputLoopTests
 
         var settings = TranscriptionEnabled(stub.BaseUrl);
         settings["Transcription:Model"] = "qwen3-asr-flash";
+        settings["Transcription:ApiType"] = "openai_chat_audio";
 
         await using var instance = await TestInstance.StartAsync(settings);
         instance.WriteSecret("openai-api-key", "test-api-key");
@@ -93,7 +95,7 @@ public class InputLoopTests
         Assert.AreEqual(TranscriptionStatusNames.Succeeded, ingested.Input.TranscriptionStatus);
         Assert.AreEqual(stub.State.ResponseText, ingested.Input.Transcript);
         Assert.AreEqual("qwen3-asr-flash", stub.State.LastModel);
-        StringAssert.StartsWith(stub.State.LastAudioData, "data:audio/mp4;base64,");
+        Assert.AreEqual(Convert.ToBase64String(FakeAudio), stub.State.LastAudioData);
         Assert.AreEqual("Bearer test-api-key", stub.State.LastAuthorization);
     }
 

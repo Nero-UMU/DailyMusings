@@ -55,50 +55,37 @@ public sealed class ModelEndpointProbeTests
             new ModelEndpointProbeRequest(
                 ExternalService.Transcription,
                 "https://candidate.example/v1",
-                "qwen3-asr-flash",
+                "arbitrary-model",
                 "saved-key",
-                "typed-key"),
+                "typed-key",
+                TranscriptionApiTypes.OpenAiChatAudio),
             CancellationToken.None);
 
         Assert.IsTrue(result.Ok);
         Assert.AreEqual("https://candidate.example/v1/chat/completions", handler.LastRequest?.RequestUri?.ToString());
-        StringAssert.Contains(handler.LastBody, "qwen3-asr-flash");
-        StringAssert.Contains(handler.LastBody, "data:audio/wav;base64,");
+        StringAssert.Contains(handler.LastBody, "arbitrary-model");
+        StringAssert.Contains(handler.LastBody, "\"type\":\"input_audio\"");
     }
 
     [TestMethod]
-    public async Task Transcription_probe_honours_the_selected_DashScope_protocol_and_parameters()
+    public async Task DashScope_probe_reports_that_the_synthetic_local_recording_has_no_public_url()
     {
         var handler = new RecordingHandler();
         var probe = CreateProbe(handler);
-        var parameters = new TranscriptionParameters(
-            TranscriptionProtocolNames.DashScopeMultimodal,
-            "zh,en",
-            EnableItn: false,
-            VocabularyId: "vocabulary-42",
-            SpeakerDiarization: true,
-            KeepDialect: true);
 
         var result = await probe.ProbeModelAsync(
             new ModelEndpointProbeRequest(
                 ExternalService.Transcription,
-                "https://workspace.example/compatible-mode/v1",
-                "qwen-audio-3.1-asr-flash",
+                "https://workspace.example/api/v1",
+                "any-model",
                 "saved-key",
                 "typed-key",
-                parameters),
+                TranscriptionApiTypes.DashScopeAsync),
             CancellationToken.None);
 
-        Assert.IsTrue(result.Ok);
-        Assert.AreEqual(
-            "https://workspace.example/api/v1/services/aigc/multimodal-generation/generation",
-            handler.LastRequest?.RequestUri?.ToString());
-        Assert.IsNotNull(handler.LastRequest);
-        CollectionAssert.Contains(handler.LastRequest.Headers.GetValues("X-DashScope-SSE").ToArray(), "disable");
-        StringAssert.Contains(handler.LastBody, "qwen-audio-3.1-asr-flash");
-        StringAssert.Contains(handler.LastBody, "vocabulary-42");
-        StringAssert.Contains(handler.LastBody, "speaker_diarization_enabled");
-        StringAssert.Contains(handler.LastBody, "data:audio/wav;base64,");
+        Assert.IsFalse(result.Ok);
+        Assert.AreEqual("probe.transcription.public_audio_url_required", result.Code);
+        Assert.IsNull(handler.LastRequest);
     }
 
     private static ExternalServiceProbe CreateProbe(HttpMessageHandler handler) => new(

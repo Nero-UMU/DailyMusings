@@ -198,12 +198,22 @@ public sealed class ExternalServiceProbe : IExternalServiceProbe
             return ProbeResult.Failure($"probe.{name}.secret_missing", "请填写 API Key，或先保存一个可用的 Key。");
         }
 
-        if (request.Service == ExternalService.Transcription &&
-            TranscriptionProtocolNames.RequiresUnsupportedTransport(request.Model))
+        if (request.Service == ExternalService.Transcription)
         {
-            return ProbeResult.Failure(
-                "probe.transcription.protocol_unsupported",
-                "这个模型需要实时 WebSocket 或公网文件异步任务，当前不能直接处理手机上传的私有录音。");
+            var apiType = request.ApiType?.Trim().ToLowerInvariant();
+            if (!TranscriptionApiTypes.IsSupported(apiType))
+            {
+                return ProbeResult.Failure(
+                    "probe.transcription.api_type_invalid",
+                    "请选择 openai_transcription、openai_chat_audio 或 dashscope_async。");
+            }
+
+            if (apiType == TranscriptionApiTypes.DashScopeAsync)
+            {
+                return ProbeResult.Failure(
+                    "probe.transcription.public_audio_url_required",
+                    "dashscope_async 需要公网可访问的音频 URL；当前测试录音只有本地文件，不能伪装成 URL 提交。");
+            }
         }
 
         using var httpRequest = await BuildModelProbeRequestAsync(request, baseUri, secret, cancellationToken)
@@ -248,7 +258,7 @@ public sealed class ExternalServiceProbe : IExternalServiceProbe
                 settings.BaseUrl,
                 settings.Model,
                 settings.SecretName,
-                Transcription: settings.Parameters),
+                ApiType: settings.ApiType),
             cancellationToken).ConfigureAwait(false);
     }
 
@@ -309,7 +319,7 @@ public sealed class ExternalServiceProbe : IExternalServiceProbe
                 Enabled = true,
                 BaseUrl = root,
                 Model = request.Model,
-                Parameters = request.Transcription ?? TranscriptionParameters.Default,
+                ApiType = request.ApiType!,
             };
             var audio = CreateProbeWave();
             return await TranscriptionHttpAdapter.BuildRequestAsync(

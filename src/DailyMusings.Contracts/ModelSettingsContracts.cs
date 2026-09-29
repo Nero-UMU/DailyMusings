@@ -26,16 +26,8 @@ public sealed record ModelEndpointDto(
     /// <summary>Whether a key resolves at all. The value itself never leaves the instance.</summary>
     bool HasPassword,
 
-    /// <summary>Present only for the transcription endpoint.</summary>
-    TranscriptionParametersDto? Transcription = null);
-
-public sealed record TranscriptionParametersDto(
-    string Protocol,
-    string? LanguageHints,
-    bool EnableItn,
-    string? VocabularyId,
-    bool SpeakerDiarization,
-    bool KeepDialect);
+    /// <summary>One of the supported speech-to-text <c>api_type</c> values; transcription only.</summary>
+    string? ApiType = null);
 
 public sealed record ModelEndpointListResponse(IReadOnlyList<ModelEndpointDto> Items);
 
@@ -47,14 +39,14 @@ public sealed record UpdateModelEndpointRequest(
     int? TimeoutSeconds,
     int? Dimensions,
 
-    /// <summary>Write-only. Stored encrypted outside the backup set, exactly like the SMTP password.</summary>
-    string? Password = null,
+    /// <summary>Write-only API key. Stored encrypted outside the backup set and never returned.</summary>
+    string? ApiKey = null,
 
     /// <summary>Removes the stored key, falling back to the secret file or the environment.</summary>
     bool? ClearPassword = null,
 
-    /// <summary>Optional speech-to-text protocol and provider parameters; transcription endpoint only.</summary>
-    TranscriptionParametersDto? Transcription = null);
+    /// <summary>Speech-to-text protocol selector; transcription endpoint only.</summary>
+    string? ApiType = null);
 
 /// <summary>What a client may see about the instance's models (§8.1): a name, and whether it is switched on.</summary>
 public sealed record ModelNameDto(string Service, string Model, bool Enabled);

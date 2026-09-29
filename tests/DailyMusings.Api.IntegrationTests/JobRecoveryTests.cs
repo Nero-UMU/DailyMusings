@@ -26,6 +26,7 @@ public class JobRecoveryTests
         ["Transcription:BaseUrl"] = baseUrl,
         ["Transcription:Model"] = "test-whisper",
         ["Transcription:SecretName"] = "openai-api-key",
+        ["Transcription:ApiType"] = "openai_transcription",
 
         // Generous, so the only thing that can end the stalled call is the shutdown itself.
         ["Transcription:TimeoutSeconds"] = "300",

@@ -139,43 +139,39 @@ public class ModelAndSmtpSettingsTests
     }
 
     [TestMethod]
-    public async Task A_public_url_only_ASR_model_is_refused_before_it_breaks_phone_recordings()
+    public async Task Transcription_model_names_are_not_used_to_guess_or_reject_protocols()
     {
-        var update = new UpdateModelEndpointUseCase(new InMemoryAppSettingStore(), new InMemoryUiSecretStore());
+        var store = new InMemoryAppSettingStore();
+
+        await new UpdateModelEndpointUseCase(store, new InMemoryUiSecretStore()).ExecuteAsync(
+            ModelService.Transcription,
+            new ModelEndpointUpdate(null, null, "any-user-supplied-model", null, null, null),
+            CancellationToken.None);
+
+        Assert.AreEqual("any-user-supplied-model", store.Snapshot()[ModelSettingKeys.Model(ModelService.Transcription)]);
+    }
+
+    [TestMethod]
+    public async Task Transcription_api_type_is_saved_and_validated()
+    {
+        var store = new InMemoryAppSettingStore();
+        var update = new UpdateModelEndpointUseCase(store, new InMemoryUiSecretStore());
+
+        await update.ExecuteAsync(
+            ModelService.Transcription,
+            new ModelEndpointUpdate(null, null, null, null, null, null, ApiType: " OPENAI_CHAT_AUDIO "),
+            CancellationToken.None);
+
+        Assert.AreEqual(
+            TranscriptionApiTypes.OpenAiChatAudio,
+            store.Snapshot()[ModelSettingKeys.TranscriptionApiType]);
 
         var failure = await Assert.ThrowsExceptionAsync<UseCaseException>(() =>
             update.ExecuteAsync(
                 ModelService.Transcription,
-                new ModelEndpointUpdate(null, null, "paraformer-v2", null, null, null),
+                new ModelEndpointUpdate(null, null, null, null, null, null, ApiType: "auto"),
                 CancellationToken.None));
-
-        Assert.AreEqual("model.transcription.protocol_unsupported", failure.Code);
-    }
-
-    [TestMethod]
-    public async Task Transcription_protocol_and_model_parameters_are_saved_as_structured_settings()
-    {
-        var store = new InMemoryAppSettingStore();
-        var parameters = new TranscriptionParameters(
-            TranscriptionProtocolNames.DashScopeMultimodal,
-            "ZH， en zh",
-            EnableItn: true,
-            VocabularyId: "  vocabulary-42  ",
-            SpeakerDiarization: true,
-            KeepDialect: true);
-
-        await new UpdateModelEndpointUseCase(store, new InMemoryUiSecretStore()).ExecuteAsync(
-            ModelService.Transcription,
-            new ModelEndpointUpdate(null, null, null, null, null, null, Transcription: parameters),
-            CancellationToken.None);
-
-        var written = store.Snapshot();
-        Assert.AreEqual(TranscriptionProtocolNames.DashScopeMultimodal, written[ModelSettingKeys.TranscriptionProtocol]);
-        Assert.AreEqual("zh,en", written[ModelSettingKeys.TranscriptionLanguageHints]);
-        Assert.AreEqual("true", written[ModelSettingKeys.TranscriptionEnableItn]);
-        Assert.AreEqual("vocabulary-42", written[ModelSettingKeys.TranscriptionVocabularyId]);
-        Assert.AreEqual("true", written[ModelSettingKeys.TranscriptionSpeakerDiarization]);
-        Assert.AreEqual("true", written[ModelSettingKeys.TranscriptionKeepDialect]);
+        Assert.AreEqual("model.transcription.api_type_invalid", failure.Code);
     }
 
     [TestMethod]
