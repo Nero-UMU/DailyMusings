@@ -1,5 +1,7 @@
 using System.Globalization;
+using System.Text.Json;
 using DailyMusings.Domain.Inputs;
+using DailyMusings.Domain.Reflections;
 using DailyMusings.Domain.Time;
 
 namespace DailyMusings.Application.Configuration;
@@ -28,6 +30,13 @@ public sealed record ContentSettings
     public const string DraftDirectoryKey = "publish.draftDirectory";
     public const string PublishedDirectoryKey = "publish.publishedDirectory";
     public const string HexoTemplateKey = "publish.hexoFrontMatterTemplate";
+
+    // The writing spec (decision A.24). Three keys rather than one blob so that the settings table and a backup
+    // stay readable, and so that "the rules are empty" is distinguishable from "nobody ever set rules" — the
+    // first is a choice the user made, the second is the only case that gets the defaults.
+    public const string WritingTargetCharactersKey = "writing.targetCharacters";
+    public const string WritingPersonKey = "writing.person";
+    public const string WritingRulesKey = "writing.rules";
 
     public const string DefaultDraftDirectory = "drafts";
     public const string DefaultPublishedDirectory = "posts";
@@ -70,7 +79,8 @@ public sealed record ContentSettings
         int contentRetentionDays = DefaultContentRetentionDays,
         string draftDirectory = DefaultDraftDirectory,
         string publishedDirectory = DefaultPublishedDirectory,
-        string? hexoFrontMatterTemplate = null)
+        string? hexoFrontMatterTemplate = null,
+        WritingSettings? writing = null)
     {
         TimeZoneId = timeZoneId;
         GenerationLocalTime = generationLocalTime;
@@ -81,6 +91,7 @@ public sealed record ContentSettings
         DraftDirectory = draftDirectory;
         PublishedDirectory = publishedDirectory;
         HexoFrontMatterTemplate = hexoFrontMatterTemplate ?? Domain.Publishing.MarkdownTemplate.Default;
+        Writing = writing ?? WritingSettings.Default;
     }
 
     public string TimeZoneId { get; init; }
@@ -104,6 +115,9 @@ public sealed record ContentSettings
     public string PublishedDirectory { get; init; }
 
     public string HexoFrontMatterTemplate { get; init; }
+
+    /// <summary>The writing spec handed to the model on every generation (decision A.24).</summary>
+    public WritingSettings Writing { get; init; }
 
     public AudioRetentionPolicy ResolveAudioRetention() => new(AudioRetentionDays);
 
@@ -129,7 +143,11 @@ public sealed record ContentSettings
             ReadInt(values, ContentRetentionKey, DefaultContentRetentionDays),
             Read(values, DraftDirectoryKey, DefaultDraftDirectory),
             Read(values, PublishedDirectoryKey, DefaultPublishedDirectory),
-            Read(values, HexoTemplateKey, Domain.Publishing.MarkdownTemplate.Default));
+            Read(values, HexoTemplateKey, Domain.Publishing.MarkdownTemplate.Default),
+            new WritingSettings(
+                ReadInt(values, WritingTargetCharactersKey, WritingSettings.DefaultTargetCharacters),
+                ReadPerson(values),
+                ReadRules(values)));
     }
 
     public IReadOnlyDictionary<string, string> ToValues() => new Dictionary<string, string>(StringComparer.Ordinal)
@@ -143,9 +161,78 @@ public sealed record ContentSettings
         [DraftDirectoryKey] = DraftDirectory,
         [PublishedDirectoryKey] = PublishedDirectory,
         [HexoTemplateKey] = HexoFrontMatterTemplate,
+        [WritingTargetCharactersKey] = Writing.TargetCharacters.ToString(CultureInfo.InvariantCulture),
+        [WritingPersonKey] = FormatPerson(Writing.Person),
+        [WritingRulesKey] = JsonSerializer.Serialize(Writing.Rules, RuleJson),
     };
 
     public static string FormatTime(TimeOnly time) => time.ToString("HH:mm", CultureInfo.InvariantCulture);
+
+    /// <summary>Stable wire names for the person, so the stored value stays readable and reorder-proof.</summary>
+    public const string WritingPersonFirst = "first";
+    public const string WritingPersonSecond = "second";
+    public const string WritingPersonThird = "third";
+
+    public static string FormatPerson(WritingPerson person) => person switch
+    {
+        WritingPerson.First => WritingPersonFirst,
+        WritingPerson.Second => WritingPersonSecond,
+        WritingPerson.Third => WritingPersonThird,
+        _ => throw new ArgumentOutOfRangeException(nameof(person), person, "Unknown writing person."),
+    };
+
+    public static bool TryParsePerson(string? value, out WritingPerson person)
+    {
+        switch (value?.Trim().ToLowerInvariant())
+        {
+            case WritingPersonFirst:
+                person = WritingPerson.First;
+                return true;
+            case WritingPersonSecond:
+                person = WritingPerson.Second;
+                return true;
+            case WritingPersonThird:
+                person = WritingPerson.Third;
+                return true;
+            default:
+                person = WritingPerson.First;
+                return false;
+        }
+    }
+
+    private static WritingPerson ReadPerson(IReadOnlyDictionary<string, string> values) =>
+        values.TryGetValue(WritingPersonKey, out var raw) && TryParsePerson(raw, out var person)
+            ? person
+            : WritingSettings.Default.Person;
+
+    /// <summary>
+    /// The rules as stored. An absent key means the user has never touched them, so they get the defaults; a
+    /// present but empty value means they deliberately cleared the list, and that choice is honoured. Unreadable
+    /// JSON is treated like an absent key: the same reasoning as a malformed job payload (§14) — a spec nobody
+    /// can parse is not a spec, and falling back to the documented default is better than failing a generation.
+    /// </summary>
+    private static IReadOnlyList<WritingRule> ReadRules(IReadOnlyDictionary<string, string> values)
+    {
+        if (!values.TryGetValue(WritingRulesKey, out var json) || string.IsNullOrWhiteSpace(json))
+        {
+            return values.ContainsKey(WritingRulesKey) ? [] : WritingSettings.DefaultRules;
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<List<WritingRule>>(json, RuleJson) ?? [];
+        }
+        catch (JsonException)
+        {
+            return WritingSettings.DefaultRules;
+        }
+    }
+
+    private static readonly JsonSerializerOptions RuleJson = new()
+    {
+        PropertyNameCaseInsensitive = true,
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+    };
 
     private static string Read(IReadOnlyDictionary<string, string> values, string key, string fallback) =>
         values.TryGetValue(key, out var value) && !string.IsNullOrWhiteSpace(value) ? value : fallback;

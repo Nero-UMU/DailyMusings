@@ -1,4 +1,5 @@
 using DailyMusings.Application.Abstractions;
+using DailyMusings.Domain.Reflections;
 using DailyMusings.Domain.Time;
 
 namespace DailyMusings.Application.Configuration;
@@ -45,7 +46,11 @@ public sealed class UpdateContentSettingsUseCase
             update.ContentRetentionDays ?? current.ContentRetentionDays,
             update.DraftDirectory ?? current.DraftDirectory,
             update.PublishedDirectory ?? current.PublishedDirectory,
-            update.HexoFrontMatterTemplate ?? current.HexoFrontMatterTemplate);
+            update.HexoFrontMatterTemplate ?? current.HexoFrontMatterTemplate,
+            new WritingSettings(
+                update.WritingTargetCharacters ?? current.Writing.TargetCharacters,
+                update.WritingPerson ?? current.Writing.Person,
+                update.WritingRules ?? current.Writing.Rules));
 
         Validate(next);
 
@@ -98,6 +103,10 @@ public sealed class UpdateContentSettingsUseCase
         ValidateDirectory(settings.DraftDirectory, "publish.draft_directory.invalid");
         ValidateDirectory(settings.PublishedDirectory, "publish.published_directory.invalid");
         new Domain.Publishing.MarkdownTemplate(settings.HexoFrontMatterTemplate).Validate();
+
+        // The writing spec is the half of this record that the model actually reads, so a bad one shows up as a
+        // bad article rather than as an error. Bounded here, at the only door it comes through (decision A.24).
+        settings.Writing.Validate();
     }
 
     private static void ValidateDirectory(string value, string code)
@@ -120,4 +129,7 @@ public sealed record ContentSettingsUpdate(
     int? ContentRetentionDays = null,
     string? DraftDirectory = null,
     string? PublishedDirectory = null,
-    string? HexoFrontMatterTemplate = null);
+    string? HexoFrontMatterTemplate = null,
+    int? WritingTargetCharacters = null,
+    WritingPerson? WritingPerson = null,
+    IReadOnlyList<WritingRule>? WritingRules = null);

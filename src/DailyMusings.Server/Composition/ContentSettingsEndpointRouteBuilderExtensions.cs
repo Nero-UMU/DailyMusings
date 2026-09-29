@@ -2,6 +2,7 @@ using System.Globalization;
 using DailyMusings.Application.Abstractions;
 using DailyMusings.Application.Configuration;
 using DailyMusings.Domain.Common;
+using DailyMusings.Domain.Reflections;
 using DailyMusings.Contracts;
 using DailyMusings.Server.Authentication;
 using Microsoft.AspNetCore.Mvc;
@@ -63,6 +64,30 @@ public static class ContentSettingsEndpointRouteBuilderExtensions
         TryParseTime(request.GenerationLocalTime, out var generation);
         TryParseTime(request.PublishLocalTime, out var publish);
 
+        // An unparseable person is rejected here rather than silently falling back to the first person: the spec
+        // is the part of these settings the model reads, and quietly changing who the article is written as is
+        // exactly the kind of wrong that produces a plausible-looking bad article (decision A.24).
+        WritingPerson? person = null;
+
+        if (request.WritingPerson is not null)
+        {
+            if (!ContentSettings.TryParsePerson(request.WritingPerson, out var parsedPerson))
+            {
+                return Invalid("writingPerson must be first, second or third.");
+            }
+
+            person = parsedPerson;
+        }
+
+        IReadOnlyList<WritingRule>? rules = null;
+
+        if (request.WritingRules is not null)
+        {
+            rules = request.WritingRules
+                .Select(rule => new WritingRule(rule.Title, rule.Instruction))
+                .ToArray();
+        }
+
         try
         {
             var settings = await update
@@ -76,7 +101,10 @@ public static class ContentSettingsEndpointRouteBuilderExtensions
                         request.ContentRetentionDays,
                         request.DraftDirectory,
                         request.PublishedDirectory,
-                        request.HexoFrontMatterTemplate),
+                        request.HexoFrontMatterTemplate,
+                        request.WritingTargetCharacters,
+                        person,
+                        rules),
                     cancellationToken)
                 .ConfigureAwait(false);
 
@@ -111,5 +139,8 @@ public static class ContentSettingsEndpointRouteBuilderExtensions
         settings.ContentRetentionDays,
         settings.DraftDirectory,
         settings.PublishedDirectory,
-        settings.HexoFrontMatterTemplate);
+        settings.HexoFrontMatterTemplate,
+        settings.Writing.TargetCharacters,
+        ContentSettings.FormatPerson(settings.Writing.Person),
+        settings.Writing.Rules.Select(rule => new WritingRuleDto(rule.Title, rule.Instruction)).ToArray());
 }

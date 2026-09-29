@@ -4,21 +4,132 @@ using DailyMusings.Domain.Topics;
 
 namespace DailyMusings.Domain.Reflections;
 
-public enum WritingLength
+/// <summary>Who the article is written as (docs/开发指导.md §8.4, decision A.24).</summary>
+public enum WritingPerson
 {
-    Short = 0,
-    Medium = 1,
-    Long = 2,
+    First = 0,
+    Second = 1,
+    Third = 2,
 }
 
-/// <summary>The writing knobs sent with a generation request (docs/开发指导.md §8.4).</summary>
-public sealed record WritingSettings(
-    WritingLength Length,
-    string Tone,
-    bool FirstPerson,
-    string? CustomInstructions)
+/// <summary>
+/// One rule in the writing spec: a short label and the instruction handed to the model.
+/// <para>
+/// The spec is a list of these rather than a set of fixed fields because the user owns it. The seeded defaults
+/// are a starting point they may rewrite, reorder or delete entirely (decision A.24).
+/// </para>
+/// </summary>
+public sealed record WritingRule(string Title, string Instruction)
 {
-    public static WritingSettings Default { get; } = new(WritingLength.Medium, "plain", true, null);
+    public const int MaxTitleLength = 40;
+    public const int MaxInstructionLength = 500;
+}
+
+/// <summary>
+/// The writing spec handed to the model on every generation (docs/开发指导.md §8.4, decision A.24).
+/// <para>
+/// This is a user-owned preference, not a per-day decision: a generation job reads the current spec when it runs,
+/// and the spec that was in force is recorded on the version it produced. The length is a number of Chinese
+/// characters rather than a small/medium/large enum, because "about 300 characters" is what a person actually
+/// wants and an enum only ever approximates it.
+/// </para>
+/// </summary>
+public sealed record WritingSettings
+{
+    public const int DefaultTargetCharacters = 300;
+    public const int MinTargetCharacters = 50;
+    public const int MaxTargetCharacters = 5000;
+    public const int MaxRules = 20;
+
+    public WritingSettings(int targetCharacters, WritingPerson person, IReadOnlyList<WritingRule>? rules = null)
+    {
+        TargetCharacters = targetCharacters;
+        Person = person;
+
+        // Never null: a spec with no rules is a legitimate choice (the user deleted every default), but a null
+        // list would turn that choice into a crash the first time something enumerated it.
+        Rules = rules ?? [];
+    }
+
+    /// <summary>Target length of the body in Chinese characters, Markdown markers excluded.</summary>
+    public int TargetCharacters { get; init; }
+
+    public WritingPerson Person { get; init; }
+
+    /// <summary>
+    /// The rules in the order the user arranged them. Empty means "no extra rules", never "seed the defaults
+    /// again" — only an instance that has never stored a spec gets the defaults.
+    /// </summary>
+    public IReadOnlyList<WritingRule> Rules { get; init; }
+
+    /// <summary>
+    /// The starting spec. Every entry is editable and deletable from the publishing settings page; the wording
+    /// aims at the failure modes of machine-written Chinese (inflated endings, connective filler, worn-out
+    /// buzzwords) rather than at a literary style.
+    /// </summary>
+    public static IReadOnlyList<WritingRule> DefaultRules { get; } =
+    [
+        new("行文风格",
+            "平实、克制，像写给自己看的记录。多用具体的名词和动作，少用抽象评价和形容词；不刻意升华，" +
+            "不强行给出意义，也不为了好看而堆砌辞藻。句子长短交替，允许出现短句和停顿。"),
+        new("结构与段落",
+            "自然分段，每段 2 到 5 句，全文 3 到 6 段。不写小标题，不用列表和编号，不用 emoji。" +
+            "段落之间靠内容推进，不靠「首先」「其次」「最后」这类连接词。"),
+        new("标题",
+            "标题是一句具体的话或一个具体的意象，6 到 16 个字，不加书名号、不加感叹号、" +
+            "不写成「随想一则」这类空泛的说法，也不概括全文。"),
+        new("开头与结尾",
+            "开头直接进入当天的内容，不写「今天」「又是平凡的一天」这类开场套话。" +
+            "结尾停在具体的事或感受上，不做总结，不写金句，不替读者拔高。"),
+        new("用词禁区",
+            "不用「总之」「综上所述」「不难看出」「值得一提的是」「在这个快节奏的时代」这类套话；" +
+            "不用「治愈」「赋能」「内耗」「破防」这类被用滥的流行词；不出现 AI 自我介绍，也不称呼读者。"),
+    ];
+
+    public static WritingSettings Default { get; } =
+        new(DefaultTargetCharacters, WritingPerson.First, DefaultRules);
+
+    /// <summary>
+    /// Rejects a spec that cannot be handed to a model. Called where a user-supplied spec enters the system, so a
+    /// typo is reported at the moment it is saved rather than silently producing a bad article at 23:00.
+    /// </summary>
+    public void Validate()
+    {
+        if (TargetCharacters is < MinTargetCharacters or > MaxTargetCharacters)
+        {
+            throw new DomainException(
+                "writing.length.out_of_range",
+                $"目标字数必须在 {MinTargetCharacters} 到 {MaxTargetCharacters} 之间。");
+        }
+
+        if (!Enum.IsDefined(Person))
+        {
+            throw new DomainException("writing.person.unknown", "人称只能是第一、第二或第三人称。");
+        }
+
+        if (Rules.Count > MaxRules)
+        {
+            throw new DomainException("writing.rules.too_many", $"规范条目最多 {MaxRules} 条。");
+        }
+
+        foreach (var rule in Rules)
+        {
+            if (string.IsNullOrWhiteSpace(rule.Title) || rule.Title.Trim().Length > WritingRule.MaxTitleLength)
+            {
+                throw new DomainException(
+                    "writing.rule.title_invalid",
+                    $"每条规范都要有标题，且不超过 {WritingRule.MaxTitleLength} 个字。");
+            }
+
+            if (string.IsNullOrWhiteSpace(rule.Instruction) ||
+                rule.Instruction.Trim().Length > WritingRule.MaxInstructionLength)
+            {
+                throw new DomainException(
+                    "writing.rule.instruction_invalid",
+                    $"每条规范都要有内容，且不超过 {WritingRule.MaxInstructionLength} 个字。");
+            }
+        }
+    }
 }
 
 /// <summary>Which model produced a version. Configuration and secrets stay on the server (§8.1).</summary>

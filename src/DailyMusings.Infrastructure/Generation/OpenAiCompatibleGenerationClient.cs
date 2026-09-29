@@ -40,7 +40,7 @@ public sealed class OpenAiCompatibleGenerationClient : IReflectionGenerationClie
     /// "不得添加无来源事实的不可覆盖系统规则".
     /// </summary>
     private const string SystemRules = """
-        你是一名中文写作助手，负责根据用户自己记录的素材，写一篇第一人称的每日随想。
+        你是一名中文写作助手，负责根据用户自己记录的素材，写一篇每日随想。
 
         不可违反的规则：
         1. 只能使用下方提供的素材内容。不得添加任何素材中不存在的事实、人名、时间、地点、数字或因果。
@@ -362,6 +362,13 @@ public sealed class OpenAiCompatibleGenerationClient : IReflectionGenerationClie
         builder.AppendLine(CultureInfo.InvariantCulture, $"内容日期：{request.ContentDate}");
         builder.AppendLine();
 
+        // The writing spec comes before the material on purpose (decision A.24). These are the standing rules for
+        // how the article is written, and a model that reads them first composes against them instead of having to
+        // retrofit a style onto text it has already planned.
+        AppendWritingSettings(builder, request.Settings);
+
+        builder.AppendLine();
+
         builder.AppendLine("今天的素材（按记录时间排序）：");
         foreach (var entry in request.DayInputs)
         {
@@ -383,9 +390,6 @@ public sealed class OpenAiCompatibleGenerationClient : IReflectionGenerationClie
         {
             builder.AppendLine("没有可引用的历史素材。");
         }
-
-        builder.AppendLine();
-        AppendWritingSettings(builder, request.Settings);
 
         builder.AppendLine();
 
@@ -449,22 +453,37 @@ public sealed class OpenAiCompatibleGenerationClient : IReflectionGenerationClie
         return builder.ToString();
     }
 
+    /// <summary>
+    /// Writes the user's writing spec (docs/开发指导.md §8.4, decision A.24).
+    /// <para>
+    /// Length and person are stated as facts about the piece ("about 300 characters", "first person") because
+    /// those are the two things a model most reliably honours when they are unambiguous; everything else is the
+    /// user's own list, emitted verbatim and in their order. The list can be empty — a user who deleted every
+    /// rule gets a prompt with no style block rather than a prompt with invented rules.
+    /// </para>
+    /// <para>
+    /// The person lives here rather than in the system rules on purpose: the system message is the part the user
+    /// cannot change, so a person hardcoded there would quietly override the setting they just picked.
+    /// </para>
+    /// </summary>
     private static void AppendWritingSettings(StringBuilder builder, WritingSettings settings)
     {
-        var length = settings.Length switch
+        builder.AppendLine("写作规范（本次成文必须遵守；与系统规则冲突时，以系统规则为准）：");
+        builder.AppendLine(CultureInfo.InvariantCulture,
+            $"- 目标篇幅：约 {settings.TargetCharacters} 字（正文汉字数，不含 Markdown 标记，允许上下浮动两成）。");
+
+        var person = settings.Person switch
         {
-            WritingLength.Short => "简短，三四百字",
-            WritingLength.Long => "较长，一千字以上",
-            _ => "中等篇幅，六七百字",
+            WritingPerson.Second => "第二人称，用「你」来写。",
+            WritingPerson.Third => "第三人称，用「他」「她」或直接叙述，不要出现「我」。",
+            _ => "第一人称，用「我」来写。",
         };
 
-        builder.AppendLine(CultureInfo.InvariantCulture, $"写作要求：{length}；语气{settings.Tone}；");
-        builder.AppendLine(settings.FirstPerson ? "使用第一人称。" : "不使用第一人称。");
+        builder.AppendLine(CultureInfo.InvariantCulture, $"- 人称：{person}");
 
-        if (!string.IsNullOrWhiteSpace(settings.CustomInstructions))
+        foreach (var rule in settings.Rules)
         {
-            // The user's instructions refine the task; the system rules above still apply and cannot be replaced.
-            builder.AppendLine(CultureInfo.InvariantCulture, $"用户附加要求：{settings.CustomInstructions.Trim()}");
+            builder.AppendLine(CultureInfo.InvariantCulture, $"- {rule.Title.Trim()}：{rule.Instruction.Trim()}");
         }
     }
 

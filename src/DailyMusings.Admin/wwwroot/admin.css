@@ -1316,6 +1316,11 @@ label.checkbox input {
 .switch-line input { width: auto; }
 .slim { margin-bottom: 0; }
 .template-editor { min-height: 18rem; font: .86rem/1.55 ui-monospace, SFMono-Regular, Consolas, monospace; }
+.writing-rules { display: grid; gap: .6rem; margin: .8rem 0; }
+.writing-rule { display: grid; grid-template-columns: minmax(9rem, 13rem) minmax(0, 1fr) auto; gap: .6rem; align-items: start; }
+.writing-rule .rule-title { font-weight: 600; }
+.writing-rule .rule-instruction { min-height: 3.6rem; font: inherit; }
+.writing-rules + .actions { display: flex; gap: .75rem; align-items: center; flex-wrap: wrap; }
 .save-bar { display: flex; justify-content: space-between; align-items: center; gap: 1rem; margin: 1rem 0; padding: .9rem 1rem; border: 1px solid var(--border); border-radius: .9rem; background: var(--surface); box-shadow: 0 12px 30px rgb(30 35 50 / 12%); }
 .save-bar .hint { display: block; }
 .publication-list { display: grid; gap: .7rem; }
@@ -1371,6 +1376,7 @@ label.checkbox input {
 
 @media (max-width: 760px) {
     .publish-actions, .settings-grid, .compact-grid, .article-grid { grid-template-columns: 1fr; }
+    .writing-rule { grid-template-columns: 1fr; }
     .action-card { min-height: auto; align-items: stretch; flex-direction: column; }
     .action-state { align-items: stretch; }
     .save-bar { align-items: stretch; flex-direction: column; }

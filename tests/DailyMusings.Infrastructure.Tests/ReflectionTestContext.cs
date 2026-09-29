@@ -222,6 +222,7 @@ internal sealed class ReflectionTestContext : IAsyncDisposable
             client,
             generation,
             content,
+            content,
             UnitOfWork,
             clock,
             ThisRetrieval,

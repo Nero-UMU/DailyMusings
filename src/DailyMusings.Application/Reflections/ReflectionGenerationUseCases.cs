@@ -205,6 +205,7 @@ public sealed class GenerateReflectionUseCase
     private readonly IReflectionRepository _reflections;
     private readonly IReflectionGenerationClient _client;
     private readonly IGenerationSettingsProvider _settings;
+    private readonly IContentSettingsProvider _contentSettings;
     private readonly IContentCalendarProvider _calendars;
     private readonly IUnitOfWork _unitOfWork;
     private readonly IClock _clock;
@@ -219,6 +220,7 @@ public sealed class GenerateReflectionUseCase
         IReflectionRepository reflections,
         IReflectionGenerationClient client,
         IGenerationSettingsProvider settings,
+        IContentSettingsProvider contentSettings,
         IContentCalendarProvider calendars,
         IUnitOfWork unitOfWork,
         IClock clock,
@@ -232,6 +234,7 @@ public sealed class GenerateReflectionUseCase
         _reflections = reflections;
         _client = client;
         _settings = settings;
+        _contentSettings = contentSettings;
         _calendars = calendars;
         _unitOfWork = unitOfWork;
         _clock = clock;
@@ -310,7 +313,13 @@ public sealed class GenerateReflectionUseCase
             .ExecuteAsync(contentDate, material, cancellationToken)
             .ConfigureAwait(false);
 
-        var writing = payload.Settings ?? WritingSettings.Default;
+        // The spec the user configured on the publishing settings page (decision A.24). Read when the job runs
+        // rather than snapshotted when it was queued: it is a standing preference, not a per-day decision like
+        // the overwrite consent the payload carries, and a user who changes their style expects the next article
+        // to follow it. A payload that does carry one still wins, which keeps the payload the place where an
+        // explicit per-run choice lives.
+        var writing = payload.Settings
+            ?? (await _contentSettings.GetAsync(cancellationToken).ConfigureAwait(false)).Writing;
 
         // The vocabulary the model may choose from. Only active topics: a merged one is a tombstone and must
         // never attract new material (A.9), and offering it would invite exactly that.

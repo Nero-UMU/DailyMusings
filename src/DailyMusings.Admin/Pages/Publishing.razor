@@ -4,7 +4,7 @@
 @inject IServiceScopeFactory ScopeFactory
 @inject ILoggerFactory LoggerFactory
 
-<PageHeader Title="发布设置" Hint="这里只管理稿件何时生成、何时发布，以及两个 Markdown 输出目录。">
+<PageHeader Title="发布设置" Hint="管理稿件何时生成、何时发布、生成时遵循的写作规范，以及两个 Markdown 输出目录。">
     <Actions><button class="btn" @onclick="ReloadAsync" disabled="@_busy">刷新状态</button></Actions>
 </PageHeader>
 
@@ -63,6 +63,54 @@
 </div>
 
 <section class="card template-card">
+    <div class="card-head">
+        <div><span class="eyebrow">模型</span><h2>博客生成规范</h2></div>
+        <button class="btn btn-sm" @onclick="ResetWritingRules" disabled="@_busy">恢复默认清单</button>
+    </div>
+    <p class="hint">这些规范会在生成时前置给文章模型，与当天的随想一起提交。默认条目可以直接改写或删掉；
+        全部删掉也有效，那时只会告诉模型篇幅和人称。</p>
+
+    <div class="form-grid compact-grid">
+        <label>目标字数
+            <input type="number" min="@WritingSettings.MinTargetCharacters" max="@WritingSettings.MaxTargetCharacters"
+                   value="@_writingTargetCharacters"
+                   @oninput="e => _writingTargetCharacters = (string?)e.Value ?? string.Empty" />
+            <span class="hint">正文汉字数，不含 Markdown 标记。</span>
+        </label>
+        <label>人称
+            <select value="@_writingPerson" @onchange="e => _writingPerson = (string?)e.Value ?? ContentSettings.WritingPersonFirst">
+                <option value="@ContentSettings.WritingPersonFirst">第一人称（我）</option>
+                <option value="@ContentSettings.WritingPersonSecond">第二人称（你）</option>
+                <option value="@ContentSettings.WritingPersonThird">第三人称（他 / 她）</option>
+            </select>
+        </label>
+    </div>
+
+    <div class="writing-rules">
+        @for (var i = 0; i < _writingRules.Count; i++)
+        {
+            var index = i;
+            <div class="writing-rule">
+                <input class="rule-title" value="@_writingRules[index].Title" placeholder="规范名称，例如「行文风格」"
+                       @oninput="e => _writingRules[index] = _writingRules[index] with { Title = (string?)e.Value ?? string.Empty }" />
+                <textarea class="rule-instruction" value="@_writingRules[index].Instruction" placeholder="写给模型的要求"
+                          @oninput="e => _writingRules[index] = _writingRules[index] with { Instruction = (string?)e.Value ?? string.Empty }"></textarea>
+                <button class="btn btn-sm btn-danger" @onclick="() => RemoveWritingRule(index)" disabled="@_busy">删除</button>
+            </div>
+        }
+        @if (_writingRules.Count == 0)
+        {
+            <p class="empty-state">目前没有任何规范条目。</p>
+        }
+    </div>
+
+    <div class="actions">
+        <button class="btn btn-sm" @onclick="AddWritingRule" disabled="@_busy">添加一条规范</button>
+        <span class="hint">最多 @WritingSettings.MaxRules 条；标题不超过 @WritingRule.MaxTitleLength 字，内容不超过 @WritingRule.MaxInstructionLength 字。</span>
+    </div>
+</section>
+
+<section class="card template-card">
     <div class="card-head"><div><span class="eyebrow">Hexo</span><h2>Front matter 模板</h2></div>
         <button class="btn btn-sm" @onclick="ResetTemplate" disabled="@_busy">恢复默认</button></div>
     <textarea class="template-editor" spellcheck="false" value="@_hexoTemplate" @oninput="e => _hexoTemplate = (string?)e.Value ?? string.Empty"></textarea>
@@ -101,6 +149,9 @@
     private string _draftDirectory = ContentSettings.DefaultDraftDirectory;
     private string _publishedDirectory = ContentSettings.DefaultPublishedDirectory;
     private string _hexoTemplate = MarkdownTemplate.Default;
+    private string _writingTargetCharacters = WritingSettings.DefaultTargetCharacters.ToString();
+    private string _writingPerson = ContentSettings.FormatPerson(WritingSettings.Default.Person);
+    private List<WritingRule> _writingRules = [.. WritingSettings.DefaultRules];
     private string _currentPassword = string.Empty;
     private bool _automaticPublish;
     private bool _busy;
@@ -124,6 +175,9 @@
         _draftDirectory = settings.DraftDirectory;
         _publishedDirectory = settings.PublishedDirectory;
         _hexoTemplate = settings.HexoFrontMatterTemplate;
+        _writingTargetCharacters = settings.Writing.TargetCharacters.ToString();
+        _writingPerson = ContentSettings.FormatPerson(settings.Writing.Person);
+        _writingRules = [.. settings.Writing.Rules];
         var targets = await services.GetRequiredService<ListPublishTargetsUseCase>().ExecuteAsync(CancellationToken.None);
         _publishTarget = targets.FirstOrDefault(target => target.Name == PublicTargetName);
         _automaticPublish = _publishTarget?.AutomaticPublishEnabled ?? false;
@@ -167,8 +221,16 @@
             !TimeOnly.TryParseExact(_publishTime, "HH:mm", CultureInfo.InvariantCulture, DateTimeStyles.None, out var publish))
             throw new UseCaseException("publish.time.invalid", "生成和发布时间都必须是 HH:mm。");
 
+        if (!int.TryParse(_writingTargetCharacters, out var targetCharacters))
+            throw new UseCaseException("writing.length.invalid", "目标字数必须是数字。");
+
+        if (!ContentSettings.TryParsePerson(_writingPerson, out var writingPerson))
+            throw new UseCaseException("writing.person.invalid", "人称只能是第一、第二或第三人称。");
+
         await services.GetRequiredService<UpdateContentSettingsUseCase>().ExecuteAsync(
-            new ContentSettingsUpdate(null, generation, publish, null, null, null, _draftDirectory, _publishedDirectory, _hexoTemplate),
+            new ContentSettingsUpdate(
+                null, generation, publish, null, null, null, _draftDirectory, _publishedDirectory, _hexoTemplate,
+                targetCharacters, writingPerson, CollectWritingRules()),
             CancellationToken.None);
         await EnsurePublicTargetAsync(services);
         await services.GetRequiredService<UpdatePublishTargetUseCase>().ExecuteAsync(
@@ -188,6 +250,29 @@
     }
 
     private void ResetTemplate() => _hexoTemplate = MarkdownTemplate.Default;
+
+    private void AddWritingRule() => _writingRules.Add(new WritingRule(string.Empty, string.Empty));
+
+    private void RemoveWritingRule(int index)
+    {
+        if (index >= 0 && index < _writingRules.Count)
+        {
+            _writingRules.RemoveAt(index);
+        }
+    }
+
+    private void ResetWritingRules() => _writingRules = [.. WritingSettings.DefaultRules];
+
+    /// <summary>
+    /// Trims what the user typed and drops rows they left completely blank: an empty row is a half-finished edit,
+    /// not a rule, and failing the whole save over one would be hostile. A row that is filled in only halfway is a
+    /// mistake, and the domain validation names it rather than dropping it silently.
+    /// </summary>
+    private IReadOnlyList<WritingRule> CollectWritingRules() =>
+        _writingRules
+            .Select(rule => new WritingRule(rule.Title.Trim(), rule.Instruction.Trim()))
+            .Where(rule => rule.Title.Length > 0 || rule.Instruction.Length > 0)
+            .ToArray();
     private PublicationStatus? TodayPublicationStatus() => _recent.FirstOrDefault(item =>
         _reflection?.WorkingVersion is { } workingVersion &&
         item.Publication.ReflectionId == _reflection.Id &&

@@ -435,6 +435,111 @@ public class AdminSurfaceTests
     }
 
     /// <summary>
+    /// 写作规范经 API 往返（docs/开发指导.md §8.4，附录 A.24）。
+    /// <para>
+    /// 关键在于「删空」与「从未配置」是两件事：前者是用户在界面上按下删除的结果，必须在读回来时保持为空，
+    /// 否则那个删除按钮等于没有用。
+    /// </para>
+    /// </summary>
+    [TestMethod]
+    public async Task The_writing_spec_round_trips_and_an_emptied_rule_list_stays_empty()
+    {
+        await using var instance = await TestInstance.StartAsync();
+        await instance.SignInAsChangedAdministratorAsync();
+
+        var initial = await instance.Client.GetFromJsonAsync<ContentSettingsDto>("/api/content-settings");
+
+        Assert.AreEqual(300, initial!.WritingTargetCharacters, "默认 300 字。");
+        Assert.AreEqual("first", initial.WritingPerson, "默认第一人称。");
+        Assert.IsTrue(initial.WritingRules.Count > 0, "全新实例应当带一份可改的默认规范清单。");
+
+        using var updated = await instance.Client.PatchAsJsonAsync(
+            "/api/content-settings",
+            new UpdateContentSettingsRequest(
+                null, null, null, null, null,
+                WritingTargetCharacters: 450,
+                WritingPerson: "third",
+                WritingRules: [new WritingRuleDto("我的风格", "短句为主，不写总结。")]));
+
+        updated.EnsureSuccessStatusCode();
+
+        var saved = (await updated.Content.ReadFromJsonAsync<ContentSettingsDto>())!;
+        Assert.AreEqual(450, saved.WritingTargetCharacters);
+        Assert.AreEqual("third", saved.WritingPerson);
+        Assert.AreEqual(1, saved.WritingRules.Count);
+
+        var reloaded = await instance.Client.GetFromJsonAsync<ContentSettingsDto>("/api/content-settings");
+        Assert.AreEqual("我的风格", reloaded!.WritingRules[0].Title, "读回来要还是用户那一份，不是默认清单。");
+        Assert.AreEqual("短句为主，不写总结。", reloaded.WritingRules[0].Instruction);
+
+        using var emptied = await instance.Client.PatchAsJsonAsync(
+            "/api/content-settings",
+            new UpdateContentSettingsRequest(null, null, null, null, null, WritingRules: []));
+
+        emptied.EnsureSuccessStatusCode();
+        Assert.AreEqual(
+            0,
+            (await emptied.Content.ReadFromJsonAsync<ContentSettingsDto>())!.WritingRules.Count,
+            "用户把清单删空是明确的选择，不能在读回来时又变回默认条目。");
+
+        // 认不出来的人称要被明确拒绝，而不是悄悄退回第一人称 —— 那会写出一篇人称不对的文章。
+        using var badPerson = await instance.Client.PatchAsJsonAsync(
+            "/api/content-settings",
+            new UpdateContentSettingsRequest(null, null, null, null, null, WritingPerson: "fourth"));
+
+        Assert.AreEqual(HttpStatusCode.BadRequest, badPerson.StatusCode);
+    }
+
+    [TestMethod]
+    public async Task A_half_filled_writing_rule_is_rejected_by_name()
+    {
+        await using var instance = await TestInstance.StartAsync();
+        await instance.SignInAsChangedAdministratorAsync();
+
+        using var half = await instance.Client.PatchAsJsonAsync(
+            "/api/content-settings",
+            new UpdateContentSettingsRequest(
+                null, null, null, null, null,
+                WritingRules: [new WritingRuleDto("只有标题", "   ")]));
+
+        Assert.AreEqual(HttpStatusCode.BadRequest, half.StatusCode);
+        Assert.AreEqual(
+            "writing.rule.instruction_invalid",
+            (await half.Content.ReadFromJsonAsync<ApiError>())!.Code,
+            "半填的条目是笔误，要按名字报出来，而不是被静默丢掉。");
+
+        using var tooLong = await instance.Client.PatchAsJsonAsync(
+            "/api/content-settings",
+            new UpdateContentSettingsRequest(null, null, null, null, null, WritingTargetCharacters: 99999));
+
+        Assert.AreEqual(HttpStatusCode.BadRequest, tooLong.StatusCode);
+        Assert.AreEqual("writing.length.out_of_range", (await tooLong.Content.ReadFromJsonAsync<ApiError>())!.Code);
+    }
+
+    /// <summary>
+    /// 写作规范卡渲染在发布设置页，而且在 Front matter 模板**上方**（附录 A.24 指明了摆放位置）。
+    /// </summary>
+    [TestMethod]
+    public async Task The_writing_spec_card_renders_above_the_front_matter_template()
+    {
+        await using var instance = await TestInstance.StartAsync();
+        await instance.SignInAsChangedAdministratorAsync();
+
+        using var page = await instance.Client.GetAsync("/publishing");
+        var html = WebUtility.HtmlDecode(await page.Content.ReadAsStringAsync());
+
+        page.EnsureSuccessStatusCode();
+
+        var specAt = html.IndexOf("博客生成规范", StringComparison.Ordinal);
+        var templateAt = html.IndexOf("Front matter 模板", StringComparison.Ordinal);
+
+        Assert.IsTrue(specAt >= 0, $"发布设置页没有渲染博客生成规范卡片：\n{html}");
+        Assert.IsTrue(templateAt > specAt, "写作规范卡必须在 Front matter 模板上方。");
+        StringAssert.Contains(html, "目标字数");
+        StringAssert.Contains(html, "添加一条规范");
+    }
+
+    /// <summary>
     /// The eight sections the operator asked for (2026-09-24). It walks the menu the way a person does: every route
     /// answers 200 and renders a heading of its own, the menu names all eight, and the pages the layout replaced are
     /// gone rather than merely unlinked.
