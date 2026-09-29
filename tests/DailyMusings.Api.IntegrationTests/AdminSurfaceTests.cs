@@ -540,6 +540,41 @@ public class AdminSurfaceTests
     }
 
     /// <summary>
+    /// 「保存发布设置」在页头右上角、与「刷新状态」并排。
+    /// <para>
+    /// 它原来贴在「时区」那一行上，看起来像是在给时区做设置 —— 一个按钮挨着哪段文字，就会被读成那段文字的
+    /// 动作。保存属于整页，所以它属于页头。
+    /// </para>
+    /// </summary>
+    [TestMethod]
+    public async Task The_save_button_sits_in_the_page_header_beside_the_refresh_button()
+    {
+        await using var instance = await TestInstance.StartAsync();
+        await instance.SignInAsChangedAdministratorAsync();
+
+        using var page = await instance.Client.GetAsync("/publishing");
+        var html = WebUtility.HtmlDecode(await page.Content.ReadAsStringAsync());
+
+        page.EnsureSuccessStatusCode();
+
+        var head = Regex.Match(
+            html,
+            "<header class=\"page-head\">.*?</header>",
+            RegexOptions.Singleline | RegexOptions.CultureInvariant);
+
+        Assert.IsTrue(head.Success, $"发布设置页没有渲染页头：\n{html}");
+        StringAssert.Contains(head.Value, "刷新状态");
+        StringAssert.Contains(head.Value, "保存发布设置");
+        StringAssert.Contains(head.Value, "btn-primary", "保存是这一页的主操作，应当保持主按钮样式。");
+
+        // 时区仍然要说清楚，只是它不再挂着一个按钮。
+        StringAssert.Contains(html, "时区", "计划时间用哪个时区仍然要写在页面上。");
+        Assert.IsFalse(
+            html.Contains("save-bar", StringComparison.Ordinal),
+            "保存按钮已经移到页头，不该再留着那条「时区 + 保存」的横条。");
+    }
+
+    /// <summary>
     /// The eight sections the operator asked for (2026-09-24). It walks the menu the way a person does: every route
     /// answers 200 and renders a heading of its own, the menu names all eight, and the pages the layout replaced are
     /// gone rather than merely unlinked.

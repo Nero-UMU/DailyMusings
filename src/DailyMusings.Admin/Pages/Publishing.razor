@@ -5,7 +5,10 @@
 @inject ILoggerFactory LoggerFactory
 
 <PageHeader Title="发布设置" Hint="管理稿件何时生成、何时发布、生成时遵循的写作规范，以及两个 Markdown 输出目录。">
-    <Actions><button class="btn" @onclick="ReloadAsync" disabled="@_busy">刷新状态</button></Actions>
+    <Actions>
+        <button class="btn" @onclick="ReloadAsync" disabled="@_busy">刷新状态</button>
+        <button class="btn-primary" @onclick="SaveAsync" disabled="@_busy">保存发布设置</button>
+    </Actions>
 </PageHeader>
 
 @if (_message is not null) { <p class="notice ok">@_message</p> }
@@ -39,7 +42,8 @@
             <label>每日自动生成时间<input type="time" value="@_generationTime" @onchange="e => _generationTime = (string?)e.Value ?? _generationTime" /></label>
             <label>稿件输出目录<input value="@_draftDirectory" @oninput="e => _draftDirectory = (string?)e.Value ?? string.Empty" /></label>
         </div>
-        <p class="hint">目录相对于容器的 Markdown 根目录；不能使用绝对路径或 <code>..</code>。</p>
+        <p class="hint">目录相对于容器的 Markdown 根目录；不能使用绝对路径或 <code>..</code>。
+            两个计划的时间都是 <strong>@_timeZoneId</strong> 时区的墙上时间；时区在系统设置中修改。</p>
     </section>
 
     <section class="card settings-card">
@@ -109,11 +113,6 @@
     <textarea class="template-editor" spellcheck="false" value="@_hexoTemplate" @oninput="e => _hexoTemplate = (string?)e.Value ?? string.Empty"></textarea>
     <p class="hint">可用：<code>{title}</code>、<code>{date}</code>、<code>{updated}</code>、<code>{tags}</code>、<code>{categories}</code>、<code>{draft}</code>、<code>{summary}</code>、<code>{slug}</code>、<code>{body}</code>。模板必须包含 <code>{body}</code>。</p>
 </section>
-
-<div class="save-bar">
-    <div><strong>时区：@_timeZoneId</strong><span class="hint">自动任务按此时区运行；时区在系统设置中修改。</span></div>
-    <button class="btn-primary" @onclick="SaveAsync" disabled="@_busy">保存发布设置</button>
-</div>
 
 <section class="card">
     <div class="card-head"><div><span class="eyebrow">记录</span><h2>最近发布</h2></div></div>
