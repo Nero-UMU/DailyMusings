@@ -37,8 +37,8 @@ public static class PublishingEndpointRouteBuilderExtensions
             .RequireAuthorization(ServerAuthenticationPolicies.DeviceOrAdmin);
 
         // Reading is allowed to a device: the draft screen has to show where a day can go. Configuring is not, and
-        // those routes are mapped outside this group on purpose — §11.1 puts the automatic-publish switch behind
-        // the admin page, and a group is the wrong place to say "except for these".
+        // those routes are mapped outside this group on purpose — §11.1 keeps the automatic-publish switch on the
+        // admin page, and a group is the wrong place to say "except for these".
         targets.MapGet(string.Empty, ListTargetsAsync);
 
         endpoints
@@ -166,11 +166,11 @@ public static class PublishingEndpointRouteBuilderExtensions
     }
 
     /// <summary>
-    /// Enables or disables unattended publishing (docs/开发指导.md §11.1, decision A.7).
+    /// Enables or disables unattended publishing (docs/开发指导.md §11.1, decision A.25).
     /// <para>
-    /// The risk acknowledgement the guide asks for is the client's job to display, and the password requirement is
-    /// the server's to enforce — which is why the password travels in the body rather than being inferred from the
-    /// session. A device token cannot reach this route at all, so it can never flip the switch.
+    /// Administrator-only, and that route policy is the whole protection: a device token cannot reach this route at
+    /// all, so it can never flip the switch. The body carries only the desired state — the earlier password
+    /// requirement was removed in A.25 — and the audit record of who set it is written server-side.
     /// </para>
     /// </summary>
     private static async Task<IResult> SetAutomaticPublishAsync(
@@ -184,15 +184,15 @@ public static class PublishingEndpointRouteBuilderExtensions
             return NotFoundTarget();
         }
 
-        if (request is null || string.IsNullOrEmpty(request.CurrentPassword))
+        if (request is null)
         {
-            return Invalid("The administrator's current password is required.");
+            return Invalid("A body is required.");
         }
 
         try
         {
             var target = await setAutomatic
-                .ExecuteAsync(new PublishTargetId(parsed), request.Enabled, request.CurrentPassword, cancellationToken)
+                .ExecuteAsync(new PublishTargetId(parsed), request.Enabled, cancellationToken)
                 .ConfigureAwait(false);
 
             return Results.Ok(ToDto(target));
@@ -605,10 +605,7 @@ public static class PublishingEndpointRouteBuilderExtensions
             "publish.target.unknown" or "publication.unknown" or "reflection.unknown" =>
                 StatusCodes.Status404NotFound,
 
-            // Two distinct kinds of refusal share the code space here: a permission-shaped one (the password did
-            // not match) and a state-shaped one (the remote is gone, the file is not ours).
-            "publish.automatic.password_rejected" => StatusCodes.Status403Forbidden,
-
+            // A state-shaped refusal: the remote is gone, the file is not ours, the pull has nothing to pull.
             "publication.remote_missing" or "publication.pull.not_supported" or
                 "publication.overwrite.not_applicable" or
                 "publication.pull.empty" or "publish.markdown.path_escapes_root" or

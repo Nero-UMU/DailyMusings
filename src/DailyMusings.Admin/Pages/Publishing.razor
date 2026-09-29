@@ -50,15 +50,8 @@
         <div class="form-grid compact-grid">
             <label>每日自动发布时间<input type="time" value="@_publishTime" @onchange="e => _publishTime = (string?)e.Value ?? _publishTime" /></label>
             <label>稿件发布目录<input value="@_publishedDirectory" @oninput="e => _publishedDirectory = (string?)e.Value ?? string.Empty" /></label>
-            @if (_automaticPublish != (_publishTarget?.AutomaticPublishEnabled ?? false))
-            {
-                <label class="full-row">当前管理员密码
-                    <input type="password" autocomplete="current-password" value="@_currentPassword" @oninput="e => _currentPassword = (string?)e.Value ?? string.Empty" />
-                    <span class="hint">改变自动发布开关需要重新验证身份。</span>
-                </label>
-            }
         </div>
-        <p class="notice warn slim">自动发布只处理已确认稿件；不会绕过内容核验。</p>
+        <p class="notice warn slim">自动发布会按上面的时间，自己把已确认的稿件写成 <code>draft: false</code> 的文件；不会绕过内容核验，也不会公开未经确认的稿件。勾选即生效，保存后立即按新开关执行。</p>
     </section>
 </div>
 
@@ -152,7 +145,6 @@
     private string _writingTargetCharacters = WritingSettings.DefaultTargetCharacters.ToString();
     private string _writingPerson = ContentSettings.FormatPerson(WritingSettings.Default.Person);
     private List<WritingRule> _writingRules = [.. WritingSettings.DefaultRules];
-    private string _currentPassword = string.Empty;
     private bool _automaticPublish;
     private bool _busy;
     private string? _message;
@@ -237,8 +229,7 @@
             _publishTarget!.Id, null, _publishedDirectory, CancellationToken.None);
         if (_automaticPublish != _publishTarget.AutomaticPublishEnabled)
             await services.GetRequiredService<SetAutomaticPublishUseCase>().ExecuteAsync(
-                _publishTarget.Id, _automaticPublish, _currentPassword, CancellationToken.None);
-        _currentPassword = string.Empty;
+                _publishTarget.Id, _automaticPublish, CancellationToken.None);
         await LoadAsync();
     }, "发布设置已保存，下一次调度立即使用新配置。");
 

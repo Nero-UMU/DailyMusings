@@ -278,22 +278,17 @@ public class PublishingLoopTests
         // A device token cannot even see the route.
         using var fromDevice = await device.PostAsJsonAsync(
             $"/api/publish-targets/{target.Id}/automatic-publish",
-            new SetAutomaticPublishRequest(true, "CorrectHorseBattery1"));
+            new SetAutomaticPublishRequest(true));
 
         Assert.IsTrue(
             fromDevice.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.Unauthorized,
             $"A device token must not be able to enable automatic publishing (got {fromDevice.StatusCode}).");
 
-        // The administrator gets it wrong first, and the wrong password is refused.
-        using var wrongPassword = await instance.Client.PostAsJsonAsync(
-            $"/api/publish-targets/{target.Id}/automatic-publish",
-            new SetAutomaticPublishRequest(true, "not-the-password"));
-
-        Assert.AreEqual(HttpStatusCode.Forbidden, wrongPassword.StatusCode);
-
+        // A.25：管理员端只要一个勾选，不再要求重新输入密码。这个端点本身就是管理员专属，
+        // 所以「谁能到得了这里」才是保护，「再输一次刚用过的密码」只是负担。
         using var enabled = await instance.Client.PostAsJsonAsync(
             $"/api/publish-targets/{target.Id}/automatic-publish",
-            new SetAutomaticPublishRequest(true, "CorrectHorseBattery1"));
+            new SetAutomaticPublishRequest(true));
 
         enabled.EnsureSuccessStatusCode();
         var enabledTarget = await enabled.Content.ReadFromJsonAsync<PublishTargetDto>();
@@ -303,9 +298,10 @@ public class PublishingLoopTests
         Assert.IsFalse(string.IsNullOrWhiteSpace(enabledTarget.AutomaticPublishEnabledBy));
         Assert.IsNotNull(enabledTarget.AutomaticPublishEnabledAtUtc);
 
+        // 关掉也只要一个勾选 —— 原来的实现连「关闭」都要求密码。
         using var disabled = await instance.Client.PostAsJsonAsync(
             $"/api/publish-targets/{target.Id}/automatic-publish",
-            new SetAutomaticPublishRequest(false, "CorrectHorseBattery1"));
+            new SetAutomaticPublishRequest(false));
 
         disabled.EnsureSuccessStatusCode();
         Assert.IsFalse((await disabled.Content.ReadFromJsonAsync<PublishTargetDto>())!.AutomaticPublishEnabled);

@@ -51,10 +51,11 @@ public sealed record CreatePublishTargetRequest(string Name, string Type, string
 public sealed record UpdatePublishTargetRequest(string? Name, string? DestinationReference);
 
 /// <summary>
-/// Turning unattended publishing on or off (§11.1). The password is required even to turn it <em>off</em>: the
-/// switch is a safety control, and a session that could disable it silently is a session that could publish.
+/// Turning unattended publishing on or off (§11.1, decision A.25). No password: the route is administrator-only,
+/// so the caller is already the instance's one administrator, and re-typing that password proved nothing while
+/// making the switch tedious. The audit record of who set it is written server-side from the account.
 /// </summary>
-public sealed record SetAutomaticPublishRequest(bool Enabled, string CurrentPassword);
+public sealed record SetAutomaticPublishRequest(bool Enabled);
 
 /// <summary>One publication, with everything the draft screen needs to explain itself.</summary>
 public sealed record PublicationDto(

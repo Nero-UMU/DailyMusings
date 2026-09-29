@@ -84,54 +84,49 @@ public sealed class UpdatePublishTargetUseCase
 }
 
 /// <summary>
-/// Turns unattended publishing on or off for one target (docs/开发指导.md §11.1, decision A.7).
+/// Turns unattended publishing on or off for one target (docs/开发指导.md §11.1, decision A.25).
 /// <para>
-/// Three things have to be true at once, and all three live here rather than in a controller so they can be
-/// tested as one rule: only an administrator may do it, they must re-enter their password at the moment they do
-/// it, and the switch records who set it. A device token cannot reach this use case at all — the API gives it no
-/// route — and it could not satisfy the password requirement if it could.
+/// Two things have to be true, and both live here rather than in a controller so they can be tested as one rule:
+/// only an administrator may do it — the API gives a device token no route to this use case — and the switch
+/// records who set it, so an instance that starts writing `draft: false` on its own can always be traced back to
+/// a deliberate act.
+/// </para>
+/// <para>
+/// The re-authentication §11.1 originally asked for is gone (A.25). The person who can reach this page is already
+/// signed in as the only administrator the instance has, so retyping that same password bought no protection —
+/// it only made the switch annoying enough to be left in whatever state it happened to be in. The risk notice
+/// stays in the interface; it was always the client's job to show it.
 /// </para>
 /// </summary>
 public sealed class SetAutomaticPublishUseCase
 {
     private readonly IPublishTargetRepository _targets;
     private readonly IAdminAccountRepository _accounts;
-    private readonly IPasswordHasher _hasher;
     private readonly IClock _clock;
 
     public SetAutomaticPublishUseCase(
         IPublishTargetRepository targets,
         IAdminAccountRepository accounts,
-        IPasswordHasher hasher,
         IClock clock)
     {
         _targets = targets;
         _accounts = accounts;
-        _hasher = hasher;
         _clock = clock;
     }
 
     public async Task<PublishTarget> ExecuteAsync(
         PublishTargetId targetId,
         bool enabled,
-        string currentPassword,
         CancellationToken cancellationToken)
     {
         var target = await UpdatePublishTargetUseCase
             .RequireAsync(_targets, targetId, cancellationToken)
             .ConfigureAwait(false);
 
+        // The audit record needs a name, and §4.1 gives an instance exactly one administrator, so the account is
+        // the honest source for it — better than trusting a name that arrived in the request body.
         var account = await _accounts.GetAsync(cancellationToken).ConfigureAwait(false)
             ?? throw new UseCaseException("admin.not_initialized", "The instance has no administrator yet.");
-
-        if (string.IsNullOrEmpty(currentPassword) || !_hasher.Verify(currentPassword, account.PasswordHash))
-        {
-            // The re-authentication §11.1 asks for. Without it, an unattended session left open on a shared
-            // machine could hand the instance the ability to publish to the public internet by itself.
-            throw new UseCaseException(
-                "publish.automatic.password_rejected",
-                "Enabling automatic publishing requires the administrator's current password.");
-        }
 
         if (enabled)
         {
