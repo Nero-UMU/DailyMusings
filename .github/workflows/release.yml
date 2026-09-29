@@ -80,17 +80,43 @@ jobs:
       - name: 安装 MAUI Android 工作负载
         run: dotnet workload install maui-android
 
+      - name: 由 tag 推导 Android 版本号
+        id: version
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF_NAME}" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+            major="${BASH_REMATCH[1]}"; minor="${BASH_REMATCH[2]}"; patch="${BASH_REMATCH[3]}"
+            echo "name=${major}.${minor}.${patch}" >> "$GITHUB_OUTPUT"
+            # versionCode 是整数且必须单调递增，手机才肯覆盖安装（否则报「应用未安装」）。
+            # 语义化版本映射成 major*10000 + minor*100 + patch：1.0.3 → 10003。
+            echo "code=$((major * 10000 + minor * 100 + patch))" >> "$GITHUB_OUTPUT"
+          else
+            # 手动触发跑在分支上：用 csproj 里的默认值，不假装成一个版本号。
+            echo "name=" >> "$GITHUB_OUTPUT"
+            echo "code=" >> "$GITHUB_OUTPUT"
+            echo "not a version tag ('${GITHUB_REF_NAME}'), keeping the project defaults"
+          fi
+          cat "$GITHUB_OUTPUT"
+
       # 必须是 Release：Debug 版依赖 Fast Deployment，APK 里不含程序集，单独安装会以
       # 「No assemblies found」启动失败（docs/发布校验值.md）。
       - name: 构建签名 APK
-        run: >
-          dotnet build src/DailyMusings.Client/DailyMusings.Client.csproj
-          -f net10.0-android -c Release -t:SignAndroidPackage
+        env:
+          VERSION_NAME: ${{ steps.version.outputs.name }}
+          VERSION_CODE: ${{ steps.version.outputs.code }}
+        run: |
+          set -euo pipefail
+          extra=()
+          if [ -n "$VERSION_NAME" ]; then
+            extra+=("-p:ApplicationDisplayVersion=$VERSION_NAME" "-p:ApplicationVersion=$VERSION_CODE")
+          fi
+          dotnet build src/DailyMusings.Client/DailyMusings.Client.csproj \
+            -f net10.0-android -c Release -t:SignAndroidPackage "${extra[@]}"
 
       - name: 改名并算 SHA-256
         run: |
           set -euo pipefail
-          version="${GITHUB_REF_NAME#v}"
+          version="${{ steps.version.outputs.name }}"
           [ -n "$version" ] || version="0.0.0-dev"
           apk="DailyMusings-client-${version}-android.apk"
           cp src/DailyMusings.Client/bin/Release/net10.0-android/dev.dailymusings.client-Signed.apk "$apk"

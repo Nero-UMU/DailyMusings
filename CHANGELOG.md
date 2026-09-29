@@ -6,6 +6,18 @@
 
 ---
 
+## 2026-09-29（第六轮，随 v1.0.3）APK 的 versionCode 随 tag 递增 —— 修掉「新版本装不上手机」
+
+- **问题**：`ApplicationVersion` 一直写死 `1`，所以此前每一次发布的 APK 的 `versionCode` 都是 1。Android 拒绝
+  用同一个 `versionCode` 覆盖安装，用户手机上会看到「应用未安装」，只能先卸载旧版——而「下载 APK 装上就能用」
+  正是这个交付形态的承诺。
+- **改法**：`release.yml` 从 tag 推导版本号再传给构建——`ApplicationDisplayVersion=1.0.3`、
+  `ApplicationVersion=10003`（`major*10000 + minor*100 + patch`，随版本单调递增）。手动触发（跑在分支上）时
+  不传这两个属性，用 csproj 里的默认值，不假装成一个版本号；APK 的文件名也统一由这一步推导。
+- **验证**：本地按 tag 的方式构建一次，合并后的 `AndroidManifest.xml` 为 `versionName=1.0.3` /
+  `versionCode=10003`；签名 APK（29,397,195 字节）里的二进制 AXML 字符串池含 `1.0.3`（`versionCode` 在 AXML
+  里是整数而非字符串，所以在 `obj` 的合并清单里核对）。
+
 ## 2026-09-29（第五轮）凭据只能从管理页填：删掉 Docker Secrets 与环境变量两条路
 
 - **两条凭据来源直接删除**：挂到 `/run/secrets` 的文件、`DAILYMUSINGS_SECRET_<名字>` 环境变量。`ISecretStore`
