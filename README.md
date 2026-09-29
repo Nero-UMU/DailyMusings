@@ -188,7 +188,7 @@ docker compose --env-file deploy/.env -f deploy/compose.yaml logs app | grep INI
 - 单一实例。数据库驱动的任务队列假定只有一个执行器，**不要**横向扩容。
 - `deploy/.env` 必须指定 `DAILYMUSINGS_CONFIG_DIR` 与 `DAILYMUSINGS_DATA_DIR`；Compose 只有这两个持久目录映射，路径不存在时会直接拒绝启动。
 - 数据目录保存数据库、音频、导出、备份和 `markdown/` 下的全部稿件；配置目录保存 `runtime.json` 与 DataProtection 密钥环。备份内容时只备份数据目录，配置目录应单独保护。
-- 密钥通过 Docker Secrets 以**文件名**引用，不进配置文件、不进日志、不进备份。默认文件为：`deepseek-api-key`（文章生成）、`openai-api-key`（语音转写）、`embedding-api-key`、`smtp-password`。
+- 密钥通过 Docker Secrets 以**文件名**引用，不进配置文件、不进日志、不进备份。三个模型分别使用独立的密钥槽位：`deepseek-api-key`（文章生成）、`openai-api-key`（语音转写）和 `embedding-api-key`；即使 Base URL 相同也不会互相读取。邮件另用 `smtp-password`。
 - 从 1.0.0 之前的实例升级上来时，启动会自动执行 `0006_markdown_only`，**WordPress 目标与其发布历史会在那一步被删除**——先备份。
 
 ## 安全须知

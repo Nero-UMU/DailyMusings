@@ -44,6 +44,31 @@ public class MigratorTests
     }
 
     [TestMethod]
+    public async Task Model_secret_migration_separates_an_explicit_legacy_embedding_slot()
+    {
+        await using var database = await TestDatabase.CreateAsync();
+
+        await database.Accessor.ExecuteAsync(
+            """
+            INSERT INTO app_setting (setting_key, value, updated_at_utc)
+            VALUES ('model.embedding.secretName', 'openai-api-key', '2026-03-01T00:00:00.0000000+00:00')
+            ON CONFLICT(setting_key) DO UPDATE SET value = excluded.value;
+            DELETE FROM schema_migrations WHERE migration_id = '0010_separate_model_secrets';
+            """,
+            CancellationToken.None);
+
+        var applied = await new SqliteMigrator(database.Accessor, NullLogger<SqliteMigrator>.Instance)
+            .MigrateAsync(CancellationToken.None);
+        var secretName = await database.Accessor.QuerySingleAsync(
+            "SELECT value FROM app_setting WHERE setting_key = 'model.embedding.secretName';",
+            reader => reader.GetString(0),
+            CancellationToken.None);
+
+        CollectionAssert.Contains(applied.ToArray(), "0010_separate_model_secrets");
+        Assert.AreEqual("embedding-api-key", secretName);
+    }
+
+    [TestMethod]
     public async Task The_schema_enforces_the_promises_the_product_makes()
     {
         await using var database = await TestDatabase.CreateAsync();

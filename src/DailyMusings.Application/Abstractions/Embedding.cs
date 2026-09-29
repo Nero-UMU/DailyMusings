@@ -57,7 +57,7 @@ public sealed record EmbeddingSettings(
         Enabled: false,
         BaseUrl: "https://api.openai.com/v1",
         Model: "text-embedding-3-small",
-        SecretName: "openai-api-key",
+        SecretName: "embedding-api-key",
         Timeout: TimeSpan.FromMinutes(2),
         Dimensions: null,
         BatchSize: 32);

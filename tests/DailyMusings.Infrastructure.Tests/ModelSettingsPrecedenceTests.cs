@@ -4,6 +4,7 @@ using DailyMusings.Infrastructure.Generation;
 using DailyMusings.Infrastructure.Notifications;
 using DailyMusings.Infrastructure.Persistence;
 using DailyMusings.Infrastructure.Persistence.Repositories;
+using DailyMusings.Infrastructure.Transcription;
 using Microsoft.Extensions.Configuration;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
@@ -65,6 +66,35 @@ public class ModelSettingsPrecedenceTests
 
         Assert.IsFalse(settings.Enabled, "A fresh instance sends nothing anywhere until an operator turns it on.");
         Assert.AreEqual(EmbeddingSettings.Default.Model, settings.Model);
+    }
+
+    [TestMethod]
+    public async Task Models_with_the_same_base_url_still_use_three_independent_api_keys()
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        var store = Store(database);
+        const string sharedBaseUrl = "https://compatible.example/v1";
+        var configuration = Configuration(
+            ("Transcription:BaseUrl", sharedBaseUrl),
+            ("Generation:BaseUrl", sharedBaseUrl),
+            ("Embedding:BaseUrl", sharedBaseUrl));
+
+        var transcription = await new ConfigurationTranscriptionSettingsProvider(configuration, store)
+            .GetAsync(CancellationToken.None);
+        var generation = await new ConfigurationGenerationSettingsProvider(configuration, store)
+            .GetAsync(CancellationToken.None);
+        var embedding = await new ConfigurationEmbeddingSettingsProvider(configuration, store)
+            .GetAsync(CancellationToken.None);
+
+        Assert.AreEqual(sharedBaseUrl, transcription.BaseUrl);
+        Assert.AreEqual(sharedBaseUrl, generation.BaseUrl);
+        Assert.AreEqual(sharedBaseUrl, embedding.BaseUrl);
+        Assert.AreEqual("openai-api-key", transcription.SecretName);
+        Assert.AreEqual("deepseek-api-key", generation.SecretName);
+        Assert.AreEqual("embedding-api-key", embedding.SecretName);
+        CollectionAssert.AllItemsAreUnique(
+            new[] { transcription.SecretName, generation.SecretName, embedding.SecretName },
+            "Base URL 相同也不能让模型共用 API Key。每个模型必须解析自己的密钥槽位。");
     }
 
     [TestMethod]
