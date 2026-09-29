@@ -80,6 +80,24 @@ jobs:
       - name: 安装 MAUI Android 工作负载
         run: dotnet workload install maui-android
 
+      - name: 写入发布签名密钥
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_SIGNING_KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+
+          # 这一步故意「缺了就失败」。此前没有密钥，构建在全新 runner 上自动生成了一把 Android 调试密钥，
+          # 于是每次发布的签名都不一样，手机上永远装不上新版本（见 docs/开发指导.md 附录 A.30）。
+          # 与其再发出一份装不上的 APK，不如让发布停下来。
+          if [ -z "${KEYSTORE_BASE64}" ]; then
+            echo "::error::缺少 ANDROID_SIGNING_KEYSTORE_BASE64。发布 APK 需要一把固定的签名密钥：" \
+                 "在本机跑 tools/release/new-signing-key.ps1，把打印出来的 4 条 Secret 与 1 条 Variable 填进仓库设置。"
+            exit 1
+          fi
+
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+          echo "keystore 已写入（$(stat -c '%s' "$RUNNER_TEMP/release.keystore") 字节）"
+
       - name: 由 tag 推导 Android 版本号
         id: version
         run: |
@@ -104,14 +122,30 @@ jobs:
         env:
           VERSION_NAME: ${{ steps.version.outputs.name }}
           VERSION_CODE: ${{ steps.version.outputs.code }}
+          SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_SIGNING_STORE_PASSWORD }}
+          SIGNING_KEY_ALIAS: ${{ secrets.ANDROID_SIGNING_KEY_ALIAS }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_SIGNING_KEY_PASSWORD }}
         run: |
           set -euo pipefail
+
+          if [ -z "${SIGNING_STORE_PASSWORD}" ] || [ -z "${SIGNING_KEY_ALIAS}" ] || [ -z "${SIGNING_KEY_PASSWORD}" ]; then
+            echo "::error::签名密钥的密码/别名不完整：需要 ANDROID_SIGNING_STORE_PASSWORD、ANDROID_SIGNING_KEY_ALIAS、ANDROID_SIGNING_KEY_PASSWORD。"
+            exit 1
+          fi
+
           extra=()
           if [ -n "$VERSION_NAME" ]; then
             extra+=("-p:ApplicationDisplayVersion=$VERSION_NAME" "-p:ApplicationVersion=$VERSION_CODE")
           fi
+
           dotnet build src/DailyMusings.Client/DailyMusings.Client.csproj \
-            -f net10.0-android -c Release -t:SignAndroidPackage "${extra[@]}"
+            -f net10.0-android -c Release -t:SignAndroidPackage \
+            -p:AndroidKeyStore=true \
+            -p:AndroidSigningKeyStore="$RUNNER_TEMP/release.keystore" \
+            -p:AndroidSigningStorePass="$SIGNING_STORE_PASSWORD" \
+            -p:AndroidSigningKeyAlias="$SIGNING_KEY_ALIAS" \
+            -p:AndroidSigningKeyPass="$SIGNING_KEY_PASSWORD" \
+            "${extra[@]}"
 
       - name: 改名并算 SHA-256
         run: |
@@ -122,6 +156,48 @@ jobs:
           cp src/DailyMusings.Client/bin/Release/net10.0-android/dev.dailymusings.client-Signed.apk "$apk"
           sha256sum "$apk" > "$apk.sha256"
           cat "$apk.sha256"
+
+      # 签名「没报错」不等于「用的是那把密钥」：构建在找不到密钥时会静默退回调试密钥，而那正是这一版要
+      # 杜绝的事。所以这里读回证书指纹，与仓库变量比对，不一致就让发布失败。
+      - name: 校验签名证书
+        env:
+          EXPECTED_CERT_SHA256: ${{ vars.ANDROID_SIGNING_CERT_SHA256 }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${EXPECTED_CERT_SHA256}" ]; then
+            echo "::error::缺少仓库变量 ANDROID_SIGNING_CERT_SHA256（摘要小写、不含冒号）。它由 tools/release/new-signing-key.ps1 打印。"
+            exit 1
+          fi
+
+          apksigner="$(find "${ANDROID_HOME:-/usr/local/lib/android/sdk}/build-tools" -name apksigner -type f 2>/dev/null | sort | tail -1)"
+          if [ -z "$apksigner" ]; then
+            echo "::error::找不到 apksigner，无法校验签名。"
+            exit 1
+          fi
+
+          version="${{ steps.version.outputs.name }}"
+          [ -n "$version" ] || version="0.0.0-dev"
+          apk="DailyMusings-client-${version}-android.apk"
+
+          actual="$("$apksigner" verify --print-certs "$apk" \
+            | grep -m1 'Signer #1 certificate SHA-256 digest' | awk '{print $NF}' | tr 'A-F' 'a-f')"
+
+          echo "签名证书 SHA-256：$actual"
+          echo "期望的证书        ：$EXPECTED_CERT_SHA256"
+
+          if [ "$actual" != "$EXPECTED_CERT_SHA256" ]; then
+            echo "::error::APK 的签名证书与仓库变量不一致——手机上会装不上（同一包名不同签名必须卸载重装）。"
+            exit 1
+          fi
+
+          echo "signing-cert-sha256=$actual" >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "### 发布签名"
+            echo ""
+            echo "- 证书 SHA-256：\`$actual\`"
+            echo "- 核对：\`apksigner verify --print-certs DailyMusings-client-${version}-android.apk\`"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@v4
         with:
