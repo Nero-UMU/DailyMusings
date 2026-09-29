@@ -195,7 +195,15 @@ jobs:
         run: |
           set -euo pipefail
           tag="$GITHUB_REF_NAME"
-          files=(*.apk *.apk.sha256)
+          version="${tag#v}"
+
+          # 文件名算出来，不用 glob：glob 不匹配时 bash 会把模式原样传下去，于是 gh 报的是
+          # 「文件不存在」，看起来像发布权限问题，实际是产物没到这一步。
+          apk="DailyMusings-client-${version}-android.apk"
+          sha="${apk}.sha256"
+          ls -la
+          [ -f "$apk" ] || { echo "缺少 $apk：构建产物没有传到这一层" >&2; exit 1; }
+          [ -f "$sha" ] || { echo "缺少 $sha" >&2; exit 1; }
 
           {
             echo "## 手机端"
@@ -212,18 +220,25 @@ jobs:
             echo "docker compose logs app | grep INITIAL-ADMIN-PASSWORD"
             echo '```'
             echo
-            echo "镜像：\`${IMAGE}:${tag#v}\`（linux/amd64、linux/arm64）。"
+            echo "镜像：\`${IMAGE}:${version}\`（linux/amd64、linux/arm64，公开包，无需登录即可拉取）。"
             echo "换端口/换数据目录在同一个文件里改 \`DM_PORT\` / \`DM_DATA_DIR\` / \`DM_CONFIG_DIR\`。"
             echo
             echo "## 校验值"
             echo
             echo '```'
-            cat ./*.apk.sha256
+            cat "$sha"
             echo '```'
           } > notes.md
+          cat notes.md
 
-          if gh release view "$tag" >/dev/null 2>&1; then
-            gh release upload "$tag" "${files[@]}" --clobber
+          # -R 不是装饰：这一步没有 checkout，cwd 不是 git 仓库，gh 自己推断不出仓库，
+          # 于是第一次运行的「建 Release」就是这样失败的（镜像与 APK 都成功，只有这一步红）。
+          if gh release view "$tag" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$tag" "$apk" "$sha" -R "$GITHUB_REPOSITORY" --clobber
           else
-            gh release create "$tag" "${files[@]}" --title "每日随想 $tag" --notes-file notes.md
+            gh release create "$tag" "$apk" "$sha" \
+              -R "$GITHUB_REPOSITORY" \
+              --title "每日随想 $tag" \
+              --notes-file notes.md
           fi
+          gh release view "$tag" -R "$GITHUB_REPOSITORY" --json tagName,url,assets
