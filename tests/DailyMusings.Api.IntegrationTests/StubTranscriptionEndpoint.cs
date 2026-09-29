@@ -121,6 +121,12 @@ internal sealed class StubTranscriptionEndpoint : IAsyncDisposable
                 cancellationToken: context.RequestAborted);
             state.LastModel = payload.RootElement.GetProperty("model").GetString();
 
+            if (state.RequireChatCompletions && !IsValidQwenChatAudioRequest(payload.RootElement))
+            {
+                context.Response.StatusCode = StatusCodes.Status400BadRequest;
+                return;
+            }
+
             var audio = payload.RootElement
                 .GetProperty("messages")[0]
                 .GetProperty("content")
@@ -150,6 +156,34 @@ internal sealed class StubTranscriptionEndpoint : IAsyncDisposable
             .Addresses.First();
 
         return new StubTranscriptionEndpoint(app, $"{address.TrimEnd('/')}/v1", state);
+    }
+
+    private static bool IsValidQwenChatAudioRequest(System.Text.Json.JsonElement root)
+    {
+        if (!root.TryGetProperty("stream", out var stream) ||
+            stream.ValueKind is not System.Text.Json.JsonValueKind.False ||
+            !root.TryGetProperty("asr_options", out var asrOptions) ||
+            !asrOptions.TryGetProperty("enable_itn", out var enableItn) ||
+            enableItn.ValueKind is not System.Text.Json.JsonValueKind.False ||
+            !root.TryGetProperty("messages", out var messages) ||
+            messages.ValueKind is not System.Text.Json.JsonValueKind.Array ||
+            messages.GetArrayLength() != 1 ||
+            !messages[0].TryGetProperty("content", out var content) ||
+            content.ValueKind is not System.Text.Json.JsonValueKind.Array ||
+            content.GetArrayLength() != 1)
+        {
+            return false;
+        }
+
+        var item = content[0];
+        return item.TryGetProperty("type", out var type) &&
+               type.GetString() == "input_audio" &&
+               item.TryGetProperty("input_audio", out var inputAudio) &&
+               inputAudio.TryGetProperty("data", out var data) &&
+               data.ValueKind == System.Text.Json.JsonValueKind.String &&
+               data.GetString() is { } value &&
+               value.StartsWith("data:audio/", StringComparison.Ordinal) &&
+               value.Contains(";base64,", StringComparison.Ordinal);
     }
 
     public async ValueTask DisposeAsync()

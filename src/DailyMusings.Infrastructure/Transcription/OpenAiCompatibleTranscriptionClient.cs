@@ -258,10 +258,12 @@ internal static class TranscriptionHttpAdapter
         await using var audio = await request.OpenAudio(cancellationToken).ConfigureAwait(false);
         using var buffer = new MemoryStream();
         await audio.CopyToAsync(buffer, cancellationToken).ConfigureAwait(false);
+        var dataUrl = $"data:{request.ContentType};base64,{Convert.ToBase64String(buffer.ToArray())}";
 
         var content = JsonContent.Create(new
         {
             model = settings.Model,
+            stream = false,
             messages = new[]
             {
                 new
@@ -269,18 +271,20 @@ internal static class TranscriptionHttpAdapter
                     role = "user",
                     content = new object[]
                     {
-                        new { type = "text", text = "Transcribe this audio and return only the transcript." },
                         new
                         {
                             type = "input_audio",
                             input_audio = new
                             {
-                                data = Convert.ToBase64String(buffer.ToArray()),
-                                format = AudioFormat(request),
+                                data = dataUrl,
                             },
                         },
                     },
                 },
+            },
+            asr_options = new
+            {
+                enable_itn = false,
             },
         });
 
@@ -532,25 +536,6 @@ internal static class TranscriptionHttpAdapter
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(baseUrl);
         return new Uri($"{baseUrl.TrimEnd('/')}/{relativePath.TrimStart('/')}", UriKind.Absolute);
-    }
-
-    private static string AudioFormat(TranscriptionRequest request)
-    {
-        var extension = Path.GetExtension(request.FileName).TrimStart('.').ToLowerInvariant();
-        if (!string.IsNullOrWhiteSpace(extension))
-        {
-            return extension;
-        }
-
-        return request.ContentType.ToLowerInvariant() switch
-        {
-            "audio/wav" or "audio/x-wav" => "wav",
-            "audio/mpeg" => "mp3",
-            "audio/mp4" => "m4a",
-            "audio/ogg" => "ogg",
-            "audio/opus" => "opus",
-            _ => "wav",
-        };
     }
 
     private static PermanentExternalFailureException PublicAudioUrlRequired() => new(

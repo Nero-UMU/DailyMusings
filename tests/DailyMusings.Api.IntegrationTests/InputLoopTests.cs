@@ -95,7 +95,9 @@ public class InputLoopTests
         Assert.AreEqual(TranscriptionStatusNames.Succeeded, ingested.Input.TranscriptionStatus);
         Assert.AreEqual(stub.State.ResponseText, ingested.Input.Transcript);
         Assert.AreEqual("qwen3-asr-flash", stub.State.LastModel);
-        Assert.AreEqual(Convert.ToBase64String(FakeAudio), stub.State.LastAudioData);
+        Assert.AreEqual(
+            $"data:audio/mp4;base64,{Convert.ToBase64String(FakeAudio)}",
+            stub.State.LastAudioData);
         Assert.AreEqual("Bearer test-api-key", stub.State.LastAuthorization);
     }
 

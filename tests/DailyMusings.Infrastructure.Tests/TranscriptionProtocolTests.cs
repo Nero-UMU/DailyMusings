@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text;
+using System.Text.Json;
 using DailyMusings.Application.Abstractions;
 using DailyMusings.Infrastructure.Transcription;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -41,10 +42,19 @@ public sealed class TranscriptionProtocolTests
         var sent = handler.Requests.Single();
         Assert.AreEqual("https://api.example.com/v1/chat/completions", sent.Url);
         StringAssert.Contains(sent.ContentType, "application/json");
-        StringAssert.Contains(sent.Body, "\"model\":\"arbitrary-model-name\"");
-        StringAssert.Contains(sent.Body, "\"type\":\"input_audio\"");
-        StringAssert.Contains(sent.Body, "\"data\":\"YXVkaW8=\"");
-        StringAssert.Contains(sent.Body, "\"format\":\"m4a\"");
+        using var payload = JsonDocument.Parse(sent.Body);
+        var root = payload.RootElement;
+        Assert.AreEqual("arbitrary-model-name", root.GetProperty("model").GetString());
+        Assert.IsFalse(root.GetProperty("stream").GetBoolean());
+        Assert.IsFalse(root.GetProperty("asr_options").GetProperty("enable_itn").GetBoolean());
+
+        var content = root.GetProperty("messages")[0].GetProperty("content");
+        Assert.AreEqual(1, content.GetArrayLength());
+        Assert.AreEqual("input_audio", content[0].GetProperty("type").GetString());
+        Assert.AreEqual(
+            "data:audio/mp4;base64,YXVkaW8=",
+            content[0].GetProperty("input_audio").GetProperty("data").GetString());
+        Assert.IsFalse(content[0].GetProperty("input_audio").TryGetProperty("format", out _));
     }
 
     [TestMethod]
