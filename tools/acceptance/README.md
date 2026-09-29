@@ -14,7 +14,7 @@
   <root>/repo/          仓库源码（docker build 的上下文；不要让它包含实例状态）
   <root>/verify/        本目录（脚本；可放任意位置，`DM_ROOT` 可覆盖 <root>）
   <root>/inst-a/        验收实例（bind mount 的 state / keys / secrets）
-  <root>/inst-b/        §15.2 的全新实例（用仓库根的 `compose.yaml` 与它自己的命名卷 `dm-data` / `dm-config`）
+  <root>/inst-b/        §15.2 的全新实例（用仓库根的 `compose.yaml`，数据落在它同级的 `data/` 与 `config/`）
   <root>/work/          证据、日志、报告、待恢复的备份包
   ```
 
@@ -25,7 +25,7 @@
   | `DM_ROOT` | 覆盖 `<root>`（默认取本目录的父目录） |
   | `DM_BASE` / `DM_MAILPIT` | 默认 `http://127.0.0.1:18321` / `:8025` |
   | `DM_IMAGE` | 服务端镜像名，默认 `dailymusings/server:local` |
-  | `DM_VOLUME` | 全新实例的状态卷名，默认 `dailymusings_dailymusings-state`（2026-09-29 后是 `dailymusings_dm-data`，见 `run-restore-verify.sh`） |
+  | `DM_STATE` | 全新实例的 state 挂载源：接受宿主机目录或具名卷名（默认由 `run-restore-verify.sh` 设成 `inst-b/data`；旧名字 `DM_VOLUME` 仍然认） |
 
 - 其余账号默认值见各脚本顶部；`compose.verify.yaml` 里写死了测试主机上的桩模型端点（`127.0.0.1:8077/v1`）与 Mailpit（`1025`）。
 
@@ -89,7 +89,7 @@ bash <root>/verify/run-phase5-verification.sh
 
 - 空目录里放的是**仓库根的** `compose.yaml`（不再是 `deploy/compose.yaml` 那个覆盖文件），并用 `DM_IMAGE=dailymusings/server:local` 指回本地构建的镜像——否则它会去 ghcr 拉发布版，验的就不是这份源码。
 - 那一步还要「新 Secrets」，所以脚本用 `sed` 打开根文件里注释掉的 `./secrets:/run/secrets:ro` 挂载，并且**打不开就直接失败**（否则会静默跑成「Secrets 根本没挂上」的假通过）。
-- 全新实例的状态卷名从 `dailymusings_dailymusings-state` 改为 `dailymusings_dm-data`（项目名仍是 `dailymusings`）。
+- 实例的 state 从「具名卷」变成「compose 同级的 `data/` 目录」（`DM_STATE` 两者都接受）；空目录里会多出 `data/` 与 `config/` 两个目录，那是容器建的。
 
 这些是**结构上的适配，不是执行证据**：本节写的仍然是「未重跑」，跑之前不要引用上面的旧结果。
 

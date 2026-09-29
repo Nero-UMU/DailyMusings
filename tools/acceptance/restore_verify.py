@@ -6,7 +6,7 @@ Two phases, because the staged restore is applied at the next start by design:
     restore_verify.py stage <archive.zip>   steps 1-3: fresh instance, admin initialized, archive uploaded
     restore_verify.py verify                steps 4-8: after the restart
 
-The evidence comes from the real instance: its API, and its own state volume read through a
+The evidence comes from the real instance: its API, and its own state read through a
 throwaway container so that the Markdown output and the secret scan are checked where they live.
 """
 
@@ -24,7 +24,10 @@ from dmverify import Api, check, error_code, note, poll, results, step, summary_
 
 BASE = os.environ.get("DM_BASE", "http://127.0.0.1:18321")
 WORK = os.environ.get("DM_WORK", "")
-VOLUME = os.environ.get("DM_VOLUME", "")
+# 实例的 state 挂载源：2026-09-29 起 compose 默认把数据放在它同级的 ./data 目录，所以这里既接受一个
+# 宿主机目录，也接受一个具名卷名 —— `docker run -v <源>:/state` 对两者是同一件事。
+# 旧名字 DM_VOLUME 仍然认，免得别人手里的脚本一夜之间失效。
+STATE = os.environ.get("DM_STATE") or os.environ.get("DM_VOLUME", "")
 IMAGE = os.environ.get("DM_IMAGE", "dailymusings/server:local")
 ADMIN_INITIAL_PASSWORD = os.environ.get("DM_ADMIN_INITIAL_PASSWORD", "")
 ADMIN_USER = os.environ.get("DM_ADMIN_USER", "owner")
@@ -39,9 +42,9 @@ def sign_in(api, username, password):
 
 
 def inspect_state(needles, inspect_script):
-    """Runs the inspection inside the instance's own image with its state volume mounted, so what is
-    checked is the restored volume itself and not a copy of it."""
-    mounts = ["-v", "%s:/state" % VOLUME, "-v", "%s:/inspect.sh:ro" % inspect_script]
+    """Runs the inspection inside the instance's own image with its state mounted, so what is
+    checked is the restored state itself and not a copy of it."""
+    mounts = ["-v", "%s:/state" % STATE, "-v", "%s:/inspect.sh:ro" % inspect_script]
     environment = []
     for index, needle in enumerate(needles):
         environment += ["-e", "NEEDLE_%d=%s" % (index, needle)]
@@ -199,7 +202,7 @@ def verify(inspect_script):
 
     token_hash = hashlib.sha256((evidence.get("deviceToken") or "").encode("utf-8")).hexdigest()
     values, _output = inspect_state([token_hash], inspect_script)
-    check("the state volume carries the restored Markdown, the media and a new export",
+    check("the state carries the restored Markdown, the media and a new export",
           int(values.get("MARKDOWN_FILES", "0")) >= 1 and int(values.get("MEDIA_FILES", "0")) >= 3
           and int(values.get("EXPORT_DIRS", "0")) >= 1,
           "markdown=%s media=%s backups=%s exports=%s" % (
@@ -250,7 +253,7 @@ def verify(inspect_script):
 
 
 if __name__ == "__main__":
-    # The inspection runs inside the instance's own image with the state volume mounted; the script lives next to
+    # The inspection runs inside the instance's own image with the state mounted; the script lives next to
     # this one, and a missing file would silently mount an empty directory instead of failing.
     inspect_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "inspect-state.sh")
     phase = sys.argv[1] if len(sys.argv) > 1 else ""
