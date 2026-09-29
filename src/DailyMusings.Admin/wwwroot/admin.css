@@ -1342,6 +1342,9 @@ label.checkbox input {
 .reader-card h2 { margin: .25rem 0; }
 .reader-card .card-head h2 { overflow-wrap: anywhere; }
 .reader-card .card-head button { flex: 0 0 auto; }
+.continuation-zone { display: flex; justify-content: space-between; gap: 1rem; align-items: center; margin-top: 1.25rem; padding: 1rem; border: 1px solid #b8d4ff; border-radius: .8rem; background: #f5f9ff; }
+.continuation-zone p { margin: .25rem 0 0; }
+.continuation-zone > button, .continuation-zone > .actions { flex: 0 0 auto; }
 .reader-document { max-width: 56rem; margin: 1.4rem auto 0; padding: 1.5rem clamp(1rem, 3vw, 2.25rem); border: 1px solid var(--border); border-radius: .85rem; background: #fff; }
 .article-summary { font-size: 1.05rem; line-height: 1.7; color: var(--muted); border-left: 3px solid #c8c0ff; margin: 0 0 1.5rem; padding-left: 1rem; }
 .article-body { overflow-wrap: anywhere; white-space: pre-wrap; line-height: 1.9; }
@@ -1370,6 +1373,8 @@ label.checkbox input {
     .library-search { max-width: none; }
     .reader-card .card-head { align-items: stretch; flex-direction: column; gap: .75rem; }
     .reader-card .card-head button { align-self: flex-start; }
+    .continuation-zone { align-items: stretch; flex-direction: column; }
+    .continuation-zone > button { align-self: flex-start; }
     .reader-document { margin-top: 1rem; padding: 1.15rem; }
     .topic-picker { display: grid; grid-template-columns: 1fr; }
     .topic-option { width: 100%; }

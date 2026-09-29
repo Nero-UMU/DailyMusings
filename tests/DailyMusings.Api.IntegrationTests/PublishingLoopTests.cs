@@ -101,6 +101,7 @@ public class PublishingLoopTests
 
         instance.WriteSecret("openai-api-key", "test-api-key");
         await instance.SignInAsChangedAdministratorAsync();
+        await UpdateContentTimeZoneAsync(instance, "Etc/GMT+12");
         var (_, device) = await instance.PairDeviceAsync();
 
         using var created = await instance.Client.PostAsJsonAsync(
@@ -108,7 +109,7 @@ public class PublishingLoopTests
             new CreatePublishTargetRequest("hexo", PublishTargetTypeNames.Markdown, "posts"));
         var target = await created.Content.ReadFromJsonAsync<PublishTargetDto>();
 
-        var (contentDate, publishedVersionId) = await GenerateAndConfirmAsync(instance, device);
+        var (contentDate, publishedVersionId) = await GenerateAndConfirmAsync(instance, device, utcOffsetMinutes: -720);
 
         using var publish = await device.PostAsJsonAsync(
             $"/api/reflections/{contentDate}/publish/{target!.Id}",
@@ -127,7 +128,7 @@ public class PublishingLoopTests
             new TextInputRequest(
                 model.State.GroundedSentence,
                 DateTimeOffset.UtcNow.ToString("o"),
-                480,
+                -720,
                 "capture-after-publication"));
         lateInput.EnsureSuccessStatusCode();
 
@@ -178,6 +179,17 @@ public class PublishingLoopTests
         Assert.IsFalse(
             publishCard.Value.Contains("已公开发布", StringComparison.Ordinal),
             $"发布设置把旧版本的发布状态错误套到了新工作版本：\n{publishCard.Value}");
+
+        // Move the instance calendar more than 24 hours ahead without waiting in real time. The same content day
+        // is now historical, so content management must expose the explicit continuation action rather than
+        // stranding the unpublished replacement after midnight.
+        await UpdateContentTimeZoneAsync(instance, "Pacific/Kiritimati");
+        using var historicalContentPage = await instance.Client.GetAsync("/content");
+        var historicalHtml = WebUtility.HtmlDecode(await historicalContentPage.Content.ReadAsStringAsync());
+        StringAssert.Contains(
+            historicalHtml,
+            "继续发布",
+            "跨日后，已有旧正式稿的未发布替代稿必须能从内容管理继续发布。");
 
         var beforeReplacement = await instance.Client.GetFromJsonAsync<PublicationListResponse>(
             $"/api/reflections/{contentDate}/publications");
@@ -376,11 +388,16 @@ public class PublishingLoopTests
 
     private static async Task<(string ContentDate, string VersionId)> GenerateAndConfirmAsync(
         TestInstance instance,
-        HttpClient device)
+        HttpClient device,
+        int utcOffsetMinutes = 480)
     {
         using var captured = await device.PostAsJsonAsync(
             "/api/inputs/text",
-            new TextInputRequest("今天试着记录了一点东西。", DateTimeOffset.UtcNow.ToString("o"), 480, "capture-1"));
+            new TextInputRequest(
+                "今天试着记录了一点东西。",
+                DateTimeOffset.UtcNow.ToString("o"),
+                utcOffsetMinutes,
+                "capture-1"));
 
         captured.EnsureSuccessStatusCode();
         var ingested = await captured.Content.ReadFromJsonAsync<IngestResponse>();
@@ -438,6 +455,20 @@ public class PublishingLoopTests
         var result = await confirmed.Content.ReadFromJsonAsync<ReflectionDto>();
 
         return (contentDate, result!.ConfirmedVersionId!);
+    }
+
+    private static async Task UpdateContentTimeZoneAsync(TestInstance instance, string timeZoneId)
+    {
+        using var updated = await instance.Client.PatchAsJsonAsync(
+            "/api/content-settings",
+            new UpdateContentSettingsRequest(
+                timeZoneId,
+                GenerationLocalTime: null,
+                PublishLocalTime: null,
+                PublishWindowMinutes: null,
+                AudioRetentionDays: null));
+
+        updated.EnsureSuccessStatusCode();
     }
 
     private static async Task<PublicationDto> WaitForPublicationAsync(

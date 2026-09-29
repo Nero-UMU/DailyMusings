@@ -4,7 +4,7 @@
 @inject IServiceScopeFactory ScopeFactory
 @inject ILoggerFactory LoggerFactory
 
-<PageHeader Title="内容管理" Hint="查看、归类和删除稿件。生成与发布计划统一放在「发布设置」。">
+<PageHeader Title="内容管理" Hint="查看、归类和删除稿件；跨日后仍未发布的新稿也可以从这里继续发布。">
     <Actions><button class="btn" @onclick="ReloadAsync" disabled="@_busy">刷新</button></Actions>
 </PageHeader>
 
@@ -50,6 +50,10 @@
                         {
                             <span class="topic-chip">@topic.Name</span>
                         }
+                        @if (CanContinuePublish(article))
+                        {
+                            <button class="btn btn-sm" @onclick="() => BeginContinuePublication(article)">继续发布</button>
+                        }
                     </div>
                 </article>
             }
@@ -72,6 +76,27 @@
                 @if (!string.IsNullOrWhiteSpace(current.Summary)) { <p class="article-summary">@current.Summary</p> }
                 <div class="article-body">@current.Body</div>
             </article>
+
+            @if (CanContinuePublish(selected))
+            {
+                <div class="continuation-zone">
+                    <div>
+                        <strong>继续发布这一天的新稿</strong>
+                        <p class="hint">这一天已有旧稿公开，但当前稿件尚未发布。发布后会用当前稿件替换旧稿；只有旧文件未被外部修改时才会删除。</p>
+                    </div>
+                    @if (_confirmContinuePublication == selected.Id)
+                    {
+                        <div class="actions">
+                            <button class="btn-primary" @onclick="ContinuePublicationAsync" disabled="@_busy">确认替换并发布</button>
+                            <button class="btn" @onclick="CancelContinuePublication" disabled="@_busy">取消</button>
+                        </div>
+                    }
+                    else
+                    {
+                        <button class="btn-primary" @onclick="() => _confirmContinuePublication = selected.Id" disabled="@_busy">继续发布…</button>
+                    }
+                </div>
+            }
 
             <div class="topic-editor">
                 <div><h3>稿件主题</h3><p class="hint">可选择一个或多个主题；第一个选中的主题作为主要主题。</p></div>
@@ -148,9 +173,12 @@
     private readonly List<ReflectionView> _articles = [];
     private readonly List<TopicSummary> _topics = [];
     private readonly HashSet<ReflectionVersionId> _publishedVersionIds = [];
+    private readonly Dictionary<ReflectionId, PublishTargetId> _publishedTargetsByReflection = [];
     private readonly List<TopicId> _selectedTopicIds = [];
+    private ContentDate _today;
     private ReflectionView? _selected;
     private ReflectionId? _confirmDeleteArticle;
+    private ReflectionId? _confirmContinuePublication;
     private TopicId? _confirmDeleteTopic;
     private string _filter = FilterAll;
     private string _search = string.Empty;
@@ -167,16 +195,18 @@
         await using var scope = ScopeFactory.CreateAsyncScope();
         var services = scope.ServiceProvider;
         var calendar = await services.GetRequiredService<IContentCalendarProvider>().GetCalendarAsync(CancellationToken.None);
-        var today = calendar.ContentDateOf(services.GetRequiredService<IClock>().UtcNow);
+        _today = calendar.ContentDateOf(services.GetRequiredService<IClock>().UtcNow);
         var page = await services.GetRequiredService<ListReflectionsUseCase>().ExecuteDetailedPageAsync(
-            today.AddDays(-36500), today, page: 1, pageSize: 10000, CancellationToken.None);
+            _today.AddDays(-36500), _today, page: 1, pageSize: 10000, CancellationToken.None);
         _articles.Clear(); _articles.AddRange(page.Items.OrderByDescending(item => item.ContentDate));
 
         _publishedVersionIds.Clear();
+        _publishedTargetsByReflection.Clear();
         var publications = await services.GetRequiredService<ListPublicationsUseCase>().ExecuteAsync(2000, CancellationToken.None);
         foreach (var item in publications.Where(item => item.Publication.Status == PublicationStatus.Published))
         {
             _publishedVersionIds.Add(item.Publication.ReflectionVersionId);
+            _publishedTargetsByReflection[item.Publication.ReflectionId] = item.Publication.PublishTargetId;
         }
 
         _topics.Clear();
@@ -211,12 +241,18 @@
 
     private bool IsPublished(ReflectionView article) =>
         article.WorkingVersion is { } version && _publishedVersionIds.Contains(version.Id);
+    private bool CanContinuePublish(ReflectionView article) =>
+        article.ContentDate < _today &&
+        article.WorkingVersion is not null &&
+        !IsPublished(article) &&
+        _publishedTargetsByReflection.ContainsKey(article.Id);
     private static string Preview(string? body) => string.IsNullOrWhiteSpace(body) ? "暂无正文" : body.Length <= 90 ? body : body[..90] + "…";
     private string FilterClass(string value) => _filter == value ? "active" : string.Empty;
     private void SetFilter(string value) => _filter = value;
 
-    private void OpenArticle(ReflectionView article) { _selected = article; _confirmDeleteArticle = null; SyncSelectedTopics(); }
-    private void CloseArticle() { _selected = null; _selectedTopicIds.Clear(); _confirmDeleteArticle = null; }
+    private void OpenArticle(ReflectionView article) { _selected = article; _confirmDeleteArticle = null; _confirmContinuePublication = null; SyncSelectedTopics(); }
+    private void BeginContinuePublication(ReflectionView article) { OpenArticle(article); _confirmContinuePublication = article.Id; }
+    private void CloseArticle() { _selected = null; _selectedTopicIds.Clear(); _confirmDeleteArticle = null; _confirmContinuePublication = null; }
     private void SyncSelectedTopics() { _selectedTopicIds.Clear(); _selectedTopicIds.AddRange(_selected?.WorkingVersion?.Topics.Select(topic => topic.Id) ?? []); }
     private void ToggleTopic(TopicId id, bool selected) { if (selected && !_selectedTopicIds.Contains(id)) _selectedTopicIds.Add(id); else if (!selected) _selectedTopicIds.Remove(id); }
 
@@ -250,6 +286,57 @@
     }, "主题已删除。");
 
     private void CancelArticleDelete() => _confirmDeleteArticle = null;
+    private void CancelContinuePublication() => _confirmContinuePublication = null;
+
+    private async Task ContinuePublicationAsync() => await RunAsync(async services =>
+    {
+        if (_selected is null || !CanContinuePublish(_selected) ||
+            !_publishedTargetsByReflection.TryGetValue(_selected.Id, out var targetId))
+        {
+            throw new UseCaseException("publication.historical_replacement_unavailable", "这篇稿件当前不能继续发布，请刷新后重试。");
+        }
+
+        var reflection = await services.GetRequiredService<GetReflectionUseCase>()
+            .ExecuteAsync(_selected.ContentDate, CancellationToken.None);
+
+        if (reflection?.WorkingVersion is null)
+        {
+            throw new UseCaseException("publication.reflection_unknown", "这一天没有可发布的稿件。");
+        }
+
+        if (reflection.Status != ReflectionStatus.Confirmed)
+        {
+            if (reflection.WorkingVersion.SourcesCheckedAtUtc is null)
+            {
+                throw new UseCaseException("reflection.confirm.source_check_pending", "来源检查尚未完成，请稍后刷新再发布。");
+            }
+
+            await services.GetRequiredService<ConfirmReflectionUseCase>().ExecuteAsync(
+                reflection.ContentDate,
+                new DailyMusings.Application.Reflections.ConfirmReflectionRequest(AcceptedUnsourcedClaims: true),
+                CancellationToken.None);
+        }
+
+        var result = await services.GetRequiredService<RequestPublicationUseCase>().ExecuteAsync(
+            reflection.ContentDate,
+            targetId,
+            PublicationVisibility.Public,
+            actor: "admin",
+            replaceExistingFile: false,
+            manual: true,
+            CancellationToken.None);
+
+        if (!result.Queued)
+        {
+            throw new UseCaseException(
+                result.Code ?? "publication.refused",
+                AdminLabels.PublicationRefusalText(result.Code, result.Detail));
+        }
+
+        _confirmContinuePublication = null;
+        await LoadAsync();
+    }, "稿件已进入发布队列；完成后会替换这一天原来发布的稿件。");
+
     private async Task DeleteArticleAsync() => await RunAsync(async services =>
     {
         if (_selected is null) return;
