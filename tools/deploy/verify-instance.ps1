@@ -87,6 +87,22 @@ function Send-ApiExpectingError {
     }
 }
 
+# 发一个「预期会失败」的请求并把 HTTP 状态码取回来。Send-ApiExpectingError 只回稳定错误码，
+# 而「删除之后还查不查得到」这件事的判据是状态码本身（404 而不是 200），所以这里要状态码。
+function Send-ApiExpectingStatus {
+    param([string]$Method, [string]$Path, $Body = $null)
+
+    try {
+        Send-Api $Method $Path $Body -WithSession | Out-Null
+        throw "本以为会被拒绝，结果它成功了：$Method $Path"
+    }
+    catch [System.Net.WebException] {
+        $response = $_.Exception.Response
+        if ($null -eq $response) { throw }
+        return [int]$response.StatusCode
+    }
+}
+
 function New-Wav {
     param([string]$Path, [int]$Milliseconds = 800)
 
@@ -387,6 +403,35 @@ Check "内容保留设置可见" {
 Check "内容清理接口可入队" {
     Send-Api POST "/api/maintenance/content-cleanup/run" @{} -WithSession | Out-Null
     "已入队"
+} | Out-Null
+
+# 本轮变更（附录 A.23）：数据管理页的删除是**物理移除**，不再是软删除。
+# 探针条目刻意回溯到 2020 年：喂入一条「今天」的输入会把当天草稿标记成晚到并让它过期，那是真实副作用，
+# 而这台是真实实例；2020 年既没有草稿可标脏，也不在 60 天补跑窗口内，喂入它是彻底的空操作。
+Check "手动删除是物理移除而不是软删除（附录 A.23）" {
+    $probe = Send-Api POST "/api/inputs/text" @{
+        text                 = "自检探针（物理删除自检，本脚本会立刻删掉这一条）"
+        createdAtUtc         = "2020-01-01T12:00:00+08:00"
+        createdOffsetMinutes = 480
+        idempotencyKey       = "selftest-delete-" + [Guid]::NewGuid().ToString("N")
+    } -WithSession
+
+    $id = $probe.input.id
+    if (-not $id) { throw "没有拿到探针条目的 id" }
+    if ($probe.input.isDeleted) { throw "刚创建的探针条目不该是已删除状态" }
+
+    Send-Api DELETE "/api/inputs/$id" -WithSession | Out-Null
+
+    # 旧实现在这里是 200 + isDeleted=true（软删除，行留着当墓碑）；新实现必须什么都没有。
+    $status = Send-ApiExpectingStatus GET "/api/inputs/$id" -WithSession
+    if ($status -ne 404) { throw "删除后 GET 返回 $status，期望 404 —— 说明它还是软删除" }
+
+    $day = Send-Api GET "/api/inputs?date=2020-01-01" -WithSession
+    if (@($day.items | Where-Object { $_.id -eq $id }).Count -ne 0) {
+        throw "已删除的条目仍然出现在 2020-01-01 的列表里"
+    }
+
+    "已删除，GET 返回 404，列表里也不再出现"
 } | Out-Null
 
 Remove-Item $wav -Force -ErrorAction SilentlyContinue
