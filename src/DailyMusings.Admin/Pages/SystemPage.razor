@@ -34,6 +34,39 @@
         </span>
     </div>
 
+@if (Overrides.IsListeningPortLocked)
+{
+    <p class="hint">
+        这个实例的监听端口由<strong>部署配置</strong>决定：容器的端口映射在启动时就固定了，所以后台不再提供修改。
+        要换端口，改部署文件里的端口映射，再重建容器。
+    </p>
+
+    <div class="summary">
+        <div class="summary-item">
+            <span class="label">当前生效端口</span>
+            <span class="value">@_effectivePort</span>
+        </div>
+        <div class="summary-item">
+            <span class="label">端口由谁决定</span>
+            <span class="value">部署配置（DAILYMUSINGS_LOCK_LISTENING_PORT=1）</span>
+        </div>
+    </div>
+
+    <div class="risk">
+        <strong>改端口的唯一一处在部署文件里。</strong>
+        <p>
+            改 <code>compose.yaml</code> 里的端口映射（<code>DM_PORT</code>，例如
+            <code class="code">DM_PORT=8080</code>），然后重建容器：
+        </p>
+        <p><code class="code">docker compose up -d</code></p>
+        <p>
+            容器内部始终监听 <code>@_effectivePort</code>，所以只需要改宿主机这一侧。
+            <code>@Overrides.ConfigPath</code> 里如果还留着早先的端口覆盖，它会被忽略（这样才不会把映射指到没人监听的端口上）。
+        </p>
+    </div>
+}
+else
+{
     <p class="hint">
         修改端口后需要同步更新 Docker Compose 的端口映射并重启容器。保存前请确认新端口没有被其他程序占用。
     </p>
@@ -75,14 +108,15 @@
             </p>
             <ol>
                 <li>
-                    在 <code>deploy/.env</code> 里把内部端口改成同一个值：
+                    在部署配置里让服务监听同一个端口（本地运行是 <code>ASPNETCORE_URLS</code>，容器部署里是
+                    端口映射与容器内端口）：
                     <br />
-                    <code class="code">DAILYMUSINGS_INTERNAL_PORT=@_port</code>
+                    <code class="code">ASPNETCORE_URLS=http://+:@_port</code>
                 </li>
                 <li>
                     重建容器：
                     <br />
-                    <code class="code">docker compose -f deploy/compose.yaml up -d --force-recreate</code>
+                    <code class="code">docker compose up -d --force-recreate</code>
                 </li>
             </ol>
             <p>
@@ -93,6 +127,7 @@
             </p>
         </div>
     }
+}
 </div>
 
 <div class="card">
@@ -781,6 +816,14 @@
 
     private async Task SavePortAsync() => await RunAsync(async () =>
     {
+        // The markup hides the form when the deployment owns the port; this is the second lock on the same door,
+        // because this page writes the override store directly rather than going through the API's refusal.
+        if (Overrides.IsListeningPortLocked)
+        {
+            _error = "这个实例的监听端口由部署配置固定（DAILYMUSINGS_LOCK_LISTENING_PORT=1），后台不能修改。";
+            return;
+        }
+
         if (!int.TryParse(_portInput, NumberStyles.Integer, CultureInfo.InvariantCulture, out var port))
         {
             _error = "端口需要是一个数字。";
@@ -802,6 +845,12 @@
 
     private async Task ClearPortAsync() => await RunAsync(async () =>
     {
+        if (Overrides.IsListeningPortLocked)
+        {
+            _error = "这个实例的监听端口由部署配置固定（DAILYMUSINGS_LOCK_LISTENING_PORT=1），后台不能修改。";
+            return;
+        }
+
         // Null clears the override, so the instance goes back to whatever the deployment says.
         Overrides.Write(null, "admin", DateTimeOffset.UtcNow);
         await LoadAsync();

@@ -1,0 +1,227 @@
+# 发布流程：把「新用户只写一份 compose.yaml + 装一个 APK」这件事真正变成可用的东西。
+#
+# 三件事，按需要各自独立：
+#   image        打 tag 时构建 linux/amd64 + linux/arm64 两个架构的镜像并推到 ghcr.io
+#   apk          构建 Release 签名的 Android APK
+#   compose-smoke 用仓库根目录那一份 compose.yaml 真的把实例起起来，再按绑定挂载的方式起第二次
+#
+# smoke 那一步是这一轮的验收本体：它用的就是新用户会拿到的那份文件，没有 .env、没有 secret 文件、没有预先
+# 建目录。它同时验证了「镜像构建得出来」「健康检查会变绿」「一次性管理员密码被打印」「绑定挂载目录的属主被
+# 纠正」「服务进程不是 root」。这些在这台开发机上都没有 Docker 可跑，所以只能在这里跑。
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  IMAGE: ghcr.io/nero-umu/dailymusings
+
+jobs:
+  image:
+    name: 构建并推送多架构镜像
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - name: 登录 ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 计算镜像标签
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=sha,format=short
+
+      - name: 构建并推送
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  apk:
+    name: 构建 Android APK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: 安装 MAUI Android 工作负载
+        run: dotnet workload install maui-android
+
+      # 必须是 Release：Debug 版依赖 Fast Deployment，APK 里不含程序集，单独安装会以
+      # 「No assemblies found」启动失败（docs/发布校验值.md）。
+      - name: 构建签名 APK
+        run: >
+          dotnet build src/DailyMusings.Client/DailyMusings.Client.csproj
+          -f net10.0-android -c Release -t:SignAndroidPackage
+
+      - name: 改名并算 SHA-256
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          [ -n "$version" ] || version="0.0.0-dev"
+          apk="DailyMusings-client-${version}-android.apk"
+          cp src/DailyMusings.Client/bin/Release/net10.0-android/dev.dailymusings.client-Signed.apk "$apk"
+          sha256sum "$apk" > "$apk.sha256"
+          cat "$apk.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: apk
+          path: |
+            DailyMusings-client-*-android.apk
+            DailyMusings-client-*-android.apk.sha256
+
+  compose-smoke:
+    name: 用仓库根的 compose.yaml 起一次实例
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: 构建本地镜像
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile
+          load: true
+          tags: dailymusings-smoke:local
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: 只用 compose.yaml 起服务（零配置：没有 .env、没有 secrets、没有预建目录）
+        env:
+          DM_IMAGE: dailymusings-smoke:local
+          DM_ADMIN_PASSWORD: SmokeTestPassword1
+        run: |
+          set -euo pipefail
+          docker compose up -d
+
+          for _ in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:18321/api/system/health >/dev/null 2>&1; then break; fi
+            sleep 2
+          done
+
+          echo "-- 健康检查 --"
+          curl -fsS http://127.0.0.1:18321/api/system/health; echo
+          curl -fsS http://127.0.0.1:18321/api/system/health | grep -q '"healthy":true'
+
+          echo "-- 部署配置里的初始密码被采用，且没有回显到容器输出里 --"
+          docker compose logs app | grep -q '部署配置'
+          if docker compose logs app | grep -q 'SmokeTestPassword1'; then
+            echo "容器输出里出现了部署配置的密码，这是不允许的" >&2
+            exit 1
+          fi
+
+          echo "-- 服务进程不是 root（PID 1 的 uid 应当是 1654）--"
+          docker compose exec -T app cat /proc/1/status | grep -q '^Uid:.*1654'
+
+      - name: 换成宿主机目录再起一次（绑定挂载路径，目录不存在也不预先 chown）
+        env:
+          DM_IMAGE: dailymusings-smoke:local
+          DM_ADMIN_PASSWORD: SmokeTestPassword1
+          DM_DATA_DIR: ${{ github.workspace }}/smoke/data
+          DM_CONFIG_DIR: ${{ github.workspace }}/smoke/config
+        run: |
+          set -euo pipefail
+          docker compose down -v
+
+          # 故意不创建这两个目录：Docker 会建，入口脚本负责把属主纠正为 1654。
+          docker compose up -d
+
+          for _ in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:18321/api/system/health >/dev/null 2>&1; then break; fi
+            sleep 2
+          done
+
+          curl -fsS http://127.0.0.1:18321/api/system/health | grep -q '"healthy":true'
+
+          echo "-- 两个挂载目录的属主已经被纠正为容器用户 --"
+          stat -c '%u %n' "$DM_DATA_DIR" "$DM_CONFIG_DIR"
+          [ "$(stat -c '%u' "$DM_DATA_DIR")" = "1654" ]
+          [ "$(stat -c '%u' "$DM_CONFIG_DIR")" = "1654" ]
+
+          echo "-- 失败时留下现场 --"
+          docker compose logs app | tail -n 40
+
+  release:
+    name: 建 Release 并附上 APK
+    needs: [apk, compose-smoke]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: apk
+
+      - name: 发布
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="$GITHUB_REF_NAME"
+          files=(*.apk *.apk.sha256)
+
+          {
+            echo "## 手机端"
+            echo
+            echo "下载下面的 \`*.apk\` 安装即可（Android 8.0 / API 26 及以上，系统会提示「未知来源」）。"
+            echo
+            echo "## 服务端"
+            echo
+            echo "只需要一份 compose 文件："
+            echo
+            echo '```bash'
+            echo "curl -fsSLO https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${tag}/compose.yaml"
+            echo "docker compose up -d"
+            echo "docker compose logs app | grep INITIAL-ADMIN-PASSWORD"
+            echo '```'
+            echo
+            echo "镜像：\`${IMAGE}:${tag#v}\`（linux/amd64、linux/arm64）。"
+            echo "换端口/换数据目录在同一个文件里改 \`DM_PORT\` / \`DM_DATA_DIR\` / \`DM_CONFIG_DIR\`。"
+            echo
+            echo "## 校验值"
+            echo
+            echo '```'
+            cat ./*.apk.sha256
+            echo '```'
+          } > notes.md
+
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" "${files[@]}" --clobber
+          else
+            gh release create "$tag" "${files[@]}" --title "每日随想 $tag" --notes-file notes.md
+          fi

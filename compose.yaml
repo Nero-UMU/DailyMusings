@@ -1,0 +1,86 @@
+# 每日随想 —— 一个文件起一个实例。
+#
+# 这是给「只想把它跑起来」的人的部署入口：不需要克隆源码、不需要 .env、不需要预先建目录、不需要任何
+# secret 文件。下面的每一项都有默认值，直接 `docker compose up -d` 就能起来。
+#
+#   1. 把本文件保存到任意一个空目录，文件名 docker-compose.yaml（或 compose.yaml）；
+#   2. 想改端口/存放位置就设置下面列出的环境变量（也可以什么都不改）；
+#   3. docker compose up -d
+#   4. docker compose logs app | grep INITIAL-ADMIN-PASSWORD     # 记下一次性的管理员初始密码
+#   5. 手机装 APK → 设置页填 http://<这台机器的IP>:<端口> → 用管理页签发的配对码配对
+#
+# 可选参数（不设置就用括号里的默认值）：
+#   DM_PORT=18321                 宿主机端口（容器内固定 18321）
+#   DM_DATA_DIR=/srv/dm/data      数据目录；不设置 = 命名卷 dm-data
+#   DM_CONFIG_DIR=/srv/dm/config  配置目录；不设置 = 命名卷 dm-config
+#   DM_ADMIN_PASSWORD=...         初始管理员密码；不设置 = 随机生成并只打印一次到容器日志
+#   DM_TZ=Asia/Shanghai           容器日志时区（内容的时区在管理页「发布设置」里，与此无关）
+#   DM_IMAGE=...                  镜像地址；默认 ghcr.io/nero-umu/dailymusings:latest
+#
+# 从源码构建而不是拉镜像，见 deploy/compose.yaml（维护者通道）。
+
+name: dailymusings
+
+services:
+  app:
+    image: ${DM_IMAGE:-ghcr.io/nero-umu/dailymusings:latest}
+
+    # §14：实例是单例。数据库驱动的任务队列假定只有一个执行器，所以这里永远不能写 replicas 或 --scale。
+    restart: unless-stopped
+
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+
+      # 容器内端口固定 18321，并与下面的端口映射、健康检查保持一致。之所以固定而不做成变量：容器里改端口
+      # 只会让宿主机映射指向一个没人监听的端口（§8.1）。作为补偿，容器部署下管理页的「监听端口」是只读的
+      # ——改端口只有一处，就是上面那个 DM_PORT。
+      ASPNETCORE_URLS: http://+:18321
+      DAILYMUSINGS_LOCK_LISTENING_PORT: "1"
+
+      # 实例的全部状态：数据目录两项 + 配置目录两项。配置目录单独分开，因为它装着能签发登录 Cookie 的
+      # 密钥环，不应该混进普通内容备份（§10.4）。
+      Storage__RootPath: /var/lib/dailymusings
+      Storage__SecretsPath: /run/secrets
+      Storage__KeyRingPath: /var/lib/dailymusings-config/keys
+      Storage__RuntimeConfigPath: /var/lib/dailymusings-config/runtime.json
+
+      TZ: "${DM_TZ:-Asia/Shanghai}"
+
+      # 初始管理员密码。留空 = 随机生成，并在一号启动日志里打印一次（§10.1）。填了就在这里用，且不会
+      # 写进日志：容器日志会被 docker 长期保存，初始密码不该在那里出现第二遍。
+      Admin__InitialPassword: "${DM_ADMIN_PASSWORD:-}"
+
+      # 可选部署默认值：转写接口的协议类型。管理页「模型管理」里保存的值优先于它。
+      Transcription__ApiType: "${DM_TRANSCRIPTION_API_TYPE:-openai_transcription}"
+
+    ports:
+      # 明文 HTTP 只适合局域网、VPN 或前面有终止 TLS 的反向代理（§10.3）。直接暴露到公网的后果，登录页
+      # 会写明并要求管理员主动确认——而那个确认并不会让连接变安全。
+      - "${DM_PORT:-18321}:18321"
+
+    volumes:
+      # 两种模式，由变量是否设置决定：
+      #   不设置 → 命名卷。零配置，而且命名卷会继承镜像里已经建好的目录属主，不需要任何 chown。
+      #   设置成绝对路径 → 绑定挂载到宿主机目录。目录不存在时 Docker 会创建（属主是 root），入口脚本会
+      #   在启动的第一瞬间把它纠正为容器用户 uid 1654，所以这里同样不需要手工 mkdir/chown。
+      #
+      # 想从文件提供 API Key（而不是在管理页里填），取消最后一行的注释并把文件放进 ./secrets/：
+      # 文件名固定为 deepseek-api-key / openai-api-key / embedding-api-key / smtp-password，权限 644。
+      - ${DM_DATA_DIR:-dm-data}:/var/lib/dailymusings
+      - ${DM_CONFIG_DIR:-dm-config}:/var/lib/dailymusings-config
+      # - ./secrets:/run/secrets:ro
+
+    healthcheck:
+      # 四项：迁移已应用、数据库可写、媒体目录可写、后台任务执行器活着。外部服务（模型、SMTP）故意不参与，
+      # 它们挂了不会让实例显得不健康，用管理页的「测试连接」单独看（§9）。
+      test: ["CMD-SHELL", "curl --fail --silent --show-error http://127.0.0.1:18321/api/system/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  # 只在没有设置 DM_DATA_DIR / DM_CONFIG_DIR 时才会被用到；声明在这里是必须的，否则 compose 会把
+  # 默认值当成一个不存在的命名卷而拒绝启动。
+  dm-data:
+  dm-config:

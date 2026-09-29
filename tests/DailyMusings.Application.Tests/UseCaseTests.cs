@@ -129,6 +129,60 @@ public class AdminUseCaseTests
                 change.ExecuteAsync(password, "owner2", "AnotherLongPassword1", CancellationToken.None))).Code);
     }
 
+    /// <summary>
+    /// The deployment may state the first administrator password instead of waiting for the one-time banner. It is
+    /// used as given, and it is never returned as a "generated" value the host would then echo into container
+    /// output — the operator already has it.
+    /// </summary>
+    [TestMethod]
+    public async Task A_password_from_the_deployment_is_used_and_is_not_reported_as_generated()
+    {
+        var harness = new TestHarness();
+        const string Configured = "FromTheDeployment1";
+
+        var result = await new InitializeAdminUseCase(
+                harness.Accounts, harness.PasswordHasher, harness.SecretGenerator, harness.Clock)
+            .ExecuteAsync(CancellationToken.None, Configured);
+
+        Assert.IsTrue(result.Created);
+        Assert.IsTrue(result.PasswordFromDeployment);
+        Assert.IsNull(result.GeneratedPassword, "Nothing was generated, so there is nothing for the host to print.");
+
+        var account = await harness.Accounts.GetAsync(CancellationToken.None);
+
+        Assert.IsNotNull(account);
+        Assert.IsTrue(harness.PasswordHasher.Verify(Configured, account.PasswordHash));
+    }
+
+    /// <summary>
+    /// A configured password that does not clear the domain rule must not create an account nobody can sign into,
+    /// and must not lower the rule either: the generator takes over, and the host says so out loud.
+    /// </summary>
+    [TestMethod]
+    public async Task An_unusable_configured_password_falls_back_to_the_generated_one()
+    {
+        var harness = new TestHarness();
+
+        var result = await new InitializeAdminUseCase(
+                harness.Accounts, harness.PasswordHasher, harness.SecretGenerator, harness.Clock)
+            .ExecuteAsync(CancellationToken.None, "short");
+
+        Assert.IsTrue(result.Created);
+        Assert.IsFalse(result.PasswordFromDeployment);
+        Assert.IsNotNull(result.GeneratedPassword);
+
+        // The same bar a user-chosen password has to clear (§10.1).
+        AdminAccount.ValidatePassword(result.GeneratedPassword!);
+
+        var account = await harness.Accounts.GetAsync(CancellationToken.None);
+
+        Assert.IsNotNull(account);
+        Assert.IsTrue(harness.PasswordHasher.Verify(result.GeneratedPassword!, account.PasswordHash));
+        Assert.IsFalse(
+            harness.PasswordHasher.Verify("short", account.PasswordHash),
+            "The refused value must not be what the account was created with.");
+    }
+
     private static async Task<string> BootstrapAsync(TestHarness harness)
     {
         var result = await new InitializeAdminUseCase(

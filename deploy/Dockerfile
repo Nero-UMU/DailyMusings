@@ -46,10 +46,20 @@ WORKDIR /app
 # The instance's whole state lives under one directory (§15.2), so a single volume is enough to be durable.
 # The key ring lives below the separately mounted configuration directory: it signs the admin's auth cookies,
 # so it must survive a container recreate but must NOT be included in the ordinary content backup (§10.4).
+#
+# The ownership set here is what a *named* volume inherits when Docker initialises it, which is why a deployment
+# with no configured directories needs no permission work at all.
 RUN mkdir -p /var/lib/dailymusings /var/lib/dailymusings-config/keys \
     && chown -R "$APP_UID" /var/lib/dailymusings /var/lib/dailymusings-config
 
+# setpriv (util-linux, part of the base image) is how the entrypoint drops from root to $APP_UID. If a future base
+# image ever loses it, the container would start as root and never drop — so fail the build here instead.
+RUN test -x /usr/bin/setpriv
+
 COPY --from=build /app ./
+
+COPY deploy/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod 0755 /usr/local/bin/docker-entrypoint.sh
 
 ENV ASPNETCORE_URLS=http://+:18321 \
     ASPNETCORE_ENVIRONMENT=Production \
@@ -62,6 +72,13 @@ ENV ASPNETCORE_URLS=http://+:18321 \
 
 EXPOSE 18321
 
-USER $APP_UID
+# Root only for the first few milliseconds: the entrypoint fixes the ownership of the two bind-mounted
+# directories, then setpriv drops to $APP_UID before the server process exists. A bind mount's ownership is the
+# host's (`create_host_path` makes it root), so the alternative is asking every operator to run
+# `sudo mkdir` + `sudo chown -R 1654:1654` first — the step that produced the "secret file unreadable" defect.
+# The process itself never serves a request as root, and a deployment that mounts as 1654 already (named volumes)
+# is simply chowned no-op.
+USER root
 
-ENTRYPOINT ["dotnet", "DailyMusings.Server.dll"]
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
+CMD ["dotnet", "DailyMusings.Server.dll"]

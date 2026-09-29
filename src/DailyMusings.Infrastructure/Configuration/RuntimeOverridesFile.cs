@@ -30,6 +30,22 @@ public static class RuntimeOverridesFile
     /// <summary>Set to <c>1</c> to ignore the file entirely — the way out if a bad override locks the operator out.</summary>
     public const string IgnoreVariableName = "DAILYMUSINGS_IGNORE_RUNTIME_OVERRIDES";
 
+    /// <summary>
+    /// Set to <c>1</c> when the deployment itself owns the listening port.
+    /// <para>
+    /// A container's published mapping is fixed when the container starts, so a port override on disk can only
+    /// aim that mapping at a port nothing is listening on. The shipped Compose file sets this, which makes "change
+    /// the port" a one-place edit (the deployment's own port variable) and turns the admin page's port card into a
+    /// read-only statement of fact. It also ignores any override left behind by an earlier start, so switching this
+    /// on cannot strand a running instance on the old port.
+    /// </para>
+    /// <para>
+    /// Read as a string and compared against <c>"1"</c> rather than bound as a boolean: a deployment value that
+    /// cannot be parsed has to mean "not locked", never an exception before the host exists.
+    /// </para>
+    /// </summary>
+    public const string ListeningPortLockVariableName = "DAILYMUSINGS_LOCK_LISTENING_PORT";
+
     private static readonly JsonSerializerOptions SerializerOptions = new()
     {
         WriteIndented = true,
@@ -42,9 +58,16 @@ public static class RuntimeOverridesFile
             "1",
             StringComparison.Ordinal);
 
+    /// <summary>True when the deployment owns the listening port, so the override file has no say in it.</summary>
+    public static bool IsListeningPortLocked =>
+        string.Equals(
+            Environment.GetEnvironmentVariable(ListeningPortLockVariableName),
+            "1",
+            StringComparison.Ordinal);
+
     public static RuntimeOverrides Read(string path)
     {
-        if (string.IsNullOrWhiteSpace(path) || IsIgnored)
+        if (string.IsNullOrWhiteSpace(path) || IsIgnored || IsListeningPortLocked)
         {
             return RuntimeOverrides.None;
         }
@@ -141,6 +164,8 @@ public sealed class FileRuntimeOverridesStore : IRuntimeOverridesStore
     public FileRuntimeOverridesStore(Storage.InstancePaths paths) => _paths = paths;
 
     public string ConfigPath => _paths.RuntimeConfigPath;
+
+    public bool IsListeningPortLocked => RuntimeOverridesFile.IsListeningPortLocked;
 
     public RuntimeOverrides Read() => RuntimeOverridesFile.Read(_paths.RuntimeConfigPath);
 

@@ -717,6 +717,19 @@ public static class OperationsEndpointRouteBuilderExtensions
             return Invalid("A body is required.");
         }
 
+        if (overrides.IsListeningPortLocked)
+        {
+            // Refused rather than stored: a container's published mapping is fixed at start, so honouring this would
+            // mean the next restart listens somewhere the mapping does not point. The deployment says the port.
+            return Results.Json(
+                new ApiError(
+                    ApiErrorCodes.InstancePortLocked,
+                    "这个实例的监听端口由部署配置固定（DAILYMUSINGS_LOCK_LISTENING_PORT=1），后台不能改。"
+                    + "要换端口请改部署配置里的端口映射——容器内监听哪个端口由部署自己的 ASPNETCORE_URLS 决定，"
+                    + "改完重建容器即可。"),
+                statusCode: StatusCodes.Status409Conflict);
+        }
+
         if (request.Port is { } port &&
             port is < RuntimeOverridesFile.MinimumPort or > RuntimeOverridesFile.MaximumPort)
         {
@@ -792,6 +805,7 @@ public static class OperationsEndpointRouteBuilderExtensions
             current.ListeningPort,
             effective,
             current.ListeningPort is { } port && port != effective,
+            overrides.IsListeningPortLocked,
             current.UpdatedBy,
             current.UpdatedAtUtc?.ToString("o", CultureInfo.InvariantCulture),
             overrides.ConfigPath,

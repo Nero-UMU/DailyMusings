@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.RegularExpressions;
 using DailyMusings.Contracts;
+using DailyMusings.Infrastructure.Configuration;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace DailyMusings.Api.IntegrationTests;
@@ -46,6 +47,44 @@ public class AdminSurfaceTests
         Assert.IsFalse(
             button.Value.Contains("disabled", StringComparison.OrdinalIgnoreCase),
             $"页面空闲时配对码按钮不应被禁用，实际标签是：{button.Value}");
+    }
+
+    /// <summary>
+    /// Under a deployment that owns the port, the system page must not offer the edit at all: a form that saves a
+    /// value the published mapping cannot follow is a button whose only outcome is an instance nobody can reach.
+    /// The section stays — it becomes a statement of where the port is decided.
+    /// </summary>
+    [TestMethod]
+    public async Task The_system_page_does_not_offer_a_port_edit_when_the_deployment_owns_it()
+    {
+        var variable = RuntimeOverridesFile.ListeningPortLockVariableName;
+        var previous = Environment.GetEnvironmentVariable(variable);
+
+        try
+        {
+            Environment.SetEnvironmentVariable(variable, "1");
+
+            await using var instance = await TestInstance.StartAsync();
+            await instance.SignInAsChangedAdministratorAsync();
+
+            using var response = await instance.Client.GetAsync("/system");
+            var html = WebUtility.HtmlDecode(await response.Content.ReadAsStringAsync());
+
+            Assert.AreEqual(HttpStatusCode.OK, response.StatusCode, $"GET /system failed:\n{html}");
+            StringAssert.Contains(html, "监听端口", "这一节仍然要在，只是改成只读的说明。");
+            StringAssert.Contains(html, "端口由谁决定", "锁定时应当说明端口由部署决定。");
+            StringAssert.Contains(html, "DM_PORT", "并且要写清改端口的那一处在部署文件里。");
+            Assert.IsFalse(
+                html.Contains("保存端口", StringComparison.Ordinal),
+                "锁定时不应再渲染保存按钮。");
+            Assert.IsFalse(
+                html.Contains("清除覆盖", StringComparison.Ordinal),
+                "锁定时不应再渲染清除按钮。");
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(variable, previous);
+        }
     }
 
     [TestMethod]

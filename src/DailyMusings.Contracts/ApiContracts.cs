@@ -32,6 +32,9 @@ public static class ApiErrorCodes
     public const string ValidationFailed = "request.invalid";
     public const string NotFound = "request.not_found";
     public const string Unexpected = "server.unexpected";
+
+    /// <summary>The deployment owns the listening port, so it cannot be changed from the admin surface.</summary>
+    public const string InstancePortLocked = "instance.port.locked";
 }
 
 public sealed record ApiError(string Code, string Message);

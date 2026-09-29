@@ -5,7 +5,16 @@ using DailyMusings.Domain.Identity;
 namespace DailyMusings.Application.Admin;
 
 /// <summary>Outcome of the first-start bootstrap. The plaintext password is returned exactly once.</summary>
-public sealed record AdminInitializationResult(bool Created, string Username, string? GeneratedPassword);
+/// <param name="PasswordFromDeployment">
+/// True when the password came from deployment configuration (the Compose file's initial-password setting) rather
+/// than from the generator. The host uses this to decide what to print: a password the operator already has in
+/// their own configuration must not be echoed into the container's log, which Docker keeps.
+/// </param>
+public sealed record AdminInitializationResult(
+    bool Created,
+    string Username,
+    string? GeneratedPassword,
+    bool PasswordFromDeployment = false);
 
 /// <summary>
 /// Creates the administrator account on first start (docs/开发指导.md §10.1).
@@ -34,12 +43,33 @@ public sealed class InitializeAdminUseCase
         _clock = clock;
     }
 
-    public async Task<AdminInitializationResult> ExecuteAsync(CancellationToken cancellationToken)
+    public async Task<AdminInitializationResult> ExecuteAsync(
+        CancellationToken cancellationToken,
+        string? preferredPassword = null)
     {
         var existing = await _accounts.GetAsync(cancellationToken).ConfigureAwait(false);
         if (existing is not null)
         {
             return new AdminInitializationResult(false, existing.Username, null);
+        }
+
+        // A password supplied by the deployment is used as given — but only if it clears the same bar a
+        // user-chosen one has to. A rule the credential page enforces cannot become optional just because the
+        // value arrived through an environment variable.
+        if (IsUsable(preferredPassword))
+        {
+            var configured = AdminAccount.CreateInitial(
+                AdminAccountId.New(),
+                _passwordHasher.Hash(preferredPassword!),
+                _clock.UtcNow);
+
+            await _accounts.AddAsync(configured, cancellationToken).ConfigureAwait(false);
+
+            return new AdminInitializationResult(
+                true,
+                configured.Username,
+                GeneratedPassword: null,
+                PasswordFromDeployment: true);
         }
 
         var password = _secretGenerator.GenerateInitialPassword();
@@ -53,6 +83,28 @@ public sealed class InitializeAdminUseCase
         await _accounts.AddAsync(account, cancellationToken).ConfigureAwait(false);
 
         return new AdminInitializationResult(true, account.Username, password);
+    }
+
+    /// <summary>
+    /// Whether a deployment-supplied password may be used, asked without letting the domain rule throw: an
+    /// unusable value falls back to the generator, which the host reports loudly rather than silently.
+    /// </summary>
+    private static bool IsUsable(string? candidate)
+    {
+        if (string.IsNullOrWhiteSpace(candidate))
+        {
+            return false;
+        }
+
+        try
+        {
+            AdminAccount.ValidatePassword(candidate);
+            return true;
+        }
+        catch (DomainException)
+        {
+            return false;
+        }
     }
 }
 

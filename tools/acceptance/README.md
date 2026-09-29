@@ -14,7 +14,7 @@
   <root>/repo/          仓库源码（docker build 的上下文；不要让它包含实例状态）
   <root>/verify/        本目录（脚本；可放任意位置，`DM_ROOT` 可覆盖 <root>）
   <root>/inst-a/        验收实例（bind mount 的 state / keys / secrets）
-  <root>/inst-b/        §15.2 的全新实例（用 `deploy/compose.yaml` 与它自己的命名卷）
+  <root>/inst-b/        §15.2 的全新实例（用仓库根的 `compose.yaml` 与它自己的命名卷 `dm-data` / `dm-config`）
   <root>/work/          证据、日志、报告、待恢复的备份包
   ```
 
@@ -25,7 +25,7 @@
   | `DM_ROOT` | 覆盖 `<root>`（默认取本目录的父目录） |
   | `DM_BASE` / `DM_MAILPIT` | 默认 `http://127.0.0.1:18321` / `:8025` |
   | `DM_IMAGE` | 服务端镜像名，默认 `dailymusings/server:local` |
-  | `DM_VOLUME` | 全新实例的状态卷名，默认 `dailymusings_dailymusings-state` |
+  | `DM_VOLUME` | 全新实例的状态卷名，默认 `dailymusings_dailymusings-state`（2026-09-29 后是 `dailymusings_dm-data`，见 `run-restore-verify.sh`） |
 
 - 其余账号默认值见各脚本顶部；`compose.verify.yaml` 里写死了测试主机上的桩模型端点（`127.0.0.1:8077/v1`）与 Mailpit（`1025`）。
 
@@ -82,6 +82,16 @@ bash <root>/verify/run-phase5-verification.sh
 ### 2026-09-24（新范围）
 
 **尚未执行。** 脚本已按 A.17 改写，改动落在：删除 `wp_request` / `wp_reset` / `wp_posts` 与全部 WordPress 判定；不再要求 `DM_WP_APP_PASSWORD`；验收实例的 compose 文件去掉 `Publishing__WordPress__*` 与对应 Secret；S5 整段换成上面写的 Markdown 生命周期，并新增「旧目标类型被拒绝」这条断言。重跑需要一台能跑 Docker 的 Linux 测试主机与一个 Mailpit，因此没有在本机完成；重跑后请把结果补到这一节，并同步更新仓库 README 里的数字。
+
+### 2026-09-29：脚本已适配「一份 compose + 一个镜像」，但**仍未重跑**
+
+附录 A.26 把对外部署形态换成「仓库根的 `compose.yaml` + 已发布镜像 + 入口脚本纠正属主后降权」。相应地改了 `run-restore-verify.sh`：
+
+- 空目录里放的是**仓库根的** `compose.yaml`（不再是 `deploy/compose.yaml` 那个覆盖文件），并用 `DM_IMAGE=dailymusings/server:local` 指回本地构建的镜像——否则它会去 ghcr 拉发布版，验的就不是这份源码。
+- 那一步还要「新 Secrets」，所以脚本用 `sed` 打开根文件里注释掉的 `./secrets:/run/secrets:ro` 挂载，并且**打不开就直接失败**（否则会静默跑成「Secrets 根本没挂上」的假通过）。
+- 全新实例的状态卷名从 `dailymusings_dailymusings-state` 改为 `dailymusings_dm-data`（项目名仍是 `dailymusings`）。
+
+这些是**结构上的适配，不是执行证据**：本节写的仍然是「未重跑」，跑之前不要引用上面的旧结果。
 
 脚本无法覆盖、因此没有声称验证过的部分：Android 客户端的交互式界面（本目录只到 API 层；界面另有真机验收），以及需要真实模型之外的判断。
 

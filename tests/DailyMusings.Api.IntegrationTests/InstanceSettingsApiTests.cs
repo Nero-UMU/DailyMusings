@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using DailyMusings.Contracts;
+using DailyMusings.Infrastructure.Configuration;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace DailyMusings.Api.IntegrationTests;
@@ -205,5 +206,54 @@ public class InstanceSettingsApiTests
         cleared.EnsureSuccessStatusCode();
         Assert.IsNull((await cleared.Content.ReadFromJsonAsync<ListeningPortDto>())!.OverridePort);
         Assert.IsFalse((await instance.Client.GetFromJsonAsync<ListeningPortDto>(PortPath))!.RestartRequired);
+    }
+
+    /// <summary>
+    /// A container deployment owns the port: the published mapping is fixed when the container starts, so the only
+    /// honest answer to "save this port" is a refusal. It also ignores an override an earlier start left behind —
+    /// the shipped Compose file sets this lock, and an instance that honoured a stale file would come back up on a
+    /// port nothing is mapped to.
+    /// </summary>
+    [TestMethod]
+    public async Task A_deployment_that_owns_the_port_reports_it_and_refuses_an_override()
+    {
+        var variable = RuntimeOverridesFile.ListeningPortLockVariableName;
+        var previous = Environment.GetEnvironmentVariable(variable);
+        var root = Path.Combine(Path.GetTempPath(), "dailymusings-api", Guid.CreateVersion7().ToString("N"));
+        var configPath = Path.Combine(root, "runtime.json");
+
+        try
+        {
+            Environment.SetEnvironmentVariable(variable, "1");
+
+            Directory.CreateDirectory(root);
+            File.WriteAllText(configPath, "{ \"port\": 19464, \"updatedBy\": \"owner\" }");
+
+            await using var instance = await TestInstance.StartAtAsync(
+                root,
+                new Dictionary<string, string?> { ["Storage:RuntimeConfigPath"] = configPath });
+
+            await instance.SignInAsChangedAdministratorAsync();
+
+            var current = await instance.Client.GetFromJsonAsync<ListeningPortDto>(PortPath);
+
+            Assert.IsNotNull(current);
+            Assert.IsTrue(current.Locked, "The page needs this to stop offering an edit it cannot apply.");
+            Assert.IsNull(current.OverridePort, "A stale override must not survive the lock.");
+            Assert.IsFalse(current.RestartRequired, "Nothing is pending when nothing can be saved.");
+
+            using var refused = await instance.Client.PatchAsJsonAsync(
+                PortPath,
+                new UpdateListeningPortRequest(19465));
+
+            Assert.AreEqual(HttpStatusCode.Conflict, refused.StatusCode);
+            Assert.AreEqual(
+                ApiErrorCodes.InstancePortLocked,
+                (await refused.Content.ReadFromJsonAsync<ApiError>())!.Code);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(variable, previous);
+        }
     }
 }

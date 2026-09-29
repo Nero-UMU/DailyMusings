@@ -36,10 +36,11 @@ DATA_DIR=$(realpath -m "$DATA_DIR")
 [ "$CONFIG_DIR" = /home/nero/dailymusings-config ] || { echo "refusing unexpected config directory: $CONFIG_DIR" >&2; exit 2; }
 [ "$DATA_DIR" = /home/nero/dailymusings-data ] || { echo "refusing unexpected data directory: $DATA_DIR" >&2; exit 2; }
 [ "$CONFIG_DIR" != "$DATA_DIR" ]
+[ -f "$ROOT/compose.yaml" ]
 [ -f "$ROOT/deploy/compose.yaml" ]
 [ -f "$ROOT/deploy/.env" ]
 
-COMPOSE="docker compose --env-file $ROOT/deploy/.env -f $ROOT/deploy/compose.yaml"
+COMPOSE="docker compose --env-file $ROOT/deploy/.env -f $ROOT/compose.yaml -f $ROOT/deploy/compose.yaml"
 
 echo "-- stop instance --"
 $COMPOSE down --remove-orphans || true
@@ -52,7 +53,7 @@ docker run --rm --user 0 \
     -c 'find /reset-config -mindepth 1 -delete && find /reset-data -mindepth 1 -delete && chown -R 1654:1654 /reset-config /reset-data'
 
 echo "-- remove legacy named volumes --"
-for volume in dailymusings_dailymusings-state dailymusings_dailymusings-keys dailymusings_dailymusings-config; do
+for volume in dailymusings_dailymusings-state dailymusings_dailymusings-keys dailymusings_dailymusings-config dailymusings_dm-data dailymusings_dm-config; do
     if docker volume inspect "$volume" >/dev/null 2>&1; then docker volume rm "$volume"; fi
 done
 

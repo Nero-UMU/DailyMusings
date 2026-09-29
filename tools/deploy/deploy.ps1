@@ -48,7 +48,7 @@ ROOT=/home/nero/dailymusings
     echo "refusing unsafe project path: `$ROOT" >&2
     exit 2
 }
-OLD_COMPOSE="docker compose -f `$ROOT/deploy/compose.yaml"
+OLD_COMPOSE="docker compose -f `$ROOT/compose.yaml -f `$ROOT/deploy/compose.yaml"
 PRESERVED=`$(mktemp -d)
 case "`$PRESERVED" in
     /tmp/tmp.*) ;;
@@ -68,8 +68,12 @@ read_env_path() {
     awk -F= -v key="`$key" '`$1 == key { sub(/^[^=]*=/, ""); gsub(/\r$/, ""); print }' "`$file" | tail -n1
 }
 
-CONFIG_DIR=`$(read_env_path DAILYMUSINGS_CONFIG_DIR)
-DATA_DIR=`$(read_env_path DAILYMUSINGS_DATA_DIR)
+# DM_* 是根 compose.yaml 用的名字；旧服务器上的 deploy/.env 里可能还是 DAILYMUSINGS_* 那套，
+# 两个都读，避免一次升级把已有的数据目录指错地方。
+CONFIG_DIR=`$(read_env_path DM_CONFIG_DIR)
+DATA_DIR=`$(read_env_path DM_DATA_DIR)
+[ -n "`$CONFIG_DIR" ] || CONFIG_DIR=`$(read_env_path DAILYMUSINGS_CONFIG_DIR)
+[ -n "`$DATA_DIR" ] || DATA_DIR=`$(read_env_path DAILYMUSINGS_DATA_DIR)
 CONFIG_DIR=`${CONFIG_DIR:-`$DEFAULT_CONFIG_DIR}
 DATA_DIR=`${DATA_DIR:-`$DEFAULT_DATA_DIR}
 
@@ -101,7 +105,7 @@ if [ -f "`$ROOT/deploy/.env" ]; then cp -a "`$ROOT/deploy/.env" "`$PRESERVED/.en
 
 echo "-- stop and remove the running instance --"
 if [ -f "`$ROOT/deploy/.env" ]; then
-    docker compose --env-file "`$ROOT/deploy/.env" -f "`$ROOT/deploy/compose.yaml" down --remove-orphans || true
+    docker compose --env-file "`$ROOT/deploy/.env" -f "`$ROOT/compose.yaml" -f "`$ROOT/deploy/compose.yaml" down --remove-orphans || true
 else
     `$OLD_COMPOSE down --remove-orphans || true
 fi
@@ -167,12 +171,20 @@ chmod 700 "`$ROOT/deploy/secrets" 2>/dev/null || true
 chmod 644 "`$ROOT/deploy/secrets/"* 2>/dev/null || true
 # Always write back the resolved and validated directories. An older .env may contain only the port settings;
 # restoring it verbatim would leave the two required bind sources undefined in the new Compose file.
-printf 'DAILYMUSINGS_CONFIG_DIR=%s\nDAILYMUSINGS_DATA_DIR=%s\nDAILYMUSINGS_HTTP_PORT=%s\nDAILYMUSINGS_INTERNAL_PORT=%s\n' \
-    "`$CONFIG_DIR" "`$DATA_DIR" "$Port" "$Port" > "`$ROOT/deploy/.env"
+# 可选项（初始管理员密码、时区、转写协议默认值）从旧 .env 里原样带过来，不在这里凭空生成。
+ADMIN_PASSWORD=`$(read_env_path DM_ADMIN_PASSWORD)
+TZ_VALUE=`$(read_env_path DM_TZ)
+TRANSCRIPTION_TYPE=`$(read_env_path DM_TRANSCRIPTION_API_TYPE)
+{
+    printf 'DM_CONFIG_DIR=%s\nDM_DATA_DIR=%s\nDM_PORT=%s\n' "`$CONFIG_DIR" "`$DATA_DIR" "$Port"
+    [ -z "`$TZ_VALUE" ] || printf 'DM_TZ=%s\n' "`$TZ_VALUE"
+    [ -z "`$TRANSCRIPTION_TYPE" ] || printf 'DM_TRANSCRIPTION_API_TYPE=%s\n' "`$TRANSCRIPTION_TYPE"
+    [ -z "`$ADMIN_PASSWORD" ] || printf 'DM_ADMIN_PASSWORD=%s\n' "`$ADMIN_PASSWORD"
+} > "`$ROOT/deploy/.env"
 cleanup_preserved
 trap - EXIT
 
-COMPOSE="docker compose --env-file `$ROOT/deploy/.env -f `$ROOT/deploy/compose.yaml"
+COMPOSE="docker compose --env-file `$ROOT/deploy/.env -f `$ROOT/compose.yaml -f `$ROOT/deploy/compose.yaml"
 
 echo "-- validate resolved compose configuration --"
 `$COMPOSE config --quiet

@@ -36,6 +36,16 @@ if (overrides.ListeningPort is { } effectivePort)
         overrides.UpdatedAtUtc?.ToString("u", CultureInfo.InvariantCulture) ?? "an unknown time",
         RuntimeOverridesFile.IgnoreVariableName);
 }
+else if (RuntimeOverridesFile.IsListeningPortLocked && File.Exists(paths.RuntimeConfigPath))
+{
+    // The lock makes the file's contents moot, and silence here would leave an operator staring at a port override
+    // that is visibly ignored. Say which switch did it, and where the port is actually decided.
+    app.Logger.LogInformation(
+        "{LockVariable}=1, so this deployment owns the listening port and the override in {RuntimeConfigPath} is "
+        + "ignored. Change the port where the deployment defines it, not here.",
+        RuntimeOverridesFile.ListeningPortLockVariableName,
+        paths.RuntimeConfigPath);
+}
 else if (RuntimeOverridesFile.IsIgnored && File.Exists(paths.RuntimeConfigPath))
 {
     app.Logger.LogWarning(

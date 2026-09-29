@@ -1,119 +1,25 @@
-# 每日随想 — single-instance self-hosted deployment (docs/开发指导.md §3.1, §14).
+# 从源码构建的覆盖文件 —— 维护者通道，不是新用户的部署入口。
 #
-# First copy deploy/.env.example to deploy/.env and set the two absolute host directories.
-# Then run from the repository root:
-#   docker compose --env-file deploy/.env -f deploy/compose.yaml up -d --build
+# 新用户只需要仓库根目录那一份 compose.yaml（拉现成镜像）。这一份叠在它上面，把同一个服务改成
+# 「用本仓库的源码构建成本地镜像」，让「改完代码立刻在一台真实机器上跑起来」这件事仍然只有一个入口：
 #
-# Read the generated administrator password once, at first start:
-#   docker compose --env-file deploy/.env -f deploy/compose.yaml logs app | grep INITIAL-ADMIN-PASSWORD
-
-name: dailymusings
+#   docker compose -f compose.yaml -f deploy/compose.yaml up -d --build
+#
+# 用法（维护者，见 tools/deploy/deploy.ps1，那才是真正在用的那条路径）：
+#   先在 deploy/.env 里指定两个绝对目录（DM_CONFIG_DIR / DM_DATA_DIR），然后
+#   docker compose --env-file deploy/.env -f compose.yaml -f deploy/compose.yaml up -d --build
+#
+# 与根目录那份的唯一差别就是下面两行：镜像改成构建产物并打上本地标签。
+# 服务定义、端口、健康检查、挂载、环境变量全部只有一份，写在 compose.yaml 里 —— 两份文件各自维护
+# 端口和挂载是上一次部署里最容易被改漏的地方。
 
 services:
   app:
-    build:
-      context: ..
-      dockerfile: deploy/Dockerfile
+    # 本地标签保留原名：tools/deploy/deploy.ps1 的「删旧镜像 → 构建 → 起新镜像」纪律，以及它在首次
+    # 绑定挂载部署时用来搬运命名卷的 root 辅助容器，都按这个名字找镜像。
     image: dailymusings/server:local
 
-    # §14: multi-instance deployment is NOT supported. The database-backed queue assumes one executor, so this
-    # service must never be scaled out. Do not add `deploy.replicas` or `--scale` here.
-    restart: unless-stopped
-
-    environment:
-      ASPNETCORE_ENVIRONMENT: Production
-      ASPNETCORE_URLS: http://+:${DAILYMUSINGS_INTERNAL_PORT:-18321}
-      Storage__RootPath: /var/lib/dailymusings
-      Storage__SecretsPath: /run/secrets
-      Storage__KeyRingPath: /var/lib/dailymusings-config/keys
-      Storage__RuntimeConfigPath: /var/lib/dailymusings-config/runtime.json
-      # Optional deployment default. A value saved from the model page still wins because settings rows are read
-      # before deployment configuration. Keeping this explicit preserves the "never infer a protocol" rule.
-      Transcription__ApiType: "${DAILYMUSINGS_TRANSCRIPTION_API_TYPE:-openai_transcription}"
-      # Mirrors the port above so the healthcheck can fall back to it when there is no admin-page override.
-      DM_INTERNAL_PORT: "${DAILYMUSINGS_INTERNAL_PORT:-18321}"
-
-      # SMTP for notification mail (§12). Optional: the admin page's 「通知管理」 writes the same settings, and what
-      # is saved there wins over these. Uncomment the block to configure a relay entirely from compose instead.
-      #
-      #   Smtp__Enabled: "true"
-      #   Smtp__Host: smtp.example.com
-      #   Smtp__Port: "587"
-      #   Smtp__FromAddress: noreply@example.com   # the sender's mailbox, which is also the SMTP username
-      #   Smtp__StartTls: "true"                   # 587: greet in the clear, then upgrade
-      #   Smtp__Ssl: "false"                       # 465: handshake before the greeting (never both at once)
-      #
-      # The two switches are independent booleans, because that is the pair every other mail form shows. The names
-      # this section had before they were split — Smtp__Security (none|starttls|ssl) and Smtp__UseStartTls — are
-      # still read and mapped onto them, so an existing deployment keeps sending after an upgrade.
-      #
-      # The password is never an environment variable: it is the smtp-password secret below, mounted as a file (or
-      # typed on the admin page). With no password at all, the sender simply does not authenticate — which is what a
-      # relay on localhost wants.
-
-    ports:
-      # §10.3 recommends HTTPS, a LAN or a VPN. If this port is exposed to the public internet over plain
-      # HTTP, the login page states the interception risk and requires an explicit acknowledgement — and that
-      # acknowledgement protects nothing. Prefer a TLS-terminating reverse proxy in front of this service.
-      #
-      # 18321 rather than 8080: 8080 is the single most contended port on a self-hosted box. The internal port is
-      # parameterized because the admin page can change the port the instance listens on (§8.1) — if you change it
-      # there, set DAILYMUSINGS_INTERNAL_PORT to the same value and recreate the container, or this mapping will
-      # point at a port nothing is listening on. The admin page prints the exact commands.
-      - "${DAILYMUSINGS_HTTP_PORT:-18321}:${DAILYMUSINGS_INTERNAL_PORT:-18321}"
-
-    volumes:
-      # Exactly two user-selected bind mounts. Both source paths are required in deploy/.env, must already exist,
-      # and must be writable by the container user (uid 1654). create_host_path=false prevents Docker from hiding
-      # a typo by silently creating a root-owned directory.
-      #
-      # Configuration: runtime.json plus the DataProtection key ring under keys/. Keep this directory out of the
-      # ordinary content backup because possession of the key ring is equivalent to possession of login cookies.
-      - type: bind
-        source: ${DAILYMUSINGS_CONFIG_DIR:?请在 deploy/.env 中设置 DAILYMUSINGS_CONFIG_DIR}
-        target: /var/lib/dailymusings-config
-        bind:
-          create_host_path: false
-
-      # Data: SQLite, audio, backups, readable exports and every generated/published manuscript. Drafts and posts
-      # are stored below ${DAILYMUSINGS_DATA_DIR}/markdown/<发布设置中的相对目录> on the host.
-      - type: bind
-        source: ${DAILYMUSINGS_DATA_DIR:?请在 deploy/.env 中设置 DAILYMUSINGS_DATA_DIR}
-        target: /var/lib/dailymusings
-        bind:
-          create_host_path: false
-
-    secrets:
-      # Names only. Values are read from files at run time and never appear in configuration, logs or backups.
-      - openai-api-key
-      - deepseek-api-key
-      - embedding-api-key
-      - smtp-password
-
-    healthcheck:
-      # The instance's port is admin-changeable, so the check reads the override file instead of assuming a
-      # number — a healthcheck hardcoded to the old port would report the container unhealthy forever after a
-      # port change, which is exactly the kind of false alarm that trains an operator to ignore it.
-      test:
-        - CMD-SHELL
-        - >
-          override=$(sed -n 's/.*"port"[[:space:]]*:[[:space:]]*\([0-9]\{1,\}\).*/\1/p'
-          "$${Storage__RuntimeConfigPath}" 2>/dev/null | head -n1);
-          curl --fail --silent --show-error
-          "http://127.0.0.1:$${override:-$${DM_INTERNAL_PORT}}/api/system/health"
-      interval: 30s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
-
-# Copy deploy/secrets.example/* into deploy/secrets/ and fill in real values before starting.
-# deploy/secrets/ is gitignored on purpose.
-secrets:
-  deepseek-api-key:
-    file: ./secrets/deepseek-api-key
-  openai-api-key:
-    file: ./secrets/openai-api-key
-  embedding-api-key:
-    file: ./secrets/embedding-api-key
-  smtp-password:
-    file: ./secrets/smtp-password
+    build:
+      # 整个仓库都是构建上下文：服务端引用其余全部项目。.dockerignore 已经把 tests/docs/本地状态排除掉。
+      context: ..
+      dockerfile: deploy/Dockerfile

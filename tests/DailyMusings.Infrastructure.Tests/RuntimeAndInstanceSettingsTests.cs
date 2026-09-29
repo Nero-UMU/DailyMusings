@@ -22,6 +22,49 @@ public class RuntimeAndInstanceSettingsTests
 {
     private const string IgnoreVariable = RuntimeOverridesFile.IgnoreVariableName;
 
+    private const string LockVariable = RuntimeOverridesFile.ListeningPortLockVariableName;
+
+    /// <summary>
+    /// When the deployment owns the listening port (the shipped Compose file sets the lock), a port override left
+    /// behind on disk has no say — otherwise switching the lock on could strand a running instance on a port its
+    /// published mapping does not point at. A value that is not exactly <c>1</c> is not a lock: a typo must not
+    /// silently freeze the port either.
+    /// </summary>
+    [TestMethod]
+    public void The_deployment_lock_makes_a_saved_port_override_moot()
+    {
+        var root = NewTempDirectory();
+        var previous = Environment.GetEnvironmentVariable(LockVariable);
+
+        try
+        {
+            Environment.SetEnvironmentVariable(LockVariable, null);
+
+            var path = Path.Combine(root, "runtime.json");
+            RuntimeOverridesFile.Write(path, new RuntimeOverrides(19464, DateTimeOffset.UnixEpoch, "owner"));
+
+            Assert.IsFalse(RuntimeOverridesFile.IsListeningPortLocked);
+            Assert.AreEqual(19464, RuntimeOverridesFile.Read(path).ListeningPort, "Unlocked, the file decides.");
+
+            Environment.SetEnvironmentVariable(LockVariable, "1");
+
+            Assert.IsTrue(RuntimeOverridesFile.IsListeningPortLocked);
+            Assert.IsNull(
+                RuntimeOverridesFile.Read(path).ListeningPort,
+                "Locked, the file must not be able to move the instance off its published port.");
+
+            Environment.SetEnvironmentVariable(LockVariable, "true");
+
+            Assert.IsFalse(RuntimeOverridesFile.IsListeningPortLocked);
+            Assert.AreEqual(19464, RuntimeOverridesFile.Read(path).ListeningPort);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(LockVariable, previous);
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     /// <summary>
     /// These are the numbers the guide documents, so a fresh instance behaves as the manual describes. They were
     /// read back from <c>GET /api/system/instance-settings</c> on an unconfigured instance.

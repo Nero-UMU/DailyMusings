@@ -33,6 +33,16 @@ public interface IRuntimeOverridesStore
     string ConfigPath { get; }
 
     /// <summary>
+    /// True when the deployment owns the listening port, so nothing here can change it.
+    /// <para>
+    /// A container's published mapping is fixed when the container starts: an override saved from the admin page
+    /// could only point that mapping at a port nothing is listening on. When this is true the page must not offer
+    /// the edit and the API must refuse it, rather than storing a value that breaks the next restart.
+    /// </para>
+    /// </summary>
+    bool IsListeningPortLocked { get; }
+
+    /// <summary>
     /// The overrides currently on disk. Never throws: a missing, unreadable or malformed file means "no
     /// overrides", because an instance that refuses to start over a bad port override is worse than one that
     /// starts on the configured port.

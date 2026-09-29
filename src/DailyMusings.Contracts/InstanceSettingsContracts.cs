@@ -46,11 +46,18 @@ public sealed record UpdateInstanceSettingsRequest(
 /// container's published port mapping is fixed when the container starts, so the change needs a recreate, and the
 /// page says so instead of pretending the new port is already live.
 /// </para>
+/// <para>
+/// <see cref="Locked"/> is true when the <em>deployment</em> owns the port — the shipped Compose file sets
+/// <c>DAILYMUSINGS_LOCK_LISTENING_PORT=1</c>. Then there is nothing to save, nothing pending, and one place to
+/// change it: the deployment's own port setting. A page that still offered the edit would be offering a way to
+/// make the instance unreachable.
+/// </para>
 /// </summary>
 public sealed record ListeningPortDto(
     int? OverridePort,
     int EffectivePort,
     bool RestartRequired,
+    bool Locked,
     string? UpdatedBy,
     string? UpdatedAtUtc,
     string RuntimeConfigPath,

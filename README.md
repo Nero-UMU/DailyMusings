@@ -61,6 +61,17 @@
 - **2026-09-28 替代稿生命周期部署验收**：代码提交 `514f9db` 已推送到 GitHub，并在 `nero@100.64.0.3` 删除旧镜像/旧源码后由 Compose 无缓存重建为镜像 `f8382cca830a`。实例健康检查四项全绿；原配置与数据挂载保持不变，线上当天状态核对为 1 份当前正式稿、2 条已取代历史记录，正式稿目录仍只有 1 个文件。
 - **2026-09-28 部署验收**：`main` 的 `8a10e14` 已通过 Compose 在 `nero@100.64.0.3` 重建为新镜像，旧镜像已删除，四项健康检查全绿。线上转写配置已从不兼容的 `paraformer-v2` 改为 `qwen3-asr-flash`；MuMu 通过手机界面上传一段可控语音后，同一次响应返回正确英文转写。两条验收录音随后已软删除并清除音频。历史上同日三份正式稿已在哈希核对和备份后收敛为最新一份，另外两条发布记录标记为 `Superseded`。
 
+## 2026-09-29 部署形态：一份 compose + 一个 APK
+
+这一轮改的是**交付形态**，不是功能（定案记录见 [`docs/开发指导.md`](docs/开发指导.md) 附录 A.26）：
+
+- **对外只发布镜像**，不再要求新用户克隆源码本地构建。`.github/workflows/release.yml` 在打 tag 时构建 `linux/amd64` 与 `linux/arm64` 两个架构推到 `ghcr.io/nero-umu/dailymusings`，并把签名 APK 与 SHA-256 附到 Release。
+- **仓库根的 `compose.yaml` 是一个自足文件**：每个参数都有默认值，不设目录时落在两份具名命名卷上，不写 `.env`、不准备 Secret 文件、不预先建目录也能 `docker compose up -d`。要指定目录就设 `DM_DATA_DIR` / `DM_CONFIG_DIR`，目录由 Docker 创建、属主由容器入口脚本纠正后立即降权。
+- **端口只有一处**：`DM_PORT`。容器部署设 `DAILYMUSINGS_LOCK_LISTENING_PORT=1`，`runtime.json` 里残留的端口覆盖被忽略，管理页那一节改成只读说明——这是上一版里最容易把新手锁在门外的一步。
+- **初始管理员密码可以由部署配置给出**（`DM_ADMIN_PASSWORD`），且不回显到容器输出；不设时完全保持「随机生成 + 只打印一次」。
+- `deploy/compose.yaml` 退化为「从源码构建」的覆盖文件，维护者那条纪律（停容器 → 删旧镜像 → 构建 → 起新镜像）不变。
+- **未验证的部分如实说明**：这一轮开发机上没有 Docker，compose 的解析、镜像构建、入口脚本降权、绑定挂载属主纠正、多架构推送与 APK 构建只在 CI 里跑，尚未在本机实跑。
+
 ## 当前进度
 
 **阶段一（领域骨架与部署）、阶段二（Android 输入闭环）、阶段三（主题与每日生成）、阶段四（通知与发布）、阶段五（运维与交付）、2026-09-24 的方向收缩轮与 2026-09-28 的管理端/部署重做均已完成。**
@@ -156,7 +167,7 @@ dotnet test
 
 覆盖范围：§17.1 列出的领域规则；迁移与仓储的原子性（含配对码只能被兑换一次的并发用例、一个真实的外键顺序回归，以及文件存储的「先落盘后引用」）；用例层；客户端离线队列（含「本地副本只在服务端确认后才删除」的顺序断言与幂等键复用）；以及走真实 HTTP 的端到端流程——阶段一的完整流程，阶段二的上传 → 执行器认领 → 转写端点 → 结果落库，阶段三的采集 → 主题识别 → 语义检索 → 生成 → 来源映射 → 无来源陈述检查 → 确认，阶段四的导出排队 / 执行 / 文件差异，以及阶段五的取回录音（含 Range 与未配对者被拒）、导出 / 备份 / 裁剪 / 恢复校验 / 音频清理。外部服务一律使用可控桩端点。
 
-当前测试基线：**553 项通过**（Domain 232、Application 32、Infrastructure 172、Client 48、Api.Integration 69）。发布相关的测试直接断言磁盘文件：`draft` 字段随可见性变化、重复导出不会覆盖非本系统写入的文件、外部改动会被判为差异而不是可重试失败，并验证已发布旧版本不会让重新生成的新版本误显示为已发布、替代稿到发布时间只提醒而不自动覆盖；另外覆盖模型候选配置探测、三种显式转写 API 类型、DashScope 异步轮询、生成响应体超时，以及设备页配对按钮可点击回归。手机端只保留采集与查看能力，稿件、主题和发布统一由管理端负责。
+当前测试基线：**579 项通过**（Domain 238、Application 39、Infrastructure 177、Client 48、Api.Integration 77）。发布相关的测试直接断言磁盘文件：`draft` 字段随可见性变化、重复导出不会覆盖非本系统写入的文件、外部改动会被判为差异而不是可重试失败，并验证已发布旧版本不会让重新生成的新版本误显示为已发布、替代稿到发布时间只提醒而不自动覆盖；另外覆盖模型候选配置探测、三种显式转写 API 类型、DashScope 异步轮询、生成响应体超时、设备页配对按钮可点击回归，以及部署形态这一轮新增的四项：部署配置里的初始密码被采用且不回显、锁定端口后接口拒绝写入且磁盘上的覆盖被忽略、锁定时系统设置页不再渲染保存按钮、残留覆盖不会把实例挪到没人监听的端口。手机端只保留采集与查看能力，稿件、主题和发布统一由管理端负责。
 
 除 `dotnet test` 之外还有部署验收脚本，见 [`tools/deploy/`](tools/deploy/)：`deploy.ps1` 把工作树部署到远程主机（停容器 → 删旧镜像 → 构建 → 启新镜像 → 等健康检查），`reset-instance.ps1` 在明确需要全新实例时清空配置/数据目录与旧命名卷，`verify-instance.ps1` 在部署好的实例上跑 25 项端到端自检，`configure-instance.ps1` 把实例配成可验收状态，`android-ui.ps1` 用 adb 驱动手机界面，`test-doubles.sh` 起模型桩与邮件接收端。
 
@@ -164,7 +175,7 @@ dotnet test
 
 ## 构建 Android 客户端
 
-需要 `maui-android` 工作负载与 Android SDK：
+**普通使用者不需要这一节**：直接去 [Releases](https://github.com/Nero-UMU/DailyMusings/releases) 下载 APK 即可（打 tag 时由 CI 构建并附上 SHA-256）。下面是自己从源码构建的方式，需要 `maui-android` 工作负载与 Android SDK：
 
 ```bash
 dotnet workload install maui-android
@@ -176,19 +187,29 @@ dotnet build src/DailyMusings.Client -f net10.0-android -c Release -t:SignAndroi
 
 ## Docker Compose 部署
 
+对外形态是**一份 compose 文件 + 一个 APK**（2026-09-29 定案，见 [`docs/开发指导.md`](docs/开发指导.md) 附录 A.26）。新用户不需要克隆源码：把仓库根的 [`compose.yaml`](compose.yaml) 存成一个文件、按需改几个参数，然后
+
 ```bash
-cp deploy/.env.example deploy/.env               # 填写两个宿主机绝对目录
-sudo mkdir -p /srv/dailymusings/config /srv/dailymusings/data
-sudo chown -R 1654:1654 /srv/dailymusings/config /srv/dailymusings/data
-cp -r deploy/secrets.example deploy/secrets     # 填入真实密钥（该目录已被 gitignore）
-docker compose --env-file deploy/.env -f deploy/compose.yaml up -d --build
-docker compose --env-file deploy/.env -f deploy/compose.yaml logs app | grep INITIAL-ADMIN-PASSWORD
+docker compose up -d
+docker compose logs app | grep INITIAL-ADMIN-PASSWORD    # 一次性的管理员初始密码
 ```
 
-- 单一实例。数据库驱动的任务队列假定只有一个执行器，**不要**横向扩容。
-- `deploy/.env` 必须指定 `DAILYMUSINGS_CONFIG_DIR` 与 `DAILYMUSINGS_DATA_DIR`；Compose 只有这两个持久目录映射，路径不存在时会直接拒绝启动。
-- 数据目录保存数据库、音频、导出、备份和 `markdown/` 下的全部稿件；配置目录保存 `runtime.json` 与 DataProtection 密钥环。备份内容时只备份数据目录，配置目录应单独保护。
-- 密钥通过 Docker Secrets 以**文件名**引用，不进配置文件、不进日志、不进备份。三个模型分别使用独立的密钥槽位：`deepseek-api-key`（文章生成）、`openai-api-key`（语音转写）和 `embedding-api-key`；即使 Base URL 相同也不会互相读取。邮件另用 `smtp-password`。
+完整步骤（含手机端配对）见 [`docs/快速部署.md`](docs/快速部署.md)。要点：
+
+- **镜像**：`ghcr.io/nero-umu/dailymusings`（`linux/amd64` 与 `linux/arm64`），打 tag 时由 [`.github/workflows/release.yml`](.github/workflows/release.yml) 构建推送；Release 同时附上 Android APK 与 SHA-256。
+- **零配置能起来**：全部参数都有默认值，不设目录时落在两份具名命名卷（`dm-data` / `dm-config`）上，不需要 `.env`、不需要 Secret 文件、不需要预先建目录。
+- **要指定目录就设 `DM_DATA_DIR` / `DM_CONFIG_DIR`**：目录不存在时由 Docker 创建，容器入口脚本（[`deploy/docker-entrypoint.sh`](deploy/docker-entrypoint.sh)）在启动的第一瞬间把属主纠正为容器用户 uid 1654，随后 `setpriv` 降权——**服务进程始终不是 root**，但容器以 root 起步做这一件事。
+- **端口只有一处**：宿主机 `DM_PORT`（默认 18321）映射到容器内固定的 18321。容器部署设 `DAILYMUSINGS_LOCK_LISTENING_PORT=1`，管理页的「监听端口」因此是只读的——容器内改端口只会让映射指向没人监听的地方。
+- **初始管理员密码**：不设 `DM_ADMIN_PASSWORD` 时与从前完全一样（随机生成、只在启动终端打印一次）；设了就按它创建，且**不回显到容器输出**（容器日志会被长期保存）。首次登录仍然强制改账号名与密码。
+- **单一实例**：数据库驱动的任务队列假定只有一个执行器，**不要**横向扩容。
+- **数据在哪**：数据目录保存数据库、音频、导出、备份和 `markdown/` 下的全部稿件；配置目录保存 `runtime.json`、DataProtection 密钥环（A.14）与管理页保存的凭据。备份内容时只备份数据目录，配置目录应单独保护。
+- **密钥**：可在管理页「模型管理」「通知管理」里填（加密存放在配置目录的 `keys/` 下，不进配置表、不进日志、不进导出、不进备份），也可以放进 `deploy/secrets.example/` 那样的文件里按名字引用（`deepseek-api-key`、`openai-api-key`、`embedding-api-key`、`smtp-password`，权限 644），或走环境变量。解析顺序是「管理页 → Secret 文件 → 环境变量」。
+- **从源码构建（维护者通道）**：`deploy/compose.yaml` 只是叠加在根 `compose.yaml` 上的覆盖文件，服务定义只有一份：
+
+```bash
+docker compose --env-file deploy/.env -f compose.yaml -f deploy/compose.yaml up -d --build
+```
+
 - 从 1.0.0 之前的实例升级上来时，启动会自动执行 `0006_markdown_only`，**WordPress 目标与其发布历史会在那一步被删除**——先备份。
 
 ## 安全须知
@@ -201,13 +222,15 @@ docker compose --env-file deploy/.env -f deploy/compose.yaml logs app | grep INI
 ## 目录结构
 
 ```
+compose.yaml 对外部署入口：拉已发布镜像、每个参数都有默认值的单文件
+.github/     release.yml：打 tag 时构建多架构镜像与 APK，并用 compose.yaml 起一次实例
 src/        Domain → Application → Infrastructure → Server / Admin（服务端依赖方向由测试强制）
             Client.Core → Client（客户端逻辑与 MAUI 界面分离；客户端只有 Android 目标）
 tests/      Domain / Application / Infrastructure / Client / Api.IntegrationTests
 tools/      acceptance/：§17.3 端到端验收与 §15.2 八步恢复验证的可重复执行脚本
             deploy/：部署与验收用的脚本（部署到远程主机、部署后自检、实例配置、adb 驱动手机、测试替身）
-deploy/     Dockerfile、compose.yaml、.env.example、secrets.example/
-docs/       开发指导.md（唯一事实源，含附录 A 的设计定案记录）、使用手册.md、发布校验值.md
+deploy/     Dockerfile、docker-entrypoint.sh、compose.yaml（从源码构建的覆盖文件）、.env.example、secrets.example/
+docs/       开发指导.md（唯一事实源，含附录 A 的设计定案记录）、快速部署.md、使用手册.md、发布校验值.md
 ```
 
 ## 备份、恢复与运维
@@ -223,6 +246,8 @@ docs/       开发指导.md（唯一事实源，含附录 A 的设计定案记�
 [`docs/开发指导.md`](docs/开发指导.md) —— 产品约束、领域模型、时间与生成规则、API 边界、测试策略与完成定义。它是本项目的唯一事实源；任何超出其范围的新需求都必须先改这份文档。**附录 A.17 是 2026-09-24 方向调整的定案记录**，含删除清单、代价与已知遗留。
 
 [`docs/发布校验值.md`](docs/发布校验值.md) —— 产物校验值、复现构建命令与验收状态。交付形态只有 Android APK（电脑端已退出范围）；2026-09-24 的产物已按当前源码重建，并已在真实部署的实例上完成真机验收。
+
+[`docs/快速部署.md`](docs/快速部署.md) —— 面向新用户的最短路径：一份 compose 文件、起服务、装 APK、配对，外加常用参数表与排障对照表。
 
 [`docs/使用手册.md`](docs/使用手册.md) —— 面向使用者与实例管理员的操作用手册：部署、Secrets、首次登录与配对、每个管理页各管什么、日常使用、备份与八步恢复、升级、排障对照表、数据与隐私。
 

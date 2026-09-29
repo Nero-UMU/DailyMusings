@@ -26,6 +26,11 @@ pwsh -File tools/deploy/deploy.ps1 -Server 100.64.0.3 -Port 18321
 4. 等 `/api/system/health` 变绿，清理构建留下的悬空镜像，最后 `exit 0`（健康检查才是成败判据，
    不能让 `set -o pipefail` 把最后一条管道的退出码当成部署失败）。
 
+服务定义只有一份：它用的是「根 `compose.yaml` + `deploy/compose.yaml` 覆盖文件」这一对（后者只加 `build:` 与本地镜像标签），
+所以端口、挂载、健康检查不会在两处各写一遍。`deploy/.env` 的键名是 `DM_CONFIG_DIR` / `DM_DATA_DIR` / `DM_PORT`
+（旧键 `DAILYMUSINGS_CONFIG_DIR` / `DAILYMUSINGS_DATA_DIR` 仍会被读一次并写回新键）；两个目录不需要预先创建或 chown，
+容器入口脚本会在启动时纠正属主后降权。
+
 密钥在打包时被排除、部署时从备份恢复，所以 `deploy/secrets/` 不会因为一次部署而丢失或泄漏。
 
 ## 部署后自检
