@@ -172,70 +172,82 @@ jobs:
       # 签名「没报错」不等于「用的是那把密钥」：构建在找不到密钥时会静默退回调试密钥（主题 CN=Android Debug），
       # 而那正是这一版要杜绝的事。所以这里读回证书主题与指纹，和仓库变量比对。
       #
-      # 这一步骤刻意**没有** set -e：每个失败分支都必须自己 emit 一条 ::error:: 注解。上一版用 set -e，
-      # apksigner 一旦非零退出就直接结束，连一行输出都没有，于是「哪里错了」只能靠猜（GitHub 的日志在
-      # 未登录/限流时读不到，注解却能被公开读到）。
+      # 刻意写成平铺的一段（没有函数、没有复合语句），并且**每一步都先打印再做判断**：上一版用了 fail() 函数
+      # 加 set -e，结果这一步在 CI 里 1 秒失败、连一行输出都没有，而 GitHub 的日志又读不到——那是最难查的
+      # 一种失败。现在无论哪一步出错，输出都在它前面一行。
       - name: 校验签名证书
         env:
           EXPECTED_CERT_SHA256: ${{ vars.ANDROID_SIGNING_CERT_SHA256 }}
         run: |
-          set -uo pipefail
-
-          fail() {
-            echo "::error title=$1::$2"
-            {
-              echo "### ❌ $1"
-              echo ""
-              echo '```'
-              echo "$2"
-              echo '```'
-            } >> "$GITHUB_STEP_SUMMARY"
-            exit 1
-          }
-
           version="${{ steps.version.outputs.name }}"
-          [ -n "$version" ] || version="0.0.0-dev"
+          if [ -z "$version" ]; then version="0.0.0-dev"; fi
           apk="DailyMusings-client-${version}-android.apk"
 
-          [ -f "$apk" ] || fail "找不到 APK 产物" "期望 $apk，工作目录里只有：$(ls -1 *.apk 2>/dev/null | tr '\n' ' ')"
+          echo "开始校验 $apk"
+          echo "工作目录内容："
+          ls -la *.apk 2>/dev/null || echo "  （当前目录没有 .apk 文件）"
+          echo "证书变量：${EXPECTED_CERT_SHA256:-（空）}"
 
-          apksigner="$(find "${ANDROID_HOME:-/usr/local/lib/android/sdk}/build-tools" -name apksigner -type f 2>/dev/null | sort | tail -1)"
-          [ -n "$apksigner" ] || fail "找不到 apksigner" "在 ${ANDROID_HOME:-/usr/local/lib/android/sdk}/build-tools 下没有 apksigner，无法校验签名。"
+          sdk="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          echo "Android SDK：$sdk"
 
-          certs=""
-          if ! certs="$("$apksigner" verify --print-certs "$apk" 2>&1)"; then
-            fail "apksigner 校验失败" "apksigner 对 $apk 的结论：$(printf '%s' "$certs" | tail -5 | tr '\n' ' ')"
+          apksigner="$(find "$sdk/build-tools" -name apksigner -type f 2>/dev/null | sort | tail -1)"
+          echo "apksigner：${apksigner:-（没找到）}"
+
+          if [ ! -f "$apk" ]; then
+            echo "::error title=找不到 APK 产物::期望 $apk，但当前目录里没有它。"
+            exit 1
           fi
 
+          if [ -z "$apksigner" ]; then
+            echo "::error title=找不到 apksigner::在 $sdk/build-tools 下没有 apksigner。"
+            exit 1
+          fi
+
+          echo "--- apksigner verify --print-certs 的输出 ---"
+          "$apksigner" verify --print-certs "$apk"
+          status=$?
+          echo "--- 退出码 $status ---"
+
+          if [ "$status" -ne 0 ]; then
+            echo "::error title=apksigner 校验失败::退出码 $status（见上方输出）。"
+            exit 1
+          fi
+
+          certs="$("$apksigner" verify --print-certs "$apk" 2>&1)"
           dn="$(printf '%s\n' "$certs" | grep -m1 'Signer #1 certificate DN' | sed 's/.*DN: //')"
           actual="$(printf '%s\n' "$certs" | grep -m1 'Signer #1 certificate SHA-256 digest' | awk '{print $NF}' | tr 'A-F' 'a-f')"
 
-          [ -n "$actual" ] || fail "读不出证书指纹" "apksigner 的输出里没有指纹行：$(printf '%s' "$certs" | tail -5 | tr '\n' ' ')"
+          echo "证书主题   ：${dn:-（读不出）}"
+          echo "实际指纹   ：${actual:-（读不出）}"
 
-          echo "证书主题   ：$dn"
-          echo "实际指纹   ：$actual"
-          echo "变量里的值 ：${EXPECTED_CERT_SHA256:-（空）}"
+          if [ -z "$actual" ]; then
+            echo "::error title=读不出证书指纹::apksigner 的输出里没有指纹行。"
+            exit 1
+          fi
 
+          if [ -z "$EXPECTED_CERT_SHA256" ]; then
+            echo "::error title=缺少仓库变量::ANDROID_SIGNING_CERT_SHA256 没设置（它是 Variable，不是 Secret）。本次指纹是 $actual。"
+            exit 1
+          fi
+
+          if [ "$actual" != "$EXPECTED_CERT_SHA256" ]; then
+            if printf '%s' "$dn" | grep -qi 'Android Debug'; then
+              echo "::error title=构建没用上发布密钥::产物是调试签名（$dn，指纹 $actual）。要修的是构建，不是变量。"
+              exit 1
+            fi
+
+            echo "::error title=签名指纹与变量不一致::产物由「$dn」签名，指纹 $actual；变量里是 $EXPECTED_CERT_SHA256。把变量改成 $actual。"
+            exit 1
+          fi
+
+          echo "签名校验通过：$dn"
           {
             echo "### APK 签名"
             echo ""
             echo "- 证书主题：\`$dn\`"
             echo "- 证书 SHA-256：\`$actual\`"
-            echo "- 仓库变量：\`${EXPECTED_CERT_SHA256:-（空）}\`"
-            echo "- 自查：\`apksigner verify --print-certs $apk\`"
           } >> "$GITHUB_STEP_SUMMARY"
-
-          [ -n "${EXPECTED_CERT_SHA256}" ] || fail "缺少仓库变量" "ANDROID_SIGNING_CERT_SHA256 没设置。它是仓库 Variable（不是 Secret），值由 tools/release/new-signing-key.ps1 打印，小写且不含冒号。本次产物是用「$dn」签的，指纹 $actual。"
-
-          if [ "$actual" != "$EXPECTED_CERT_SHA256" ]; then
-            if printf '%s' "$dn" | grep -qi 'Android Debug'; then
-              fail "构建没用上发布密钥" "产物是调试签名（$dn，指纹 $actual）。密钥或口令没生效，要修的是构建，不是变量。"
-            fi
-
-            fail "签名指纹与变量不一致" "产物由「$dn」签名，指纹 $actual；变量里是 $EXPECTED_CERT_SHA256。若 $actual 确实是你那把密钥的指纹，把变量改成它：gh variable set ANDROID_SIGNING_CERT_SHA256 -R ${GITHUB_REPOSITORY} --body $actual"
-          fi
-
-          echo "签名校验通过：$dn"
 
       # 即使校验失败也把产物传上来：失败的那次跑最容易需要「它到底被谁签的」，而 GitHub 的日志在未登录或
       # 限流时读不到。产物只是 Actions artifact（不是 Release），会过期，留在那里当证据没有代价。
