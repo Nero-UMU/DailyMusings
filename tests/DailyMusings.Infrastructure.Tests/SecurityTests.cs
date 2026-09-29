@@ -127,7 +127,13 @@ public class SecurityTests
             File.WriteAllText(Path.Combine(secretsDirectory, "smtp-password"), "s3cret-from-file\n");
             Environment.SetEnvironmentVariable("DAILYMUSINGS_SECRET_EMBEDDING_API_KEY", "from-env");
 
-            var store = new EncryptedUiSecretStore(new InstancePaths(new StorageOptions { RootPath = root }));
+            // KeyRingPath is set explicitly: with the default ("keys") the encrypted store would write into this
+            // test process's working directory, and the next run would read its own leftover value back.
+            var store = new EncryptedUiSecretStore(new InstancePaths(new StorageOptions
+            {
+                RootPath = root,
+                KeyRingPath = Path.Combine(root, "keys"),
+            }));
             var secrets = (ISecretStore)store;
 
             Assert.IsNull(secrets.TryGet("smtp-password"), "A mounted file must not be read any more.");
@@ -151,12 +157,29 @@ public class SecurityTests
     [TestMethod]
     public void A_secret_name_cannot_escape_the_credential_directory()
     {
-        var store = (ISecretStore)new EncryptedUiSecretStore(
-            new InstancePaths(new StorageOptions { RootPath = Path.GetTempPath() }));
+        // Nothing is written here, so a temp root and a temp key-ring path keep the store off this process's
+        // working directory either way.
+        var root = Path.Combine(Path.GetTempPath(), "dailymusings-secret-names", Guid.CreateVersion7().ToString("N"));
 
-        Assert.ThrowsException<ArgumentException>(() => store.TryGet("../../etc/passwd"));
-        Assert.ThrowsException<ArgumentException>(() => store.TryGet("nested/name"));
-        Assert.ThrowsException<ArgumentException>(() => store.TryGet("   "));
+        try
+        {
+            var store = (ISecretStore)new EncryptedUiSecretStore(new InstancePaths(new StorageOptions
+            {
+                RootPath = root,
+                KeyRingPath = Path.Combine(root, "keys"),
+            }));
+
+            Assert.ThrowsException<ArgumentException>(() => store.TryGet("../../etc/passwd"));
+            Assert.ThrowsException<ArgumentException>(() => store.TryGet("nested/name"));
+            Assert.ThrowsException<ArgumentException>(() => store.TryGet("   "));
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
     }
 
     [TestMethod]

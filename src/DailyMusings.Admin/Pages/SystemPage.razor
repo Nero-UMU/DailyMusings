@@ -860,10 +860,16 @@ else
 
     private async Task SaveBackupAsync() => await RunAsync(async services =>
     {
-        if (!TimeOnly.TryParseExact(_backupTime, "HH:mm", CultureInfo.InvariantCulture, DateTimeStyles.None, out var backupTime) ||
-            !TimeOnly.TryParseExact(_contentCleanupTime, "HH:mm", CultureInfo.InvariantCulture, DateTimeStyles.None, out var contentCleanupTime))
+        // 兼容 HH:mm / H:mm / HH:mm:ss（见 AdminFormat.TryParseTimeOfDay），并点名是哪一个字段不对。
+        if (!AdminFormat.TryParseTimeOfDay(_backupTime, out var backupTime))
         {
-            _error = "备份时刻与内容清理时刻都需要写成 HH:mm，例如 03:30。";
+            _error = "备份时刻读不出来：请写成 HH:mm，例如 03:30。";
+            return;
+        }
+
+        if (!AdminFormat.TryParseTimeOfDay(_contentCleanupTime, out var contentCleanupTime))
+        {
+            _error = "内容清理时刻读不出来：请写成 HH:mm，例如 04:30。";
             return;
         }
 
@@ -918,9 +924,9 @@ else
 
     private async Task SaveRetentionAsync() => await RunAsync(async services =>
     {
-        if (!TimeOnly.TryParseExact(_audioCleanupTime, "HH:mm", CultureInfo.InvariantCulture, DateTimeStyles.None, out var audioCleanupTime))
+        if (!AdminFormat.TryParseTimeOfDay(_audioCleanupTime, out var audioCleanupTime))
         {
-            _error = "音频清理时刻需要写成 HH:mm，例如 04:00。";
+            _error = "音频清理时刻读不出来：请写成 HH:mm，例如 04:00。";
             return;
         }
 

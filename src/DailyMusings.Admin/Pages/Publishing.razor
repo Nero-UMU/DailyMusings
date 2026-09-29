@@ -208,9 +208,8 @@
 
     private async Task SaveAsync() => await RunAsync(async services =>
     {
-        if (!TimeOnly.TryParseExact(_generationTime, "HH:mm", CultureInfo.InvariantCulture, DateTimeStyles.None, out var generation) ||
-            !TimeOnly.TryParseExact(_publishTime, "HH:mm", CultureInfo.InvariantCulture, DateTimeStyles.None, out var publish))
-            throw new UseCaseException("publish.time.invalid", "生成和发布时间都必须是 HH:mm。");
+        var generation = ParseTimeOrThrow(_generationTime, "生成时间");
+        var publish = ParseTimeOrThrow(_publishTime, "发布时间");
 
         if (!int.TryParse(_writingTargetCharacters, out var targetCharacters))
             throw new UseCaseException("writing.length.invalid", "目标字数必须是数字。");
@@ -239,8 +238,30 @@
             PublicTargetName, PublishTargetType.Markdown, _publishedDirectory, CancellationToken.None)).Target;
     }
 
-    private void ResetTemplate() => _hexoTemplate = MarkdownTemplate.Default;
+    /// <summary>
+    /// 读两个时间字段，并在**哪一个**不对时点名说清。
+    /// <para>
+    /// 旧写法把两个字段塞进同一个条件里、一起报「生成和发布时间都必须是 HH:mm」，恰好把真正的原因挡住了：
+    /// <c>&lt;input type="time"&gt;</c> 交给 Blazor 的是带秒的往返格式，于是严格按 <c>HH:mm</c> 解析会把一次
+    /// 完全正常的修改判成非法，还顺手冤枉另一个字段。解析现在统一在
+    /// <see cref="AdminFormat.TryParseTimeOfDay"/>（见 CHANGELOG 2026-09-29 第七轮）。
+    /// </para>
+    /// </summary>
+    private static TimeOnly ParseTimeOrThrow(string? value, string label)
+    {
+        if (AdminFormat.TryParseTimeOfDay(value, out var parsed))
+        {
+            return parsed;
+        }
 
+        var text = (value ?? string.Empty).Trim();
+
+        throw (text.Length == 0
+            ? new UseCaseException("publish.time.empty", $"{label}还是空的：请填一个完整的时间，例如 08:00。")
+            : new UseCaseException("publish.time.invalid", $"{label}「{text}」看不懂：请写成 HH:mm，例如 08:00。"));
+    }
+
+    private void ResetTemplate() => _hexoTemplate = MarkdownTemplate.Default;
     private void AddWritingRule() => _writingRules.Add(new WritingRule(string.Empty, string.Empty));
 
     private void RemoveWritingRule(int index)
