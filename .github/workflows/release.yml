@@ -172,57 +172,70 @@ jobs:
       # 签名「没报错」不等于「用的是那把密钥」：构建在找不到密钥时会静默退回调试密钥（主题 CN=Android Debug），
       # 而那正是这一版要杜绝的事。所以这里读回证书主题与指纹，和仓库变量比对。
       #
-      # 刻意写成平铺的一段（没有函数、没有复合语句），并且**每一步都先打印再做判断**：上一版用了 fail() 函数
-      # 加 set -e，结果这一步在 CI 里 1 秒失败、连一行输出都没有，而 GitHub 的日志又读不到——那是最难查的
-      # 一种失败。现在无论哪一步出错，输出都在它前面一行。
+      # 三条纪律，都是上一轮踩出来的：
+      #   1) **必须 `set +e`**。GitHub 用 `bash -e {0}` 跑这一步，任何一条命令返回非零都会当场静默结束脚本——
+      #      上一版就是死在 `find "$sdk/build-tools"`（SDK 路径不存在 → find 退出 1），日志里一个字都没有，
+      #      而人看到的只是「Process completed with exit code 1」。
+      #   2) 每一步**先打印再做判断**，任何失败都要留下一行能读的输出。
+      #   3) 探测不要只信一个路径：ANDROID_HOME / ANDROID_SDK_ROOT / 镜像默认路径 / PATH 都试一遍，
+      #      再不行就用 setup-java 一定装了的 keytool 兜底。
       - name: 校验签名证书
         env:
           EXPECTED_CERT_SHA256: ${{ vars.ANDROID_SIGNING_CERT_SHA256 }}
         run: |
+          set +e
+          set -o pipefail
+
           version="${{ steps.version.outputs.name }}"
           if [ -z "$version" ]; then version="0.0.0-dev"; fi
           apk="DailyMusings-client-${version}-android.apk"
 
           echo "开始校验 $apk"
-          echo "工作目录内容："
-          ls -la *.apk 2>/dev/null || echo "  （当前目录没有 .apk 文件）"
           echo "证书变量：${EXPECTED_CERT_SHA256:-（空）}"
+          echo "工作目录里的 .apk："
+          ls -la ./*.apk 2>/dev/null || echo "  （没有）"
+          echo "ANDROID_HOME=${ANDROID_HOME:-（未设置）} ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT:-（未设置）}"
 
-          sdk="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
-          echo "Android SDK：$sdk"
+          apksigner=""
+          for root in "${ANDROID_HOME:-}" "${ANDROID_SDK_ROOT:-}" /usr/local/lib/android/sdk "$HOME/Android/Sdk"; do
+            if [ -n "$root" ] && [ -d "$root/build-tools" ]; then
+              echo "  在 $root/build-tools 下找 apksigner……"
+              candidate="$(find "$root/build-tools" -name apksigner -type f 2>/dev/null | sort | tail -1)"
+              if [ -n "$candidate" ]; then apksigner="$candidate"; break; fi
+            fi
+          done
 
-          apksigner="$(find "$sdk/build-tools" -name apksigner -type f 2>/dev/null | sort | tail -1)"
+          if [ -z "$apksigner" ]; then
+            apksigner="$(command -v apksigner 2>/dev/null)"
+          fi
+
           echo "apksigner：${apksigner:-（没找到）}"
 
           if [ ! -f "$apk" ]; then
-            echo "::error title=找不到 APK 产物::期望 $apk，但当前目录里没有它。"
+            echo "::error title=找不到 APK 产物::期望 $apk，当前目录里没有它。"
             exit 1
           fi
 
-          if [ -z "$apksigner" ]; then
-            echo "::error title=找不到 apksigner::在 $sdk/build-tools 下没有 apksigner。"
-            exit 1
+          if [ -n "$apksigner" ]; then
+            echo "--- apksigner verify --print-certs ---"
+            certs="$("$apksigner" verify --print-certs "$apk" 2>&1)"
+            echo "$certs"
+            dn="$(printf '%s\n' "$certs" | grep -m1 'Signer #1 certificate DN' | sed 's/.*DN: //')"
+            actual="$(printf '%s\n' "$certs" | grep -m1 'Signer #1 certificate SHA-256 digest' | awk '{print $NF}' | tr 'A-F' 'a-f')"
+          else
+            # keytool 一定在（setup-java 装了 JDK）：它读的是 v1 JAR 签名证书，够用来比对指纹。
+            echo "--- keytool -printcert -jarfile（apksigner 没找到时的兜底）---"
+            certs="$(keytool -printcert -jarfile "$apk" 2>&1)"
+            echo "$certs"
+            dn="$(printf '%s\n' "$certs" | grep -m1 -i '^Owner:' | sed 's/^Owner: //')"
+            actual="$(printf '%s\n' "$certs" | grep -m1 -i 'SHA256:' | sed 's/.*SHA256: //' | tr -d ':' | tr -d ' ' | tr 'A-F' 'a-f')"
           fi
-
-          echo "--- apksigner verify --print-certs 的输出 ---"
-          "$apksigner" verify --print-certs "$apk"
-          status=$?
-          echo "--- 退出码 $status ---"
-
-          if [ "$status" -ne 0 ]; then
-            echo "::error title=apksigner 校验失败::退出码 $status（见上方输出）。"
-            exit 1
-          fi
-
-          certs="$("$apksigner" verify --print-certs "$apk" 2>&1)"
-          dn="$(printf '%s\n' "$certs" | grep -m1 'Signer #1 certificate DN' | sed 's/.*DN: //')"
-          actual="$(printf '%s\n' "$certs" | grep -m1 'Signer #1 certificate SHA-256 digest' | awk '{print $NF}' | tr 'A-F' 'a-f')"
 
           echo "证书主题   ：${dn:-（读不出）}"
           echo "实际指纹   ：${actual:-（读不出）}"
 
           if [ -z "$actual" ]; then
-            echo "::error title=读不出证书指纹::apksigner 的输出里没有指纹行。"
+            echo "::error title=读不出证书指纹::上面两种工具都没给出指纹，见它们的原始输出。"
             exit 1
           fi
 
@@ -237,7 +250,7 @@ jobs:
               exit 1
             fi
 
-            echo "::error title=签名指纹与变量不一致::产物由「$dn」签名，指纹 $actual；变量里是 $EXPECTED_CERT_SHA256。把变量改成 $actual。"
+            echo "::error title=签名指纹与变量不一致::产物由「$dn」签名，指纹 $actual；变量里是 $EXPECTED_CERT_SHA256。把变量改成 $actual 即可。"
             exit 1
           fi
 
