@@ -32,6 +32,12 @@ keys/
 deploy/secrets/
 deploy/*.local.yaml
 
+## APK 签名密钥（附录 A.30）。默认生成在 $HOME/.dailymusings-signing，这里再拦一道：
+## 私钥进公开仓库等于任何人都能签出被手机接受的假更新（脚本另有一道拒绝写进仓库的检查）。
+*.keystore
+*.jks
+.dailymusings-signing/
+
 ## Scratch
 .tmp-*
 *.tmp
