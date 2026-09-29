@@ -21,11 +21,14 @@ rm -rf "${FRESH:?}"
 mkdir -p "$FRESH/secrets"
 cp "$REPO/compose.yaml" "$FRESH/compose.yaml"
 
-# 根 compose.yaml 里 secrets 目录那一行是注释掉的（默认走管理页填密钥）。这里显式打开它，因为这一步要验的
-# 正是「全新实例 + 新 Secrets」；改不动就直接失败，不要悄悄跑成「Secrets 没挂上」的假通过。
-sed -i 's|^      # - \./secrets:/run/secrets:ro|      - ./secrets:/run/secrets:ro|' "$FRESH/compose.yaml"
+# 根 compose.yaml 里没有 secrets 挂载（默认走管理页填密钥），而这一步要验的正是「全新实例 + 新 Secrets」，
+# 所以把那一行插进 volumes 列表。按挂载目标匹配，不依赖文件里有没有注释、缩进有没有变过；
+# 插不进去就直接失败，不要悄悄跑成「Secrets 没挂上」的假通过。
+awk '{ print } /\/var\/lib\/dailymusings-config/ { print "      - ./secrets:/run/secrets:ro" }' \
+    "$FRESH/compose.yaml" > "$FRESH/compose.with-secrets.yaml"
+mv "$FRESH/compose.with-secrets.yaml" "$FRESH/compose.yaml"
 grep -q '^      - \./secrets:/run/secrets:ro' "$FRESH/compose.yaml" || {
-    echo "refusing to continue: could not enable the ./secrets mount in the copied compose.yaml" >&2
+    echo "refusing to continue: could not add the ./secrets mount to the copied compose.yaml" >&2
     exit 2
 }
 

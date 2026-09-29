@@ -724,7 +724,7 @@ public static class OperationsEndpointRouteBuilderExtensions
             return Results.Json(
                 new ApiError(
                     ApiErrorCodes.InstancePortLocked,
-                    "这个实例的监听端口由部署配置固定（DAILYMUSINGS_LOCK_LISTENING_PORT=1），后台不能改。"
+                    "这个实例的监听端口由部署配置固定（DM_LOCK_LISTENING_PORT=1），后台不能改。"
                     + "要换端口请改部署配置里的端口映射——容器内监听哪个端口由部署自己的 ASPNETCORE_URLS 决定，"
                     + "改完重建容器即可。"),
                 statusCode: StatusCodes.Status409Conflict);

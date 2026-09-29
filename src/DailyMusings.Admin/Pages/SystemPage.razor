@@ -48,7 +48,7 @@
         </div>
         <div class="summary-item">
             <span class="label">端口由谁决定</span>
-            <span class="value">部署配置（DAILYMUSINGS_LOCK_LISTENING_PORT=1）</span>
+            <span class="value">部署配置（DM_LOCK_LISTENING_PORT=1）</span>
         </div>
     </div>
 
@@ -820,7 +820,7 @@ else
         // because this page writes the override store directly rather than going through the API's refusal.
         if (Overrides.IsListeningPortLocked)
         {
-            _error = "这个实例的监听端口由部署配置固定（DAILYMUSINGS_LOCK_LISTENING_PORT=1），后台不能修改。";
+            _error = "这个实例的监听端口由部署配置固定（DM_LOCK_LISTENING_PORT=1），后台不能修改。";
             return;
         }
 
@@ -847,7 +847,7 @@ else
     {
         if (Overrides.IsListeningPortLocked)
         {
-            _error = "这个实例的监听端口由部署配置固定（DAILYMUSINGS_LOCK_LISTENING_PORT=1），后台不能修改。";
+            _error = "这个实例的监听端口由部署配置固定（DM_LOCK_LISTENING_PORT=1），后台不能修改。";
             return;
         }
 

@@ -75,7 +75,7 @@ EXPOSE 18321
 # 健康检查放在镜像里而不是 compose 里：这样 `docker run` 的人也有它，而 compose 文件可以少一段。
 # 四项：迁移已应用、数据库可写、媒体目录可写、后台任务执行器活着。外部服务（模型、SMTP）故意不参与——
 # 它们挂了不会让实例显得不健康，用管理页的「测试连接」单独看（§9）。
-# 端口写死 18321 是安全的：容器内的监听端口由部署固定（DAILYMUSINGS_LOCK_LISTENING_PORT），运行期不会被改。
+# 端口写死 18321 是安全的：容器内的监听端口由部署固定（DM_LOCK_LISTENING_PORT），运行期不会被改。
 HEALTHCHECK --interval=30s --timeout=5s --retries=5 --start-period=30s \
     CMD curl --fail --silent --show-error http://127.0.0.1:18321/api/system/health || exit 1
 

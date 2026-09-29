@@ -1,35 +1,17 @@
-# 每日随想 —— 一个文件起一个实例。
-#
-#   docker compose up -d
-#   docker compose logs app | grep INITIAL-ADMIN-PASSWORD     # 一次性的管理员初始密码
-#
-# 手机端：装 Release 页里的 APK → 设置页填 http://<本机IP>:<端口> → 用管理页签发的配对码配对。
+# 每日随想：一个文件起一个实例。`docker compose up -d` 直接可用；全部可设置参数见 README 的「部署参数」。
 name: dailymusings
 
 services:
   app:
-    image: ghcr.io/nero-umu/dailymusings:latest   # 固定版本就写 :1.0.0
+    image: ${DM_IMAGE:-ghcr.io/nero-umu/dailymusings:latest}
     container_name: dailymusings
     restart: unless-stopped
-
     environment:
-      # 端口由部署决定（容器内固定 18321），所以管理页里的「监听端口」是只读的，改端口只改下面的映射
-      DAILYMUSINGS_LOCK_LISTENING_PORT: "1"
-      TZ: Asia/Shanghai
-      # 可以在这里直接指定初始管理员密码（至少 12 位）；留空则随机生成并只打印一次到日志
+      DM_LOCK_LISTENING_PORT: "${DM_LOCK_LISTENING_PORT:-1}"
+      TZ: "${DM_TZ:-Asia/Shanghai}"
       Admin__InitialPassword: "${DM_ADMIN_PASSWORD:-}"
-
     ports:
-      - "${DM_PORT:-18321}:18321"   # 左边是宿主机端口，右边是容器内端口，不要动
-
+      - "${DM_PORT:-18321}:18321"
     volumes:
-      - ${DM_DATA_DIR:-./data}:/var/lib/dailymusings            # 数据库、录音、备份、导出、markdown 稿件
-      - ${DM_CONFIG_DIR:-./config}:/var/lib/dailymusings-config # 登录密钥环、管理页保存的凭据
-      # 想从文件给 API Key（而不是在管理页里填）：取消下一行的注释，文件放 ./secrets/，权限 644
-      # - ./secrets:/run/secrets:ro
-
-    # 三点说明：
-    #   * 上面两个目录不需要预先创建，也不需要 chown —— 容器启动时会自己建好并把属主改成容器用户。
-    #   * 配置目录里装着能签发登录 Cookie 的密钥环，单独留着，不要混进普通内容备份。
-    #   * 不想用宿主机目录，就把挂载换成两份具名卷（dm-data:/var/lib/dailymusings 与
-    #     dm-config:/var/lib/dailymusings-config），并在文件末尾补上 volumes: 与两个卷名。
+      - ${DM_DATA_DIR:-./data}:/var/lib/dailymusings
+      - ${DM_CONFIG_DIR:-./config}:/var/lib/dailymusings-config

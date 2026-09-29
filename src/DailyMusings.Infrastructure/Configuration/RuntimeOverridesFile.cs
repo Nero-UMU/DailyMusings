@@ -31,20 +31,20 @@ public static class RuntimeOverridesFile
     public const string IgnoreVariableName = "DAILYMUSINGS_IGNORE_RUNTIME_OVERRIDES";
 
     /// <summary>
-    /// Set to <c>1</c> when the deployment itself owns the listening port.
+    /// Set to <c>1</c> when the deployment itself owns the listening port (the shipped Compose file does).
     /// <para>
     /// A container's published mapping is fixed when the container starts, so a port override on disk can only
-    /// aim that mapping at a port nothing is listening on. The shipped Compose file sets this, which makes "change
-    /// the port" a one-place edit (the deployment's own port variable) and turns the admin page's port card into a
-    /// read-only statement of fact. It also ignores any override left behind by an earlier start, so switching this
-    /// on cannot strand a running instance on the old port.
+    /// aim that mapping at a port nothing is listening on. This switch makes "change the port" a one-place edit
+    /// (the deployment's own port variable) and turns the admin page's port card into a read-only statement of
+    /// fact. It also ignores any override left behind by an earlier start, so switching this on cannot strand a
+    /// running instance on the old port.
     /// </para>
     /// <para>
     /// Read as a string and compared against <c>"1"</c> rather than bound as a boolean: a deployment value that
     /// cannot be parsed has to mean "not locked", never an exception before the host exists.
     /// </para>
     /// </summary>
-    public const string ListeningPortLockVariableName = "DAILYMUSINGS_LOCK_LISTENING_PORT";
+    public const string ListeningPortLockVariableName = "DM_LOCK_LISTENING_PORT";
 
     private static readonly JsonSerializerOptions SerializerOptions = new()
     {
@@ -52,16 +52,18 @@ public static class RuntimeOverridesFile
     };
 
     /// <summary>True when the operator has asked this start to ignore the overrides file.</summary>
-    public static bool IsIgnored =>
-        string.Equals(
-            Environment.GetEnvironmentVariable(IgnoreVariableName),
-            "1",
-            StringComparison.Ordinal);
+    public static bool IsIgnored => IsOn(IgnoreVariableName);
 
     /// <summary>True when the deployment owns the listening port, so the override file has no say in it.</summary>
-    public static bool IsListeningPortLocked =>
+    public static bool IsListeningPortLocked => IsOn(ListeningPortLockVariableName);
+
+    /// <summary>
+    /// "Set to 1" — a string comparison on purpose, never a boolean binding. A deployment value that cannot be
+    /// parsed has to mean "off" (§8.1), not an exception thrown before the web host exists.
+    /// </summary>
+    private static bool IsOn(string variableName) =>
         string.Equals(
-            Environment.GetEnvironmentVariable(ListeningPortLockVariableName),
+            Environment.GetEnvironmentVariable(variableName),
             "1",
             StringComparison.Ordinal);
 

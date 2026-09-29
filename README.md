@@ -95,6 +95,37 @@ docker compose logs app | grep INITIAL-ADMIN-PASSWORD     # 一次性的管理�
 
 完整步骤、参数表与排障对照表见 **[`docs/快速部署.md`](docs/快速部署.md)**。镜像在 `ghcr.io/nero-umu/dailymusings`（`linux/amd64` 与 `linux/arm64`，公开包），发布记录见 [Releases](https://github.com/Nero-UMU/DailyMusings/releases)。
 
+## 部署参数
+
+[`compose.yaml`](compose.yaml) 本身不带注释，可设置的东西全部在这里。**每一项都是可选的**，不设就用默认值。
+
+| 变量 | 默认 | 作用 |
+| --- | --- | --- |
+| `DM_IMAGE` | `ghcr.io/nero-umu/dailymusings:latest` | 镜像。固定版本写 `:1.0.1`，或换成你自己的仓库 |
+| `DM_PORT` | `18321` | 宿主机端口。容器内固定 18321，**只改这一个** |
+| `DM_DATA_DIR` | `./data`（与 compose 同级） | 数据库、录音、备份、导出、`markdown/` 全部稿件 |
+| `DM_CONFIG_DIR` | `./config`（与 compose 同级） | `runtime.json`、登录密钥环、管理页保存的凭据。**单独保护，别混进普通内容备份** |
+| `DM_ADMIN_PASSWORD` | 不设 | 初始管理员密码（至少 12 位）。不设就随机生成，并只打印一次到容器日志 |
+| `DM_TZ` | `Asia/Shanghai` | 容器日志时区（内容的时区在管理页「发布设置」里，与此无关） |
+| `DM_LOCK_LISTENING_PORT` | `1` | 让部署独占监听端口：`runtime.json` 里残留的端口覆盖被忽略、`PATCH /api/system/listening-port` 返回 409 `instance.port.locked`、管理页「系统设置」那一节变成只读。设成 `0` 回到老行为（后台可以存端口，但你得自己把映射与容器内监听同步好再重建） |
+
+两个目录**不需要预先创建，也不需要 chown**：容器入口会把它们建好、把属主改成容器用户（uid 1654），随后降权运行。
+
+**怎么设**，三种都行：
+
+```bash
+# 1) 直接改 compose 里的默认值
+# 2) 在同目录放一个 .env，里面写 DM_PORT=8080
+# 3) 启动前导出：
+DM_PORT=8080 docker compose up -d
+```
+
+**想把数据放到别处**（例如 NAS 共享目录）：`DM_DATA_DIR=/srv/dm/data DM_CONFIG_DIR=/srv/dm/config docker compose up -d`。
+
+**想从文件给 API Key**（而不是在管理页里填）：在 compose 的 `volumes:` 下加一行 `- ./secrets:/run/secrets:ro`，把文件放进 `./secrets/`——文件名固定为 `deepseek-api-key`、`openai-api-key`、`embedding-api-key`、`smtp-password`，内容就是纯文本值，权限 644。解析顺序是「管理页填的 → Secret 文件 → 环境变量」。
+
+**想用命名卷而不是宿主机目录**：把那两行挂载换成 `dm-data:/var/lib/dailymusings` 与 `dm-config:/var/lib/dailymusings-config`，并在文件末尾补上 `volumes:` 和这两个卷名。
+
 ## 手机端
 
 去 [Releases](https://github.com/Nero-UMU/DailyMusings/releases) 下载 `DailyMusings-client-<版本>-android.apk` 安装（自签名包，系统会提示「未知来源」；同页给出 SHA-256）。打开 App → 设置页填服务端地址 → 测试连接 → 填配对码 → 配对。

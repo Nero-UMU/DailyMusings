@@ -6,6 +6,19 @@
 
 ---
 
+## 2026-09-29（第四轮）参数收敛：端口锁改名、compose 不再带注释、参数集中到 README
+
+- **`DAILYMUSINGS_LOCK_LISTENING_PORT` 改名为 `DM_LOCK_LISTENING_PORT`**：用户会改的开关都是 `DM_*`
+  （`DM_PORT` / `DM_DATA_DIR` / `DM_CONFIG_DIR` / `DM_ADMIN_PASSWORD`），只有它是应用侧的老前缀，读起来像两套
+  东西。**不保留旧名**——这个项目还没有使用者，留一个只在文档里才讲得清的兼容壳不值得。同族的
+  `DAILYMUSINGS_IGNORE_RUNTIME_OVERRIDES` 没动：它是救急开关而不是配置项，也不出现在 compose 里。
+- **`compose.yaml` 只剩一行注释（18 行）**：所有可设置参数连同默认值、三种给法、两个变体（Secret 文件 /
+  具名卷）搬进 README 的「部署参数」一节。部署文件从此只做一件事——把参数映射进容器。
+- 顺带把 `TZ` 与端口锁也写成 `${DM_TZ:-Asia/Shanghai}` 这种可覆盖形式，于是「每个参数都能用 `.env` 或环境
+  变量改」这句话对**每一个**参数都成立。
+- 验收脚本跟着改：它原本靠 sed 取消 compose 里那行 secrets 挂载的注释，现在改成按挂载目标 awk 插入（不依赖
+  注释是否存在），并用真实 compose.yaml 演练过一遍（插入位置、缩进、YAML 解析都对）。
+
 ## 2026-09-29（第三轮）交付面收拾：compose 精简、LOGO 换新、README 重写
 
 - **`compose.yaml` 从 86 行压到 35 行，环境变量从 9 个减到 3 个**：与镜像 `ENV` 重复的 `ASPNETCORE_*`
@@ -28,7 +41,7 @@
 
 - **对外只发布镜像**，不再要求新用户克隆源码本地构建。`.github/workflows/release.yml` 在打 tag 时构建 `linux/amd64` 与 `linux/arm64` 两个架构推到 `ghcr.io/nero-umu/dailymusings`，并把签名 APK 与 SHA-256 附到 Release。
 - **仓库根的 `compose.yaml` 是一个自足文件**：每个参数都有默认值，不设目录时落在两份具名命名卷上，不写 `.env`、不准备 Secret 文件、不预先建目录也能 `docker compose up -d`。要指定目录就设 `DM_DATA_DIR` / `DM_CONFIG_DIR`，目录由 Docker 创建、属主由容器入口脚本纠正后立即降权。
-- **端口只有一处**：`DM_PORT`。容器部署设 `DAILYMUSINGS_LOCK_LISTENING_PORT=1`，`runtime.json` 里残留的端口覆盖被忽略，管理页那一节改成只读说明——这是上一版里最容易把新手锁在门外的一步。
+- **端口只有一处**：`DM_PORT`。容器部署设 `DAILYMUSINGS_LOCK_LISTENING_PORT=1`（这个开关在第四轮改名为 `DM_LOCK_LISTENING_PORT`），`runtime.json` 里残留的端口覆盖被忽略，管理页那一节改成只读说明——这是上一版里最容易把新手锁在门外的一步。
 - **初始管理员密码可以由部署配置给出**（`DM_ADMIN_PASSWORD`），且不回显到容器输出；不设时完全保持「随机生成 + 只打印一次」。
 - `deploy/compose.yaml` 退化为「从源码构建」的覆盖文件，维护者那条纪律（停容器 → 删旧镜像 → 构建 → 起新镜像）不变。
 - **未验证的部分如实说明**：这一轮开发机上没有 Docker，compose 的解析、镜像构建、入口脚本降权、绑定挂载属主纠正、多架构推送与 APK 构建只在 CI 里跑，尚未在本机实跑。
