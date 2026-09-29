@@ -138,8 +138,24 @@ jobs:
           echo "-- 健康检查（来自镜像的 HEALTHCHECK，compose 文件里已经没有这一段）--"
           curl -fsS http://127.0.0.1:18321/api/system/health; echo
           curl -fsS http://127.0.0.1:18321/api/system/health | grep -q '"healthy":true'
+
+          # 镜像 HEALTHCHECK 的 start_period 是 30s，而上面的 HTTP 探针几秒内就通了——所以这里必须等，
+          # 不能探针一通就断言 healthy（第一次运行就是这么挂的：status 还是 starting）。
           # 用 compose ps -q 取容器 id：compose 里写了 container_name，名字不再带项目前缀。
-          docker inspect "$(docker compose ps -q app)" --format '{{.State.Health.Status}}' | grep -qx healthy
+          cid="$(docker compose ps -q app)"
+          status=""
+          for _ in $(seq 1 30); do
+            status="$(docker inspect "$cid" --format '{{.State.Health.Status}}')"
+            [ "$status" = "healthy" ] && break
+            sleep 2
+          done
+          if [ "$status" != "healthy" ]; then
+            echo "容器健康状态是 '$status'，最近几条健康检查输出：" >&2
+            docker inspect "$cid" --format '{{range .State.Health.Log}}{{.ExitCode}} {{.Output}}{{end}}' >&2
+            docker compose logs app | tail -n 40 >&2
+            exit 1
+          fi
+          echo "镜像 HEALTHCHECK 报告 $status"
 
           echo "-- 默认目录由容器自己建好并纠正属主 --"
           stat -c '%u %n' ./data ./config
