@@ -6,7 +6,7 @@
 @inject IServer Server
 @inject ILoggerFactory LoggerFactory
 
-@* 系统设置分区：实例本身的八件事（外加保留原有能力所需的「调度与检索」）。
+@* 系统设置分区：实例本身的八件事，以及自动任务与历史素材的高级参数。
    每一项都写明「保存后什么时候生效」——端口要重建容器、备份恢复要重启、其余立即生效。 *@
 
 <PageHeader Title="系统设置"
@@ -543,11 +543,14 @@
 
 <div class="card">
     <div class="card-head">
-        <h2>附 · 调度与检索</h2>
+        <div>
+            <span class="eyebrow">高级设置</span>
+            <h2>自动任务与历史素材</h2>
+        </div>
     </div>
 
     <p class="hint">
-        这些选项控制自动补生成的范围、每轮处理数量和历史素材检索方式。没有明确需求时建议保留默认值。
+        控制后台检查任务的频率、停机后的稿件补生成，以及写作时如何选择过去的随想。通常保持默认值即可；保存后无需重启。
     </p>
 
     @if (_instance is null)
@@ -556,44 +559,56 @@
     }
     else
     {
+        <h3>自动任务</h3>
         <div class="form-grid">
             <label>
-                调度轮询间隔（秒，1–3600）
+                后台检查间隔（秒）
                 <input type="number" value="@_schedulerInterval" @onchange="e => _schedulerInterval = ParseIntOrDefault(e.Value, _schedulerInterval)" />
+                <small>每隔多久检查生成、发布、索引、备份和清理任务。可填写 1–3600，默认 30。</small>
             </label>
             <label>
-                补跑窗口（天，1–3650）
+                稿件补生成范围（天）
                 <input type="number" value="@_schedulerBackfill" @onchange="e => _schedulerBackfill = ParseIntOrDefault(e.Value, _schedulerBackfill)" />
+                <small>恢复运行后，最多向前检查多少天内“有素材但没有稿件”的日期。可填写 1–3650，默认 60。</small>
             </label>
             <label>
-                每次调度的生成上限（1–100）
+                每轮最多补生成（篇）
                 <input type="number" value="@_schedulerBatch" @onchange="e => _schedulerBatch = ParseIntOrDefault(e.Value, _schedulerBatch)" />
+                <small>按日期从旧到新加入生成队列，避免恢复运行时集中调用模型。可填写 1–100，默认 3。</small>
             </label>
+        </div>
+
+        <h3>历史素材</h3>
+        <div class="form-grid">
             <label>
-                检索最多返回材料条数
+                最多采用的历史素材（条）
                 <input type="number" value="@_maxMaterials" @onchange="e => _maxMaterials = ParseIntOrDefault(e.Value, _maxMaterials)" />
+                <small>最终最多向文章模型提供多少条过去的随想。可填写 1–100，默认 10。</small>
             </label>
             <label>
-                候选扫描上限
+                最多检查的候选素材（条）
                 <input type="number" value="@_candidateScanLimit" @onchange="e => _candidateScanLimit = ParseIntOrDefault(e.Value, _candidateScanLimit)" />
+                <small>排序前最多检查多少条历史记录。值越大越全面，也会增加查询开销。可填写 1–20000，默认 500。</small>
             </label>
             <label>
-                相关性下限（0–1）
+                最低相关度
                 <input type="number" step="0.01" value="@_minimumRelevance" @onchange="e => _minimumRelevance = ParseDoubleOrDefault(e.Value, _minimumRelevance)" />
+                <small>过滤语义、主题和全文候选；越高越严格。可填写 0–1，默认 0.05。</small>
             </label>
             <label>
-                词面匹配下限（0–1）
+                最低文字匹配度
                 <input type="number" step="0.01" value="@_minimumLexicalScore" @onchange="e => _minimumLexicalScore = ParseDoubleOrDefault(e.Value, _minimumLexicalScore)" />
+                <small>Embedding 不可用时过滤全文匹配结果；越高越不容易采用只有少量相同文字的素材。可填写 0–1，默认 0.08。</small>
             </label>
         </div>
 
         <div class="actions">
-            <button class="btn-primary" @onclick="SaveSchedulerAsync" disabled="@_busy">保存调度与检索</button>
+            <button class="btn-primary" @onclick="SaveSchedulerAsync" disabled="@_busy">保存高级设置</button>
         </div>
 
         <p class="hint">
-            补跑窗口决定停机或离线后最多往前找多少天有待生成素材的日期；生成上限决定一次调度最多把几天放进队列，
-            避免长时间停机后一次性打出一串模型调用。检索这几项在 Embedding 未启用时决定降级行为。
+            Embedding 可用时，系统结合语义相似度和主题选择素材；不可用或索引重建中时，自动改用主题和全文匹配。
+            无论采用哪种方式，都不会引用稿件日期之后的内容。
         </p>
     }
 </div>
@@ -849,7 +864,7 @@
         _instance = saved;
         ApplyInstanceSettings(saved);
 
-        _message = "已保存调度与检索设置，下一次调度与下一次检索即按新值执行。";
+        _message = "高级设置已保存，下一次后台检查和历史素材检索即按新值执行。";
     });
 
     private async Task SaveRetentionAsync() => await RunAsync(async services =>
