@@ -157,18 +157,20 @@ jobs:
           sha256sum "$apk" > "$apk.sha256"
           cat "$apk.sha256"
 
-      # 签名「没报错」不等于「用的是那把密钥」：构建在找不到密钥时会静默退回调试密钥，而那正是这一版要
-      # 杜绝的事。所以这里读回证书指纹，与仓库变量比对，不一致就让发布失败。
+      # 签名「没报错」不等于「用的是那把密钥」：构建在找不到密钥时会静默退回调试密钥（主题 CN=Android Debug），
+      # 而那正是这一版要杜绝的事。所以这里读回证书主题与指纹，和仓库变量比对。
+      #
+      # 失败信息刻意写全：证书主题 + 实际指纹 + 期望指纹 + 两种成因各自该怎么办。上一次失败时只有一句
+      # 「不一致」，而 GitHub 的日志在未登录/限流时读不到，定位只能靠猜——这个代价不该再付一次。
       - name: 校验签名证书
         env:
           EXPECTED_CERT_SHA256: ${{ vars.ANDROID_SIGNING_CERT_SHA256 }}
         run: |
           set -euo pipefail
 
-          if [ -z "${EXPECTED_CERT_SHA256}" ]; then
-            echo "::error::缺少仓库变量 ANDROID_SIGNING_CERT_SHA256（摘要小写、不含冒号）。它由 tools/release/new-signing-key.ps1 打印。"
-            exit 1
-          fi
+          version="${{ steps.version.outputs.name }}"
+          [ -n "$version" ] || version="0.0.0-dev"
+          apk="DailyMusings-client-${version}-android.apk"
 
           apksigner="$(find "${ANDROID_HOME:-/usr/local/lib/android/sdk}/build-tools" -name apksigner -type f 2>/dev/null | sort | tail -1)"
           if [ -z "$apksigner" ]; then
@@ -176,30 +178,43 @@ jobs:
             exit 1
           fi
 
-          version="${{ steps.version.outputs.name }}"
-          [ -n "$version" ] || version="0.0.0-dev"
-          apk="DailyMusings-client-${version}-android.apk"
+          certs="$("$apksigner" verify --print-certs "$apk")"
+          dn="$(printf '%s\n' "$certs" | grep -m1 'Signer #1 certificate DN' | sed 's/.*DN: //')"
+          actual="$(printf '%s\n' "$certs" | grep -m1 'Signer #1 certificate SHA-256 digest' | awk '{print $NF}' | tr 'A-F' 'a-f')"
 
-          actual="$("$apksigner" verify --print-certs "$apk" \
-            | grep -m1 'Signer #1 certificate SHA-256 digest' | awk '{print $NF}' | tr 'A-F' 'a-f')"
+          echo "证书主题   ：$dn"
+          echo "实际指纹   ：$actual"
+          echo "变量里的值 ：${EXPECTED_CERT_SHA256:-（空）}"
 
-          echo "签名证书 SHA-256：$actual"
-          echo "期望的证书        ：$EXPECTED_CERT_SHA256"
+          {
+            echo "### APK 签名"
+            echo ""
+            echo "- 证书主题：\`$dn\`"
+            echo "- 证书 SHA-256：\`$actual\`"
+            echo "- 仓库变量：\`${EXPECTED_CERT_SHA256:-（空）}\`"
+            echo "- 自查：\`apksigner verify --print-certs $apk\`"
+          } >> "$GITHUB_STEP_SUMMARY"
 
-          if [ "$actual" != "$EXPECTED_CERT_SHA256" ]; then
-            echo "::error::APK 的签名证书与仓库变量不一致——手机上会装不上（同一包名不同签名必须卸载重装）。"
+          if [ -z "${EXPECTED_CERT_SHA256}" ]; then
+            echo "::error title=缺少仓库变量::ANDROID_SIGNING_CERT_SHA256 没设置。它是仓库 Variable（不是 Secret），值由 tools/release/new-signing-key.ps1 打印，小写且不含冒号。本次产物是用 $dn 签的，指纹 $actual。"
             exit 1
           fi
 
-          echo "signing-cert-sha256=$actual" >> "$GITHUB_STEP_SUMMARY"
-          {
-            echo "### 发布签名"
-            echo ""
-            echo "- 证书 SHA-256：\`$actual\`"
-            echo "- 核对：\`apksigner verify --print-certs DailyMusings-client-${version}-android.apk\`"
-          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$actual" != "$EXPECTED_CERT_SHA256" ]; then
+            if printf '%s' "$dn" | grep -qi 'Android Debug'; then
+              echo "::error title=构建没用上发布密钥::产物是调试签名（$dn）。密钥或口令没生效，要修的是构建，不是变量。"
+            else
+              echo "::error title=签名指纹与变量不一致::产物由「$dn」签名，指纹 $actual；变量里是 $EXPECTED_CERT_SHA256。若 $actual 确实是你那把密钥的指纹，把变量改成它：gh variable set ANDROID_SIGNING_CERT_SHA256 -R ${GITHUB_REPOSITORY} --body $actual"
+            fi
+            exit 1
+          fi
 
+          echo "签名校验通过：$dn"
+
+      # 即使校验失败也把产物传上来：失败的那次跑最容易需要「它到底被谁签的」，而 GitHub 的日志在未登录或
+      # 限流时读不到。产物只是 Actions artifact（不是 Release），会过期，留在那里当证据没有代价。
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: apk
           path: |
