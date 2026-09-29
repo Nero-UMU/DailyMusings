@@ -27,6 +27,9 @@ services:
       Storage__SecretsPath: /run/secrets
       Storage__KeyRingPath: /var/lib/dailymusings-config/keys
       Storage__RuntimeConfigPath: /var/lib/dailymusings-config/runtime.json
+      # Optional deployment default. A value saved from the model page still wins because settings rows are read
+      # before deployment configuration. Keeping this explicit preserves the "never infer a protocol" rule.
+      Transcription__ApiType: "${DAILYMUSINGS_TRANSCRIPTION_API_TYPE:-openai_transcription}"
       # Mirrors the port above so the healthcheck can fall back to it when there is no admin-page override.
       DM_INTERNAL_PORT: "${DAILYMUSINGS_INTERNAL_PORT:-18321}"
 
