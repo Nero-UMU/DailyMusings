@@ -81,7 +81,7 @@ bash <root>/verify/run-phase5-verification.sh
 
 ### 2026-09-24（新范围）
 
-**尚未执行。** 脚本已按 A.17 改写，改动落在：删除 `wp_request` / `wp_reset` / `wp_posts` 与全部 WordPress 判定；不再要求 `DM_WP_APP_PASSWORD`；验收实例的 compose 文件去掉 `Publishing__WordPress__*` 与对应 Secret；S5 整段换成上面写的 Markdown 生命周期，并新增「旧目标类型被拒绝」这条断言。重跑需要一台能跑 Docker 的 Linux 测试主机与一个 Mailpit，因此没有在本机完成；重跑后请把结果补到这一节，并同步更新仓库 README 里的数字。
+**尚未执行。** 脚本已按 A.17 改写，改动落在：删除 `wp_request` / `wp_reset` / `wp_posts` 与全部 WordPress 判定；不再要求 `DM_WP_APP_PASSWORD`；验收实例的 compose 文件去掉 `Publishing__WordPress__*` 与对应 Secret；S5 整段换成上面写的 Markdown 生命周期，并新增「旧目标类型被拒绝」这条断言。重跑需要一台能跑 Docker 的 Linux 测试主机与一个 Mailpit，因此没有在本机完成；重跑后请把结果补到这一节，并同步更新 [`CHANGELOG.md`](../../CHANGELOG.md) 里的数字。
 
 ### 2026-09-29：脚本已适配「一份 compose + 一个镜像」，但**仍未重跑**
 
@@ -101,6 +101,6 @@ bash <root>/verify/run-phase5-verification.sh
 
 - 装 Release APK（`adb install`）→ 设置页填地址（HTTP 会先要求确认风险）→ 测试连接 → 用管理页的十分钟配对码配对 → **切断与服务器的通路**（先摘 adb 反向隧道、关蜂窝数据，设备侧 `curl` 得到 code=000）→ 录两段语音（4.1 秒 / 2.1 秒）并写一条文字 → 界面显示「3 条失败（连不上服务器）」且服务端条目数不变 → 恢复通路后点「立即同步」→「已上传 3 条」，服务端 5 条（4 语音 + 1 文字）、转写与主题归属齐全、磁盘 4 个真实 m4a。
 
-这一轮抓到四个客户端缺陷（详见仓库 README 的「历史记录」小节）：服务器不可达时今日页崩溃、未分类的上传异常逃逸且队列状态不同步、平台名写死成 `android`，以及一个只在**当时的 Windows 客户端**上出现的录音失败——最后这一条随电脑端一起撤销了。修复后共 386 项测试通过。
+这一轮抓到四个客户端缺陷（详见 [`CHANGELOG.md`](../../CHANGELOG.md) 的「历史记录：验证过的路径」一节）：服务器不可达时今日页崩溃、未分类的上传异常逃逸且队列状态不同步、平台名写死成 `android`，以及一个只在**当时的 Windows 客户端**上出现的录音失败——最后这一条随电脑端一起撤销了。修复后共 386 项测试通过。
 
 三个限制值得记下：`adb shell input text` 在这台设备上**无法注入 CJK**（`InputShellCommand.sendText` 抛 NPE），所以设备上那几条文字是 ASCII 写下的；小米自带搜狗输入法会把 ASCII 标点转成全角（`:`→`：`、`/`→`、`、`.`→`。`），输入 URL 前必须 `ime set` 到 ASCII 输入法（本仓库用 `io.appium.settings/.UnicodeIME`）；Tailscale 处于 DERP 中继时 RTT 可达数百毫秒且会短时丢包，因此重试与幂等键的行为是被真实网络逼出来的，而不是构造出来的。

@@ -36,11 +36,12 @@
 	</PropertyGroup>
 
 	<ItemGroup>
-		<!-- App Icon -->
-		<MauiIcon Include="Resources\AppIcon\appicon.svg" ForegroundFile="Resources\AppIcon\appiconfg.svg" Color="#512BD4" />
+		<!-- App Icon：单张位图（原图无 alpha 通道，白底），Color 是自适应图标的底色。取白而不是品牌紫，
+		     否则四角会露出一圈紫色边框。 -->
+		<MauiIcon Include="Resources\AppIcon\appicon.png" Color="#FFFFFF" />
 
-		<!-- Splash Screen -->
-		<MauiSplashScreen Include="Resources\Splash\splash.svg" Color="#512BD4" BaseSize="128,128" />
+		<!-- Splash Screen：同一图案，白底配白底色，图案居中；BaseSize 是这个图案在启动图里的基准尺寸。 -->
+		<MauiSplashScreen Include="Resources\Splash\splash.png" Color="#FFFFFF" BaseSize="128,128" />
 
 		<!-- Images -->
 		<MauiImage Include="Resources\Images\*" />

@@ -135,9 +135,16 @@ jobs:
             sleep 2
           done
 
-          echo "-- 健康检查 --"
+          echo "-- 健康检查（来自镜像的 HEALTHCHECK，compose 文件里已经没有这一段）--"
           curl -fsS http://127.0.0.1:18321/api/system/health; echo
           curl -fsS http://127.0.0.1:18321/api/system/health | grep -q '"healthy":true'
+          # 用 compose ps -q 取容器 id：compose 里写了 container_name，名字不再带项目前缀。
+          docker inspect "$(docker compose ps -q app)" --format '{{.State.Health.Status}}' | grep -qx healthy
+
+          echo "-- 默认目录由容器自己建好并纠正属主 --"
+          stat -c '%u %n' ./data ./config
+          [ "$(stat -c '%u' ./data)" = "1654" ]
+          [ "$(stat -c '%u' ./config)" = "1654" ]
 
           echo "-- 部署配置里的初始密码被采用，且没有回显到容器输出里 --"
           docker compose logs app | grep -q '部署配置'
@@ -151,7 +158,7 @@ jobs:
           # 调用方式下会把剩下的脚本吃掉（在真实服务器上踩过一次，脚本静默半途结束、退出码还是 0）。
           docker compose exec -T app cat /proc/1/status </dev/null | grep -q '^Uid:.*1654'
 
-      - name: 换成宿主机目录再起一次（绑定挂载路径，目录不存在也不预先 chown）
+      - name: 把两个目录指到别处再起一次（DM_DATA_DIR / DM_CONFIG_DIR）
         env:
           DM_IMAGE: dailymusings-smoke:local
           DM_ADMIN_PASSWORD: SmokeTestPassword1
@@ -161,7 +168,7 @@ jobs:
           set -euo pipefail
           docker compose down -v
 
-          # 故意不创建这两个目录：Docker 会建，入口脚本负责把属主纠正为 1654。
+          # 故意不创建这两个目录：它们由容器创建，属主也由容器纠正。
           docker compose up -d
 
           for _ in $(seq 1 60); do
@@ -171,7 +178,7 @@ jobs:
 
           curl -fsS http://127.0.0.1:18321/api/system/health | grep -q '"healthy":true'
 
-          echo "-- 两个挂载目录的属主已经被纠正为容器用户 --"
+          echo "-- 指定的两个目录的属主已经被纠正为容器用户 --"
           stat -c '%u %n' "$DM_DATA_DIR" "$DM_CONFIG_DIR"
           [ "$(stat -c '%u' "$DM_DATA_DIR")" = "1654" ]
           [ "$(stat -c '%u' "$DM_CONFIG_DIR")" = "1654" ]

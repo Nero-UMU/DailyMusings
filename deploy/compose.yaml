@@ -9,9 +9,8 @@
 #   先在 deploy/.env 里指定两个绝对目录（DM_CONFIG_DIR / DM_DATA_DIR），然后
 #   docker compose --env-file deploy/.env -f compose.yaml -f deploy/compose.yaml up -d --build
 #
-# 与根目录那份的唯一差别就是下面两行：镜像改成构建产物并打上本地标签。
-# 服务定义、端口、健康检查、挂载、环境变量全部只有一份，写在 compose.yaml 里 —— 两份文件各自维护
-# 端口和挂载是上一次部署里最容易被改漏的地方。
+# 与根目录那份的唯一差别就是下面两行：镜像改成构建产物并打上本地标签。服务定义、端口、挂载、环境变量
+# 全部只有一份，写在 compose.yaml 里 —— 两份文件各自维护端口和挂载是上一次部署里最容易被改漏的地方。
 
 services:
   app:

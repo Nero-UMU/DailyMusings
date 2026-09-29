@@ -193,16 +193,15 @@ pre code {
     text-decoration: none;
 }
 
+/* 品牌标记是 logo 位图（白底），所以这里不再有背景色与字号——那些是它还是「每」字时的样式。 */
 .brand-mark {
-    align-items: center;
-    background: var(--primary);
+    background: #fff;
+    border: 1px solid var(--border);
     border-radius: 10px;
-    color: #fff;
     display: inline-flex;
     flex: 0 0 auto;
-    font-weight: 700;
     height: 32px;
-    justify-content: center;
+    object-fit: contain;
     width: 32px;
 }
 
@@ -339,14 +338,13 @@ pre code {
     gap: 0.7rem;
 }
 
+/* 登录页左栏是深色底，白底 logo 在这里正好当一枚小图章。 */
 .login-mark {
-    align-items: center;
-    background: #60a5fa;
+    background: #fff;
     border-radius: 0.8rem;
-    color: #0f172a;
     display: inline-flex;
     height: 2.55rem;
-    justify-content: center;
+    object-fit: contain;
     width: 2.55rem;
 }
 
