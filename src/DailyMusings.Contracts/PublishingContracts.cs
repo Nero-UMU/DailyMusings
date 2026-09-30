@@ -111,18 +111,20 @@ public sealed record RemoteCheckResponse(
     string? RemoteContentHash,
     string? LocalContentHash);
 
-/// <summary>Which notification events are sent, and where (§12).</summary>
+/// <summary>Which notification events are sent, where, and whether the mail carries the article (§12, A.34).</summary>
 public sealed record NotificationSettingsDto(
     bool SmtpConfigured,
     string ToAddress,
     string? InstanceUrl,
     bool DraftReady,
     bool JobFailed,
-    bool AutomaticPublication);
+    bool AutomaticPublication,
+    bool IncludeContent);
 
 public sealed record UpdateNotificationSettingsRequest(
     string? ToAddress,
     string? InstanceUrl,
     bool? DraftReady,
     bool? JobFailed,
-    bool? AutomaticPublication);
+    bool? AutomaticPublication,
+    bool? IncludeContent);

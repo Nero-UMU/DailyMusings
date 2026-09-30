@@ -263,6 +263,45 @@ internal sealed class PublishingTestContext : IAsyncDisposable
     }
 
     /// <summary>
+    /// Writes a draft that is **not** confirmed — the state 附录 A.33 的自动发布要处理的状态（勾选了自动公开的目标
+    /// 到点直接发布当天的工作稿）。除了不调用 <c>Confirm</c>，其余与 <see cref="SeedConfirmedDraftAsync"/> 一致。
+    /// </summary>
+    public async Task<(Reflection Reflection, ReflectionVersion Version)> SeedUnconfirmedDraftAsync(
+        ContentDate contentDate,
+        string title = "今天的记录",
+        string body = "第一段。\n\n第二段。")
+    {
+        var reflection = Reflection.Create(ReflectionId.New(), contentDate, GenerationReason.Scheduled, Clock.UtcNow);
+        reflection.MarkReady(Clock.UtcNow);
+        reflection.BeginGeneration(GenerationReason.Scheduled, Clock.UtcNow);
+
+        var version = ReflectionVersion.CreateGenerated(
+            ReflectionVersionId.New(),
+            reflection.Id,
+            title,
+            "摘要",
+            body,
+            WritingSettings.Default,
+            new ModelInfo("test-writer"),
+            "generation-test-v1",
+            Clock.UtcNow,
+            tags: ["记录"],
+            categories: ["随想"]);
+
+        reflection.ApplyGeneratedVersion(version.Id, false, false, Clock.UtcNow);
+
+        await using var transaction = await UnitOfWork.BeginAsync(CancellationToken.None);
+
+        await Reflections.AddAsync(reflection, CancellationToken.None);
+        await Reflections.AddVersionAsync(version, CancellationToken.None);
+        await Reflections.ReplaceSourcesAsync(version.Id, [], CancellationToken.None);
+
+        await transaction.CommitAsync(CancellationToken.None);
+
+        return (reflection, version);
+    }
+
+    /// <summary>
     /// Installs a newly generated working version while preserving the previously confirmed version. This is the
     /// state produced when new material arrives after a publication and the user regenerates but has not confirmed
     /// or published the replacement yet.

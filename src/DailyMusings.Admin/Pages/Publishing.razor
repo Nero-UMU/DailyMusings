@@ -66,7 +66,8 @@
         </p>
         <p class="hint">@AutoPublishStateText()</p>
 
-        <p class="notice warn slim">自动发布会把已确认的稿件按上面的时间写成 <code>draft: false</code> 的文件；未经确认的稿件不会公开。</p>
+        <p class="notice warn slim">自动公开开启时，到点把当天生成的稿件写成 <code>draft: false</code> 的文件；没开启时只写
+            <code>draft: true</code> 的草稿。已公开的文件不会被自动替换。</p>
     </section>
 </div>
 
@@ -362,14 +363,18 @@
     {
         var state = _reflection?.Status switch
         {
-            null => "今天还没有稿件，先生成并确认它，自动发布才有对象。",
-            not ReflectionStatus.Confirmed =>
-                "今天的稿件还没有确认——自动发布只处理已确认的稿件，它不会替你确认，所以到点也不会有动作。",
-            _ when TodayPublicationStatus() == PublicationStatus.Published => "今天的稿件已确认，而且已经发布过了。",
-            _ => "今天的稿件已确认，到上面的时刻会自动发布。",
+            null => _automaticPublish
+                ? "今天还没有稿件；生成出来就会按上面的时刻自动发布。"
+                : "今天还没有稿件；没开自动公开时，需要先生成并确认它。",
+            _ when TodayPublicationStatus() == PublicationStatus.Published => "今天已经发布过了。",
+            ReflectionStatus.Confirmed => "今天已确认，到上面的时刻会自动发布。",
+            _ => _automaticPublish
+                ? "今天还没确认；已开启自动公开，到点会直接发布这一版。"
+                : "今天还没确认；没开自动公开时，自动发布只处理已确认的稿件。",
         };
 
-        return (_automaticPublish ? "自动公开：已开启。" : "自动公开：未开启，到点只写草稿（draft: true）。") + state;
+        // 「未开启」不是「不发」：到点仍然会把当天生成的稿写成文件，只是 front matter 里 draft: true。
+        return (_automaticPublish ? "自动公开：已开启。" : "自动公开：未开启。到点写草稿（draft: true）。") + state;
     }
 
     private async Task RunAsync(Func<IServiceProvider, Task> work, string success)

@@ -59,20 +59,20 @@ public sealed record AudioRetentionPolicy(int Days)
 
 /// <summary>
 /// Decides which recordings a cleanup sweep may physically delete
-/// (docs/开发指导.md §15.1, decision A.1).
+/// (docs/开发指导.md §15.1, decisions A.1 and A.35).
 /// <para>
 /// The two conditions worth naming are both about not destroying the only copy of something. Audio of a
 /// <em>failed</em> transcription is never cleanable, however long it has been sitting there: the transcript does not
 /// exist, so the recording is the input, and deleting it would throw away the material the retry needs. And nothing
-/// is cleanable before a human has confirmed the day, because until then nobody has agreed that the text says what
-/// was said.
+/// is cleanable before the day's <em>计时起点</em> has arrived — 起点是「首次确认」与「首次公开发布」中较早的那个
+/// （附录 A.35），因为这两件事都意味着「这一天的文字已经定下来、录音不再需要被核对」。
 /// </para>
 /// </summary>
 public static class AudioCleanupPolicy
 {
     public static bool IsCleanable(
         InputEntry entry,
-        DateTimeOffset? confirmedAtUtc,
+        DateTimeOffset? countdownFromUtc,
         AudioRetentionPolicy policy,
         DateTimeOffset nowUtc)
     {
@@ -90,7 +90,8 @@ public static class AudioCleanupPolicy
             return false;
         }
 
-        // §15.1: 用户首次确认该日草稿后 the audio becomes a candidate. No confirmation, no cleanup.
-        return confirmedAtUtc is { } confirmed && policy.IsDue(confirmed, nowUtc);
+        // §15.1，附录 A.35：这一天「被确认」或「被公开发布」之前，录音不可清理。两个事件都意味着文字已经定下来，
+        // 录音不再需要留着核对；起点取两者中较早的那个（由调用方算好传进来）。
+        return countdownFromUtc is { } from && policy.IsDue(from, nowUtc);
     }
 }

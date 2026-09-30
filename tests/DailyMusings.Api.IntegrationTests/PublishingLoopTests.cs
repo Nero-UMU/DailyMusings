@@ -340,7 +340,7 @@ public class PublishingLoopTests
         // Writing is the part a device must not be able to do: the recipient decides where the user's material goes.
         using var deviceWrite = await device.PatchAsJsonAsync(
             "/api/notification-settings",
-            new UpdateNotificationSettingsRequest("attacker@example.invalid", null, null, null, null));
+            new UpdateNotificationSettingsRequest("attacker@example.invalid", null, null, null, null, null));
 
         Assert.IsTrue(
             deviceWrite.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden,
@@ -353,7 +353,7 @@ public class PublishingLoopTests
 
         using var updated = await instance.Client.PatchAsJsonAsync(
             "/api/notification-settings",
-            new UpdateNotificationSettingsRequest("owner@example.invalid", "http://instance.test", DraftReady: true, null, null));
+            new UpdateNotificationSettingsRequest("owner@example.invalid", "http://instance.test", DraftReady: true, null, null, null));
 
         updated.EnsureSuccessStatusCode();
         var after = await updated.Content.ReadFromJsonAsync<NotificationSettingsDto>();

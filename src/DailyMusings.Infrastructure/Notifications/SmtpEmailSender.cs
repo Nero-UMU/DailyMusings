@@ -128,6 +128,11 @@ public sealed class ConfigurationNotificationSettingsProvider : INotificationSet
                 ?? section.GetValue<string?>("InstanceUrl"))
         {
             Events = events,
+
+            // 附录 A.34：正文进不进邮件，默认关闭（`Notification__IncludeContent=true` 也能开）。
+            IncludeContent = bool.TryParse(Read(stored, NotificationSettingKeys.IncludeContent), out var includeContent)
+                ? includeContent
+                : section.GetValue<bool?>("IncludeContent") ?? false,
         };
 
         bool ReadSwitch(string settingKey, string configurationKey) =>

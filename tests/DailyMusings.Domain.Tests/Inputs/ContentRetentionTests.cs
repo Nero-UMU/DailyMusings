@@ -55,7 +55,7 @@ public class ContentRetentionTests
         var policy = new ContentRetentionPolicy(0);
 
         Assert.IsFalse(
-            ContentCleanupPolicy.IsCleanable(entry, confirmedAtUtc: null, policy, TestFactory.Noon.AddDays(30)),
+            ContentCleanupPolicy.IsCleanable(entry, countdownFromUtc: null, policy, TestFactory.Noon.AddDays(30)),
             "Until a human signs the day off, nothing is disposable.");
     }
 

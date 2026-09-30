@@ -45,15 +45,30 @@ public sealed record NotificationPayload(string To, string Subject, string Body)
 /// <summary>
 /// Writes the mail itself (docs/开发指导.md §12).
 /// <para>
-/// Every message names what happened and points at the instance, and none of them carries the user's writing.
-/// That is not an oversight: mail travels over an unencrypted channel by default, and the draft is the most
-/// private thing this product holds, so an automatic copy of it in an inbox is a worse default than a short note
-/// asking the user to open the app.
+/// By default every message names what happened and points at the instance, and none of them carries the user's
+/// writing: mail travels over an unencrypted channel by default, and the draft is the most private thing this
+/// product holds, so an automatic copy in an inbox is a worse default than a short note asking the user to open
+/// the app. **2026-09-30 起这不是硬规则**（附录 A.34）：通知管理里可以打开「邮件包含稿件正文」，打开后下面几个
+/// 写信方法会收到 <c>content</c> 并把**正文原文（Markdown，不含 front matter）**附在信里。默认仍然是关闭。
 /// </para>
 /// </summary>
 public static class NotificationComposer
 {
-    public static EmailMessage DraftReady(ContentDate contentDate, string? title, string recipient, string? instanceUrl)
+    /// <summary>正文与「请到实例查看」二选一：带正文时就不再劝人去实例里看。</summary>
+    private static void AppendContent(StringBuilder body, string? content)
+    {
+        if (string.IsNullOrWhiteSpace(content))
+        {
+            body.AppendLine("正文不在邮件里，请到实例中查看与核验。");
+            return;
+        }
+
+        body.AppendLine("正文（Markdown 原文）：");
+        body.AppendLine();
+        body.AppendLine(content.Trim());
+    }
+
+    public static EmailMessage DraftReady(ContentDate contentDate, string? title, string? content, string recipient, string? instanceUrl)
     {
         var subject = string.Create(CultureInfo.InvariantCulture, $"[每日随想] {contentDate} 的草稿等你确认");
 
@@ -68,7 +83,7 @@ public static class NotificationComposer
         }
 
         AppendLink(body, instanceUrl);
-        body.AppendLine("正文不在邮件里，请到实例中查看与核验。");
+        AppendContent(body, content);
 
         return new EmailMessage(recipient, subject, body.ToString().TrimEnd());
     }
@@ -76,6 +91,7 @@ public static class NotificationComposer
     public static EmailMessage UnpublishedAtPublishTime(
         ContentDate contentDate,
         string? title,
+        string? content,
         string recipient,
         string? instanceUrl)
     {
@@ -93,7 +109,15 @@ public static class NotificationComposer
         }
 
         AppendLink(body, instanceUrl);
-        body.AppendLine("如果暂时不发布，无需处理；下次重新生成时，内容管理会改为显示最新稿件。");
+
+        if (string.IsNullOrWhiteSpace(content))
+        {
+            body.AppendLine("如果暂时不发布，无需处理；下次重新生成时，内容管理会改为显示最新稿件。");
+        }
+        else
+        {
+            AppendContent(body, content);
+        }
 
         return new EmailMessage(recipient, subject, body.ToString().TrimEnd());
     }
@@ -130,6 +154,7 @@ public static class NotificationComposer
         string targetName,
         string? remoteId,
         string? errorCode,
+        string? content,
         string recipient,
         string? instanceUrl)
     {
@@ -185,6 +210,12 @@ public static class NotificationComposer
         body.AppendLine();
         AppendLink(body, instanceUrl);
 
+        // 只有「发出去了」的那两种状态附正文（附录 A.34）：失败或超时的信里贴正文没有用处，只需要原因与错误码。
+        if (status is PublicationStatus.Published or PublicationStatus.DraftUploaded)
+        {
+            AppendContent(body, content);
+        }
+
         return new EmailMessage(recipient, subject, body.ToString().TrimEnd());
     }
 
@@ -226,18 +257,25 @@ public sealed class QueueNotificationUseCase
         ContentDate contentDate,
         Domain.Common.ReflectionVersionId version,
         string? title,
+        string? content,
         CancellationToken cancellationToken) =>
         QueueAsync(
             NotificationEvent.DraftReady,
             NotificationKeys.ForDraftReady(contentDate, version),
             contentDate.ToString(),
-            (settings, recipient) => NotificationComposer.DraftReady(contentDate, title, recipient, settings.InstanceUrl),
+            (settings, recipient) => NotificationComposer.DraftReady(
+                contentDate,
+                title,
+                Included(settings, content),
+                recipient,
+                settings.InstanceUrl),
             cancellationToken);
 
     public Task<bool> QueueUnpublishedAtPublishTimeAsync(
         ContentDate contentDate,
         Domain.Common.ReflectionVersionId version,
         string? title,
+        string? content,
         CancellationToken cancellationToken) =>
         QueueAsync(
             NotificationEvent.DraftReady,
@@ -246,6 +284,7 @@ public sealed class QueueNotificationUseCase
             (settings, recipient) => NotificationComposer.UnpublishedAtPublishTime(
                 contentDate,
                 title,
+                Included(settings, content),
                 recipient,
                 settings.InstanceUrl),
             cancellationToken);
@@ -269,6 +308,7 @@ public sealed class QueueNotificationUseCase
         string targetName,
         string? remoteId,
         string? errorCode,
+        string? content,
         CancellationToken cancellationToken) =>
         QueueAsync(
             NotificationEvent.AutomaticPublication,
@@ -279,9 +319,17 @@ public sealed class QueueNotificationUseCase
                 targetName,
                 remoteId,
                 errorCode,
+                Included(settings, content),
                 recipient,
                 settings.InstanceUrl),
             cancellationToken);
+
+    /// <summary>
+    /// 只有开关打开时才把正文交给写信方法（附录 A.34）。在这里判断而不是在写信方法里，是因为「要不要带正文」
+    /// 是一个设置，而写信方法是纯函数——它拿到正文就写，拿不到就写那句「请到实例查看」。
+    /// </summary>
+    private static string? Included(NotificationSettings settings, string? content) =>
+        settings.IncludeContent ? content : null;
 
     private async Task<bool> QueueAsync(
         NotificationEvent notificationEvent,

@@ -414,7 +414,7 @@ public sealed class GenerateReflectionUseCase
         // §12's "新草稿待确认". Queued after the draft is durable, so a mail can never announce something that a
         // failed transaction rolled back; a mail failure, in turn, cannot touch the draft (§12).
         await _notifications
-            .QueueDraftReadyAsync(contentDate, version.Id, version.Title, cancellationToken)
+            .QueueDraftReadyAsync(contentDate, version.Id, version.Title, version.Body, cancellationToken)
             .ConfigureAwait(false);
 
         return new ReflectionGenerationResult(

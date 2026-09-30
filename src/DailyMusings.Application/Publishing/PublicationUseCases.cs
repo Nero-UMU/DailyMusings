@@ -145,27 +145,43 @@ public sealed class RequestPublicationUseCase
             return new PublicationRequestResult(PublicationRequestOutcome.Refused, "publication.reflection_unknown", "That day has no draft.", null, null);
         }
 
-        if (reflection.Status != ReflectionStatus.Confirmed || reflection.ConfirmedVersionId is null)
-        {
-            return new PublicationRequestResult(
-                PublicationRequestOutcome.Refused,
-                "publication.reflection_not_confirmed",
-                "Only a confirmed draft can be published.",
-                null,
-                null);
-        }
-
         var target = await _targets.FindByIdAsync(targetId, cancellationToken).ConfigureAwait(false);
         if (target is null)
         {
             return new PublicationRequestResult(PublicationRequestOutcome.Refused, "publish.target.unknown", "That publish target does not exist.", null, null);
         }
 
-        var versionId = reflection.ConfirmedVersionId.Value;
+        // Which version this request is about (附录 A.33, 2026-09-30):
+        //
+        // - **手动发布**仍然只发「已确认」的那一版。管理页在点「发布稿件」时会先替你确认，所以人工路径没有变化；
+        //   直接调接口的人得到的回答也仍然是「先确认」。
+        // - **自动发布**在目标勾选了「允许自动公开发布」时发**当天的工作稿**：勾选本身就是那个授权，不再要求先有
+        //   人确认（用户要求：勾上就到点自动发布当天生成的稿件）。它不会顺手把稿件标记为已确认——确认意味着
+        //   「人核验过」，并且会启动录音/内容的保留计时、冻结这一天的重新生成，那些副作用不该由一个勾选触发。
+        // - 目标**没勾选**时，自动路径仍要求已确认：§11.1 原来的「默认只生成私人草稿，由你核验后才发布」对它成立。
+        var versionId = manual
+            ? reflection.Status == ReflectionStatus.Confirmed ? reflection.ConfirmedVersionId : null
+            : target.AutomaticPublishEnabled
+                ? reflection.WorkingVersionId
+                : reflection.ConfirmedVersionId;
+
+        if (versionId is null)
+        {
+            return new PublicationRequestResult(
+                PublicationRequestOutcome.Refused,
+                reflection.WorkingVersionId is null ? "publication.reflection_unknown" : "publication.reflection_not_confirmed",
+                reflection.WorkingVersionId is null
+                    ? "That day has no draft yet."
+                    : "Only a confirmed draft can be published.",
+                null,
+                null);
+        }
+
         var now = _clock.UtcNow;
+        var publishVersionId = versionId.Value;
 
         var publication = await _publications
-            .FindByVersionAndTargetAsync(versionId, targetId, cancellationToken)
+            .FindByVersionAndTargetAsync(publishVersionId, targetId, cancellationToken)
             .ConfigureAwait(false);
 
         // Whether this call is the one that put the work in the queue, which is what the caller's log line and the
@@ -196,7 +212,7 @@ public sealed class RequestPublicationUseCase
             publication = Publication.Create(
                 PublicationId.New(),
                 reflection.Id,
-                versionId,
+                publishVersionId,
                 targetId,
                 manual ? PublicationTrigger.Manual : PublicationTrigger.Automatic,
                 scheduledAt,
@@ -259,7 +275,7 @@ public sealed class RequestPublicationUseCase
         var job = await _jobs.EnsureAsync(
             JobType.Publication,
             publication.Id.ToString(),
-            IdempotencyKeys.Publication(versionId, targetId, publication.ExportRound),
+            IdempotencyKeys.Publication(publishVersionId, targetId, publication.ExportRound),
             new PublicationPayload(replaceExistingFile).ToJson(),
             requeueFailed: manual,
             cancellationToken).ConfigureAwait(false);
@@ -566,8 +582,21 @@ public sealed class RunPublicationUseCase
             return;
         }
 
+        // 附录 A.34：这一版发出的稿件的正文。写信方法只在「邮件包含稿件正文」打开时才会用它，
+        // 所以默认行为仍是「信里不带正文」。
+        var version = await _reflections
+            .FindVersionAsync(publication.ReflectionVersionId, cancellationToken)
+            .ConfigureAwait(false);
+
         await _notifications
-            .QueuePublicationAsync(publication.Id, status, targetName, publication.RemoteId, errorCode, cancellationToken)
+            .QueuePublicationAsync(
+                publication.Id,
+                status,
+                targetName,
+                publication.RemoteId,
+                errorCode,
+                version?.Body,
+                cancellationToken)
             .ConfigureAwait(false);
     }
 }

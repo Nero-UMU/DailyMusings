@@ -588,11 +588,11 @@ public sealed class RunAudioCleanupUseCase
 
         var now = _clock.UtcNow;
 
-        // The cutoff is the earliest confirmation that could already be due, so the query can use the index instead
-        // of loading every day ever confirmed.
+        // The cutoff is the earliest 计时起点 that could already be due, so the query can use the index instead
+        // of loading every day ever finished with. 起点 = 首次确认与首次公开发布中较早的那个（A.35）。
         var cutoff = policy.DeletesImmediately ? now : now.AddDays(-policy.Days);
         var days = await _reflections
-            .ListConfirmedBeforeAsync(cutoff, 500, cancellationToken)
+            .ListRetentionCandidatesAsync(cutoff, 500, cancellationToken)
             .ConfigureAwait(false);
 
         var deleted = 0;
@@ -600,14 +600,14 @@ public sealed class RunAudioCleanupUseCase
         long released = 0;
         var candidateDays = 0;
 
-        foreach (var reflection in days)
+        foreach (var (reflection, countdownFrom) in days)
         {
             var entries = await _inputs
                 .ListByContentDateAsync(reflection.ContentDate, cancellationToken)
                 .ConfigureAwait(false);
 
             var cleanable = entries
-                .Where(entry => AudioCleanupPolicy.IsCleanable(entry, reflection.ConfirmedAtUtc, policy, now))
+                .Where(entry => AudioCleanupPolicy.IsCleanable(entry, countdownFrom, policy, now))
                 .ToArray();
 
             if (cleanable.Length == 0)

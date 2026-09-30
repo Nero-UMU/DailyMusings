@@ -120,6 +120,11 @@ public interface ITopicRepository
 }
 
 /// <summary>
+/// 一天的保留计时候选：这一天，以及它的计时起点（首次确认与首次公开发布中较早的那个，附录 A.35）。
+/// </summary>
+public sealed record RetentionCandidate(Reflection Reflection, DateTimeOffset CountdownFromUtc);
+
+/// <summary>
 /// Persistence for daily reflections and their versions (docs/开发指导.md §6.3, §6.4).
 /// <para>
 /// Versions are never deleted — only the four slot pointers on the reflection rotate (§6.4) — so
@@ -151,13 +156,20 @@ public interface IReflectionRepository
     Task<IReadOnlyList<Reflection>> ListAllAsync(int limit, CancellationToken cancellationToken);
 
     /// <summary>
-    /// Days confirmed at or before <paramref name="cutoffUtc"/>, oldest confirmation first.
+    /// Days whose **保留计时起点**已经到达，按起点从早到晚。
     /// <para>
-    /// This is the retention sweep's query (decision A.1). It filters on the confirmation instant rather than on the
-    /// content day, because the window starts when a human signed the day off — not when the material happened.
+    /// 起点 = 首次确认与首次公开发布中**较早的那个**（附录 A.35，2026-09-30）。这条规则存在的理由很具体：
+    /// 2026-09-30 起「自动公开」可以不经确认直接发布当天生成的稿，如果计时仍然只认确认，那么「只自动发布、
+    /// 从不确认」的实例会永远不清理——用户配了 30 天录音保留，却什么都删不掉，而页面上没有任何迹象说明原因。
+    /// </para>
+    /// <para>
+    /// 只算**公开**发布（<c>Published</c>）：上传草稿不是「发出去了」，录音的核对价值没有因此下降。
     /// </para>
     /// </summary>
-    Task<IReadOnlyList<Reflection>> ListConfirmedBeforeAsync(DateTimeOffset cutoffUtc, int limit, CancellationToken cancellationToken);
+    Task<IReadOnlyList<RetentionCandidate>> ListRetentionCandidatesAsync(
+        DateTimeOffset cutoffUtc,
+        int limit,
+        CancellationToken cancellationToken);
 
     Task AddAsync(Reflection reflection, CancellationToken cancellationToken);
 

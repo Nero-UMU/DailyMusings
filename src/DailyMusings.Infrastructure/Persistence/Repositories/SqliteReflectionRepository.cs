@@ -1,6 +1,7 @@
 using System.Text.Json;
 using DailyMusings.Application.Abstractions;
 using DailyMusings.Domain.Common;
+using DailyMusings.Domain.Publishing;
 using DailyMusings.Domain.Reflections;
 using DailyMusings.Domain.Reflections.Sources;
 using DailyMusings.Domain.Time;
@@ -92,19 +93,37 @@ public sealed class SqliteReflectionRepository : IReflectionRepository
     /// The retention sweep's query (decision A.1): days whose <em>first confirmation</em> is old enough. Indexed on
     /// that column, so a sweep does not walk every day the instance has ever written.
     /// </summary>
-    public async Task<IReadOnlyList<Reflection>> ListConfirmedBeforeAsync(
+    public async Task<IReadOnlyList<RetentionCandidate>> ListRetentionCandidatesAsync(
         DateTimeOffset cutoffUtc,
         int limit,
         CancellationToken cancellationToken) =>
         await _accessor.QueryAsync(
             $"""
-             SELECT {ReflectionColumns} FROM reflection
-              WHERE confirmed_at_utc IS NOT NULL AND confirmed_at_utc <= $cutoff
-              ORDER BY confirmed_at_utc
+             SELECT * FROM (
+                 SELECT {ReflectionColumns},
+                        CASE
+                            WHEN r.confirmed_at_utc IS NULL THEN p.first_published_at_utc
+                            WHEN p.first_published_at_utc IS NULL THEN r.confirmed_at_utc
+                            WHEN r.confirmed_at_utc < p.first_published_at_utc THEN r.confirmed_at_utc
+                            ELSE p.first_published_at_utc
+                        END AS countdown_from
+                   FROM reflection r
+                   LEFT JOIN (
+                       SELECT reflection_id, MIN(completed_at_utc) AS first_published_at_utc
+                         FROM publication
+                        WHERE status = $published AND completed_at_utc IS NOT NULL
+                        GROUP BY reflection_id
+                   ) p ON p.reflection_id = r.id
+             )
+              WHERE countdown_from IS NOT NULL AND countdown_from <= $cutoff
+              ORDER BY countdown_from
               LIMIT $limit;
              """,
-            MapReflection,
+            reader => new RetentionCandidate(
+                MapReflection(reader),
+                SqliteValues.ReadRequiredInstant(reader, reader.GetOrdinal("countdown_from"))),
             cancellationToken,
+            ("$published", (int)PublicationStatus.Published),
             ("$cutoff", SqliteValues.Instant(cutoffUtc)),
             ("$limit", limit)).ConfigureAwait(false);
 

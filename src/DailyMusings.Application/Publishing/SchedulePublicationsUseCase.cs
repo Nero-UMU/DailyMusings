@@ -110,6 +110,7 @@ public sealed class SchedulePublicationsUseCase
                     reflection.ContentDate,
                     workingVersionId,
                     workingVersion?.Title,
+                    workingVersion?.Body,
                     cancellationToken)
                 .ConfigureAwait(false);
         }
@@ -140,7 +141,7 @@ public sealed class SchedulePublicationsUseCase
         var queued = 0;
 
         foreach (var reflection in reflections
-            .Where(candidate => candidate.Status == ReflectionStatus.Confirmed)
+            .Where(candidate => candidate.WorkingVersionId is not null)
             .OrderBy(candidate => candidate.ContentDate))
         {
             // §11.1: 默认 23:00 生成、次日 08:00 发布；发布时间晚于生成时间则是当天（见 PublishSlotFor）。
@@ -153,17 +154,27 @@ public sealed class SchedulePublicationsUseCase
                 .ListByReflectionAsync(reflection.Id, cancellationToken)
                 .ConfigureAwait(false);
 
-            if (activePublications.Any(publication =>
-                    publication.Status == PublicationStatus.Published &&
-                    publication.ReflectionVersionId != reflection.ConfirmedVersionId))
-            {
-                // A confirmed regeneration is still not permission to replace an already-public file. Only the
-                // manual publication endpoint records that explicit decision.
-                continue;
-            }
-
             foreach (var target in targets)
             {
+                // 附录 A.33（2026-09-30 用户要求）：勾选了「允许自动公开发布」的目标发**当天的工作稿**——勾选本身就是
+                // 那个授权，不再要求先有人确认；没勾选的目标保持 §11.1 原文，只发已确认的稿。
+                var versionToPublish = target.AutomaticPublishEnabled
+                    ? reflection.WorkingVersionId
+                    : reflection.Status == ReflectionStatus.Confirmed ? reflection.ConfirmedVersionId : null;
+
+                if (versionToPublish is null)
+                {
+                    continue;
+                }
+
+                if (activePublications.Any(publication =>
+                        publication.Status == PublicationStatus.Published &&
+                        publication.ReflectionVersionId != versionToPublish))
+                {
+                    // 已经公开的是另一版：自动动作不替换已公开的文件（那要人来做），只由上面的提醒告诉用户。
+                    continue;
+                }
+
                 var result = await _request
                     .ExecuteAsync(
                         reflection.ContentDate,
@@ -236,6 +247,8 @@ public sealed class SchedulePublicationsUseCase
                     target?.Name ?? publication.PublishTargetId.ToString(),
                     publication.RemoteId,
                     errorCode: "publication.window_expired",
+                    // 超时这封信不附正文（附录 A.34）：它要说的就是「什么都没发生，原因在此」。
+                    content: null,
                     cancellationToken)
                 .ConfigureAwait(false);
         }
@@ -270,8 +283,15 @@ public sealed class SchedulePublicationsUseCase
                 .FindByIdAsync(publication.ReflectionId, cancellationToken)
                 .ConfigureAwait(false);
 
-            var stillCurrent = reflection is { Status: ReflectionStatus.Confirmed } &&
-                               reflection.ConfirmedVersionId == publication.ReflectionVersionId;
+            // 「还作数」= 这一天仍然停在这一版上，而且这一版对它仍然成立：
+            //   * 已确认的那一版：只有状态仍是「已确认」时才算数——新增素材把它标成过期时，待发布的那一版随之失效
+            //     （§11.1 原文，New_material_invalidates_a_pending_publication 钉住的就是这条）。
+            //   * 未确认的工作稿：附录 A.33 的自动发布针对的正是它，所以只要这一天还停在这一版上就算数；
+            //     这里若要求「已确认」，刚排上的自动发布会在这个 tick 里被自己作废。
+            var stillCurrent = reflection is not null &&
+                               (reflection.ConfirmedVersionId == publication.ReflectionVersionId
+                                   ? reflection.Status == ReflectionStatus.Confirmed
+                                   : reflection.WorkingVersionId == publication.ReflectionVersionId);
 
             if (stillCurrent)
             {

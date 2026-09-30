@@ -7,7 +7,8 @@ namespace DailyMusings.Application.Notifications;
 /// The notification preferences as the admin page and the API read them (docs/开发指导.md §12).
 /// <para>
 /// Extracted from the endpoint so the Blazor page and the API answer identically: this instance has one recipient
-/// address and three event switches, and two places writing them from two copies of the logic is how they drift.
+/// address, three event switches and one content switch, and two places writing them from two copies of the logic
+/// is how they drift.
 /// </para>
 /// </summary>
 public sealed record NotificationSettingsView(
@@ -16,7 +17,8 @@ public sealed record NotificationSettingsView(
     string? InstanceUrl,
     bool DraftReady,
     bool JobFailed,
-    bool AutomaticPublication);
+    bool AutomaticPublication,
+    bool IncludeContent);
 
 /// <summary>Reads the preferences, with the SMTP state the client needs to explain whether mail can be sent at all.</summary>
 public sealed class ReadNotificationSettingsUseCase
@@ -41,7 +43,8 @@ public sealed class ReadNotificationSettingsUseCase
             InstanceUrl: settings.InstanceUrl,
             DraftReady: settings.IsEnabled(NotificationEvent.DraftReady),
             JobFailed: settings.IsEnabled(NotificationEvent.JobFailed),
-            AutomaticPublication: settings.IsEnabled(NotificationEvent.AutomaticPublication));
+            AutomaticPublication: settings.IsEnabled(NotificationEvent.AutomaticPublication),
+            IncludeContent: settings.IncludeContent);
     }
 }
 
@@ -61,6 +64,7 @@ public sealed class UpdateNotificationSettingsUseCase
         bool? draftReady,
         bool? jobFailed,
         bool? automaticPublication,
+        bool? includeContent,
         CancellationToken cancellationToken)
     {
         if (toAddress is not null)
@@ -82,6 +86,7 @@ public sealed class UpdateNotificationSettingsUseCase
                      (NotificationSettingKeys.DraftReady, draftReady),
                      (NotificationSettingKeys.JobFailed, jobFailed),
                      (NotificationSettingKeys.AutomaticPublication, automaticPublication),
+                     (NotificationSettingKeys.IncludeContent, includeContent),
                  })
         {
             if (value is not null)

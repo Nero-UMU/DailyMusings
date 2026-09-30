@@ -905,8 +905,11 @@ public class PublishingTests
         var day = Day(context);
 
         var version = ReflectionVersionId.New();
-        var queued = await context.QueueNotifications.QueueDraftReadyAsync(day, version, "今天的记录", CancellationToken.None);
-        var again = await context.QueueNotifications.QueueDraftReadyAsync(day, version, "今天的记录", CancellationToken.None);
+
+        // 正文是「递上去的」，不是「被写进去的」：开关默认关闭（上下文里没打开 IncludeContent），
+        // 所以下面两处即使把正文交进队列，信里也不该出现它（附录 A.34）。
+        var queued = await context.QueueNotifications.QueueDraftReadyAsync(day, version, "今天的记录", "第一段。\n\n第二段。", CancellationToken.None);
+        var again = await context.QueueNotifications.QueueDraftReadyAsync(day, version, "今天的记录", "第一段。\n\n第二段。", CancellationToken.None);
 
         Assert.IsTrue(queued);
         Assert.IsTrue(again, "Asking again is not an error; the key is what makes it a no-op.");
@@ -930,6 +933,91 @@ public class PublishingTests
         Assert.IsFalse(message.Body.Contains("第一段", StringComparison.Ordinal));
     }
 
+    /// <summary>
+    /// 附录 A.33（2026-09-30 用户要求）：勾选了「允许自动公开发布」的目标，到点发布**当天生成的稿**——
+    /// 勾选本身就是那个授权，不再要求先有人确认。这条测试同时钉住另一半：自动发布**不会**顺手把稿件标成
+    /// 「已确认」，因为确认意味着人核验过，而且会启动录音/内容的保留计时、让这一天不再被自动重新生成。
+    /// </summary>
+    [TestMethod]
+    public async Task An_opted_in_target_publishes_the_day_that_was_only_generated()
+    {
+        await using var context = await PublishingTestContext.CreateAsync();
+        var target = await context.AddTargetAsync("hexo", automatic: true);
+
+        var day = Day(context);
+        var (reflection, _) = await context.SeedUnconfirmedDraftAsync(day);
+        AdvanceToJustAfterThePublishSlot(context, day);
+
+        var result = await context.Schedule.ExecuteAsync(CancellationToken.None);
+
+        Assert.AreEqual(1, result.Queued, "发布时刻到了，当天生成过的稿就该被排上。");
+
+        var publication = (await context.Publications.ListOutstandingAsync(50, CancellationToken.None)).Single();
+        Assert.AreEqual(PublicationVisibility.Public, publication.RequestedVisibility);
+
+        await context.QueueAndRunAsync(publication);
+
+        var stored = await context.Publications.FindByIdAsync(publication.Id, CancellationToken.None);
+        Assert.AreEqual(PublicationStatus.Published, stored!.Status);
+
+        var after = await context.Reflections.FindByIdAsync(reflection.Id, CancellationToken.None);
+        Assert.AreNotEqual(
+            ReflectionStatus.Confirmed,
+            after!.Status,
+            "自动发布不是「确认」：确认要由人来做，保留计时也不该被一个勾选启动。");
+    }
+
+    /// <summary>
+    /// 另一半：**没勾选**的目标保持 §11.1 原文——只发已确认的稿。同一天、同一时刻，只是目标没勾选，
+    /// 结果就必须是「什么都不排」。
+    /// </summary>
+    [TestMethod]
+    public async Task A_target_without_the_opt_in_still_waits_for_a_confirmed_draft()
+    {
+        await using var context = await PublishingTestContext.CreateAsync();
+        await context.AddTargetAsync("hexo");
+
+        var day = Day(context);
+        await context.SeedUnconfirmedDraftAsync(day);
+        AdvanceToJustAfterThePublishSlot(context, day);
+
+        var result = await context.Schedule.ExecuteAsync(CancellationToken.None);
+
+        Assert.AreEqual(0, result.Queued, "没勾选的目标不替用户做主：未确认的稿不会被自动发出去。");
+        Assert.AreEqual(0, (await context.Publications.ListOutstandingAsync(50, CancellationToken.None)).Count);
+    }
+
+    /// <summary>
+    /// 附录 A.34：通知管理里的「邮件里附上稿件正文」打开后，草稿就绪的信里带正文原文；
+    /// 默认关闭时同样的调用不带（下一条测试钉住默认）。
+    /// </summary>
+    [TestMethod]
+    public async Task The_content_switch_puts_the_article_text_in_the_mail()
+    {
+        await using var context = await PublishingTestContext.CreateAsync();
+        context.Notifications.Settings = new NotificationSettings("owner@example.test", null)
+        {
+            Events = new Dictionary<NotificationEvent, bool> { [NotificationEvent.DraftReady] = true },
+            IncludeContent = true,
+        };
+
+        await context.QueueNotifications
+            .QueueDraftReadyAsync(Day(context), ReflectionVersionId.New(), "今天的记录", "第一段。\n\n第二段。", CancellationToken.None);
+
+        var job = (await context.Jobs.ListRecentAsync(20, CancellationToken.None))
+            .Single(candidate => candidate.JobType == JobType.Notification);
+
+        await context.SendNotifications.ExecuteAsync(job.Payload, CancellationToken.None);
+
+        var message = context.Email.Sent.Single();
+        StringAssert.Contains(message.Body, "正文（Markdown 原文）：");
+        StringAssert.Contains(message.Body, "第一段。");
+        StringAssert.Contains(message.Body, "第二段。");
+        Assert.IsFalse(
+            message.Body.Contains("正文不在邮件里", StringComparison.Ordinal),
+            "带了正文就不该再说「正文不在邮件里」。");
+    }
+
     [TestMethod]
     public async Task A_disabled_event_queues_nothing()
     {
@@ -940,7 +1028,7 @@ public class PublishingTests
         };
 
         var queued = await context.QueueNotifications
-            .QueueDraftReadyAsync(Day(context), ReflectionVersionId.New(), "标题", CancellationToken.None);
+            .QueueDraftReadyAsync(Day(context), ReflectionVersionId.New(), "标题", content: null, CancellationToken.None);
 
         Assert.IsFalse(queued);
         Assert.AreEqual(0, await context.Database.CountAsync("processing_job"));

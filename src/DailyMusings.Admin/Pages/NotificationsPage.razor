@@ -191,7 +191,14 @@ else
                     <input type="checkbox" checked="@_notificationAutomatic" @onchange="e => _notificationAutomatic = e.Value is true" />
                     自动发布有结果时发信
                 </label>
+                <label class="checkbox">
+                    <input type="checkbox" checked="@_notificationContent" @onchange="e => _notificationContent = e.Value is true" />
+                    邮件里附上稿件正文
+                </label>
             </div>
+
+            <p class="hint">附上正文只影响「新草稿」与「发布成功」这两类信；失败与超时的信只说明原因。
+                邮件默认走明文，打开等于把稿件复制一份到邮箱里，是否打开由你决定。</p>
 
             <div class="form-grid">
                 <label>
@@ -235,6 +242,7 @@ else
 
     private string? _notificationsInstanceUrl;
     private bool _notificationDraftReady;
+    private bool _notificationContent;
     private bool _notificationJobFailed;
     private bool _notificationAutomatic;
 
@@ -279,6 +287,7 @@ else
         _notificationDraftReady = _notifications.DraftReady;
         _notificationJobFailed = _notifications.JobFailed;
         _notificationAutomatic = _notifications.AutomaticPublication;
+        _notificationContent = _notifications.IncludeContent;
     }
 
     private string PasswordSourceText() => _smtp?.PasswordSource switch
@@ -331,6 +340,7 @@ else
                 _notificationDraftReady,
                 _notificationJobFailed,
                 _notificationAutomatic,
+                _notificationContent,
                 CancellationToken.None);
 
         // Read back rather than trusting the form: what the instance stored is what the next mail will use.

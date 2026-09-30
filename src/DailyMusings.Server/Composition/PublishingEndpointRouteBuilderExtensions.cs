@@ -420,6 +420,7 @@ public static class PublishingEndpointRouteBuilderExtensions
                 request.DraftReady,
                 request.JobFailed,
                 request.AutomaticPublication,
+                request.IncludeContent,
                 cancellationToken)
             .ConfigureAwait(false);
 
@@ -432,7 +433,8 @@ public static class PublishingEndpointRouteBuilderExtensions
         InstanceUrl: settings.InstanceUrl,
         DraftReady: settings.DraftReady,
         JobFailed: settings.JobFailed,
-        AutomaticPublication: settings.AutomaticPublication);
+        AutomaticPublication: settings.AutomaticPublication,
+        IncludeContent: settings.IncludeContent);
 
     /// <summary>
     /// Looks a publication's view up after a write, so the response carries the same shape as a read would.

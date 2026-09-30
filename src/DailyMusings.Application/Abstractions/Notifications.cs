@@ -101,6 +101,16 @@ public sealed record NotificationSettings(
     public IReadOnlyDictionary<NotificationEvent, bool> Events { get; init; } =
         new Dictionary<NotificationEvent, bool>();
 
+    /// <summary>
+    /// 是否把稿件正文附进邮件（2026-09-30 定案，附录 A.34；**默认关闭**）。
+    /// <para>
+    /// 它刻意不是「事件开关」：<see cref="Events"/> 决定「发不发这封信」，它决定「要发的信里带不带正文」。
+    /// 默认关闭的理由与 §12 原来那条一致——邮件默认走明文，正文是这个产品最私密的东西；但这条不再是硬规则，
+    /// 而是一个由使用者自己打开的选择。
+    /// </para>
+    /// </summary>
+    public bool IncludeContent { get; init; }
+
     public bool IsEnabled(NotificationEvent notificationEvent) =>
         Events.TryGetValue(notificationEvent, out var enabled) && enabled;
 
@@ -128,9 +138,12 @@ public static class NotificationSettingKeys
     public const string AutomaticPublication = "notification.publication";
     public const string ToAddress = "notification.to";
     public const string InstanceUrl = "notification.instanceUrl";
+
+    /// <summary>邮件里是否附上稿件正文（附录 A.34，默认关闭）。</summary>
+    public const string IncludeContent = "notification.includeContent";
 }
 
-/// <summary>A message ready to send. Plain text: the product's mail carries facts, not the user's writing.</summary>
+/// <summary>A message ready to send. Plain text, and the body only carries the article when the operator asked for it.</summary>
 public sealed record EmailMessage(string To, string Subject, string Body);
 
 /// <summary>

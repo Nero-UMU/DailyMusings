@@ -58,14 +58,14 @@ public sealed record ContentRetentionPolicy(int Days)
 
 /// <summary>
 /// Decides which inputs a content sweep may strip (docs/开发指导.md §15.1 and the retention window added with
-/// this feature).
+/// this feature; 计时起点见附录 A.35).
 /// <para>
-/// Two conditions, both about not destroying something that is still needed. The day has to have been confirmed
-/// — until a human signs it off, nothing is disposable. And an entry whose transcription never succeeded is left
-/// alone: its audio is the only copy of the material, so deleting it would throw away something a retry still
-/// needs (the same reasoning as <see cref="AudioCleanupPolicy"/>) — and since the sweep soft-deletes the row,
-/// stripping such an entry would leave its blob unreachable rather than merely deleted. Those entries are picked
-/// up by a later sweep if the transcription eventually succeeds.
+/// Two conditions, both about not destroying something that is still needed. The day's <em>计时起点</em> has to have
+/// arrived — 起点是「首次确认」与「首次公开发布」中较早的那个，在那之前没有任何东西是可丢弃的。And an entry whose
+/// transcription never succeeded is left alone: its audio is the only copy of the material, so deleting it would
+/// throw away something a retry still needs (the same reasoning as <see cref="AudioCleanupPolicy"/>) — and since the
+/// sweep soft-deletes the row, stripping such an entry would leave its blob unreachable rather than merely deleted.
+/// Those entries are picked up by a later sweep if the transcription eventually succeeds.
 /// </para>
 /// </summary>
 public static class ContentCleanupPolicy
@@ -80,7 +80,7 @@ public static class ContentCleanupPolicy
 
     public static bool IsCleanable(
         InputEntry entry,
-        DateTimeOffset? confirmedAtUtc,
+        DateTimeOffset? countdownFromUtc,
         ContentRetentionPolicy policy,
         DateTimeOffset nowUtc)
     {
@@ -98,6 +98,6 @@ public static class ContentCleanupPolicy
             return false;
         }
 
-        return confirmedAtUtc is { } confirmed && policy.IsDue(confirmed, nowUtc);
+        return countdownFromUtc is { } from && policy.IsDue(from, nowUtc);
     }
 }

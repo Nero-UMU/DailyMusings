@@ -37,7 +37,7 @@ public class SettingsPrecedenceApiTests
 
         using var saved = await instance.Client.PatchAsJsonAsync(
             "/api/notification-settings",
-            new UpdateNotificationSettingsRequest("from-admin-page@example.test", null, true, null, null));
+            new UpdateNotificationSettingsRequest("from-admin-page@example.test", null, true, null, null, null));
 
         saved.EnsureSuccessStatusCode();
 

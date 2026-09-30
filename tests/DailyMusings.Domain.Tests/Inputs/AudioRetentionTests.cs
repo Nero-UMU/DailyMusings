@@ -55,7 +55,7 @@ public class AudioRetentionTests
         var now = TestFactory.Noon.AddDays(60);
 
         Assert.IsFalse(
-            AudioCleanupPolicy.IsCleanable(entry, confirmedAtUtc: null, policy, now),
+            AudioCleanupPolicy.IsCleanable(entry, countdownFromUtc: null, policy, now),
             "Until somebody signs the day off, the recordings are still the only account of what was said.");
 
         Assert.IsTrue(AudioCleanupPolicy.IsCleanable(entry, TestFactory.Noon, policy, now));

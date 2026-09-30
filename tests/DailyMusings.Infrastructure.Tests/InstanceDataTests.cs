@@ -5,6 +5,7 @@ using DailyMusings.Application.Operations;
 using DailyMusings.Domain.Common;
 using DailyMusings.Domain.Inputs;
 using DailyMusings.Domain.Jobs;
+using DailyMusings.Domain.Publishing;
 using DailyMusings.Domain.Reflections;
 using DailyMusings.Domain.Time;
 using DailyMusings.Infrastructure.Operations;
@@ -657,6 +658,58 @@ public class InstanceDataTests
         Assert.AreEqual(0, result.DeletedBlobs);
         Assert.AreEqual(0, result.CandidateDays);
         Assert.IsTrue((await inputs.ListAllAsync(10, CancellationToken.None)).Single().HasAudio);
+    }
+
+    /// <summary>
+    /// 附录 A.35（2026-09-30）：保留计时起点 = 首次确认与**首次公开发布**中较早的那个。这条测试钉住
+    /// 「只靠自动发布、从不确认」那条路径：没有确认，但公开发布过，起点就是发布时刻。
+    /// <para>
+    /// 改动之前保留策略只认确认，于是这种实例永远不会清理——用户配了 30 天录音保留却什么都删不掉，
+    /// 页面上也没有任何迹象说明原因。另一半（还没到窗口就不是候选）在这里一起断言。
+    /// </para>
+    /// </summary>
+    [TestMethod]
+    public async Task A_publication_starts_the_retention_countdown_without_a_confirmation()
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        var (paths, inputs, reflections, _, publications, targets, _, unitOfWork, clock, _) = await BuildAsync(database);
+        var audio = new FileAudioStore(paths);
+
+        await SeedAsync(inputs, reflections, unitOfWork, clock, audio, confirmed: false);
+
+        var reflection = (await reflections.ListAllAsync(10, CancellationToken.None)).Single();
+        Assert.IsNull(reflection.ConfirmedAtUtc, "前提：这一天从未被确认。");
+
+        var target = PublishTarget.Create(PublishTargetId.New(), "hexo", PublishTargetType.Markdown, "posts");
+        await targets.AddAsync(target, CancellationToken.None);
+
+        var publishedAt = clock.UtcNow.AddDays(-40);
+        var publication = Publication.Create(
+            PublicationId.New(),
+            reflection.Id,
+            reflection.WorkingVersionId!.Value,
+            target.Id,
+            PublicationTrigger.Automatic,
+            publishedAt,
+            PublicationVisibility.Public);
+
+        await publications.AddAsync(publication, CancellationToken.None);
+
+        publication.Begin("system:scheduler", publishedAt);
+        publication.CompleteAsPublished("2026-03-11-今天的记录.md", "hash", publishedAt);
+        await publications.UpdateAsync(publication, CancellationToken.None);
+
+        var candidates = await reflections
+            .ListRetentionCandidatesAsync(publishedAt.AddMinutes(1), 50, CancellationToken.None);
+
+        var candidate = candidates.Single();
+        Assert.AreEqual(reflection.Id, candidate.Reflection.Id);
+        Assert.AreEqual(publishedAt, candidate.CountdownFromUtc, "没有确认时，起点就是首次公开发布的时刻。");
+
+        var tooEarly = await reflections
+            .ListRetentionCandidatesAsync(publishedAt.AddMinutes(-1), 50, CancellationToken.None);
+
+        Assert.AreEqual(0, tooEarly.Count, "窗口没到就不是候选。");
     }
 
     private static async Task SeedAsync(
