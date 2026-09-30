@@ -49,7 +49,7 @@
                         x:Name="CircleLabel"
                         Text="记录随想"
                         FontSize="19"
-                        FontFamily="OpenSansSemibold"
+                        FontAttributes="Bold"
                         HorizontalOptions="Center"
                         VerticalOptions="Center"
                         HorizontalTextAlignment="Center" />
@@ -82,7 +82,7 @@
                     <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
                         <Label
                             x:Name="CurrentHeadline"
-                            FontFamily="OpenSansSemibold"
+                            FontAttributes="Bold"
                             FontSize="15"
                             VerticalOptions="Center" />
                         <Label

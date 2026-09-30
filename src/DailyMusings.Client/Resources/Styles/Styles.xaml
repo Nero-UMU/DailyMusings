@@ -7,6 +7,14 @@
         The phone's design system. Every control that the pages use has an implicit style here, because a dark app
         that leaves one control on its platform default gets a white box in the middle of the screen — which is
         exactly what an Editor or an ActivityIndicator does when it is not styled.
+
+        苹果风格见 docs/开发指导.md §22 与附录 A.38：底色分三档、控件取 iOS 的语义色与圆角、按下变暗而不是
+        缩放、页面标题按 Large Title 放大。
+
+        字体这里刻意**不指定 FontFamily**。SF Pro 在 Android 上不存在，也不该嵌入（授权与体积）；而这款
+        App 的正文是中文，之前那两个 OpenSans 字体本来就不含汉字，中文一直是由系统字体渲染的 —— 也就是说
+        FontFamily 只影响过拉丁字母与数字。留空即落到 Android 的系统字体，这才是这台设备上「系统字体」的
+        真身。（改字号而不是换字体，才是苹果观感在这里真正的来源。）
     -->
 
     <Style TargetType="ContentPage" ApplyToDerivedTypes="True">
@@ -20,26 +28,27 @@
     <Style TargetType="Label">
         <Setter Property="TextColor" Value="{StaticResource TextPrimary}" />
         <Setter Property="FontSize" Value="15" />
-        <Setter Property="FontFamily" Value="OpenSansRegular" />
         <Setter Property="LineBreakMode" Value="WordWrap" />
     </Style>
 
+    <!-- Large Title。三个页面都关掉了 Shell 的导航栏（NavBarIsVisible=False），页面标题就是这个
+         Label，所以放大它就能拿到 iOS 大标题的观感，不必改任何页面标记。 -->
     <Style x:Key="TitleLabel" TargetType="Label">
-        <Setter Property="FontSize" Value="22" />
-        <Setter Property="FontFamily" Value="OpenSansSemibold" />
+        <Setter Property="FontSize" Value="28" />
+        <Setter Property="FontAttributes" Value="Bold" />
         <Setter Property="TextColor" Value="{StaticResource TextPrimary}" />
     </Style>
 
     <Style x:Key="SectionLabel" TargetType="Label">
         <Setter Property="FontSize" Value="13" />
-        <Setter Property="FontFamily" Value="OpenSansSemibold" />
+        <Setter Property="FontAttributes" Value="Bold" />
         <Setter Property="TextColor" Value="{StaticResource TextSecondary}" />
         <Setter Property="TextTransform" Value="Uppercase" />
-        <Setter Property="CharacterSpacing" Value="1" />
+        <Setter Property="CharacterSpacing" Value="0.6" />
     </Style>
 
     <Style x:Key="CaptionLabel" TargetType="Label">
-        <Setter Property="FontSize" Value="12" />
+        <Setter Property="FontSize" Value="13" />
         <Setter Property="TextColor" Value="{StaticResource TextSecondary}" />
     </Style>
 
@@ -49,7 +58,7 @@
     </Style>
 
     <Style x:Key="TranscriptLabel" TargetType="Label">
-        <Setter Property="FontSize" Value="16" />
+        <Setter Property="FontSize" Value="17" />
         <Setter Property="LineHeight" Value="1.45" />
         <Setter Property="TextColor" Value="{StaticResource TextPrimary}" />
     </Style>
@@ -75,7 +84,7 @@
     <Style TargetType="Button">
         <Setter Property="BackgroundColor" Value="{StaticResource Accent}" />
         <Setter Property="TextColor" Value="{StaticResource TextOnAccent}" />
-        <Setter Property="FontFamily" Value="OpenSansSemibold" />
+        <Setter Property="FontAttributes" Value="Bold" />
         <Setter Property="FontSize" Value="15" />
         <Setter Property="CornerRadius" Value="12" />
         <Setter Property="Padding" Value="16,12" />
@@ -85,10 +94,10 @@
             <VisualStateGroupList>
                 <VisualStateGroup x:Name="CommonStates">
                     <VisualState x:Name="Normal" />
+                    <!-- 按下是「变暗」，不是缩小：缩放会让整行在手指下抖动。 -->
                     <VisualState x:Name="Pressed">
                         <VisualState.Setters>
                             <Setter Property="BackgroundColor" Value="{StaticResource AccentPressed}" />
-                            <Setter Property="Scale" Value="0.985" />
                         </VisualState.Setters>
                     </VisualState>
                     <VisualState x:Name="Disabled">
@@ -108,7 +117,6 @@
         <Setter Property="TextColor" Value="{StaticResource TextPrimary}" />
         <Setter Property="BorderColor" Value="{StaticResource Divider}" />
         <Setter Property="BorderWidth" Value="1" />
-        <Setter Property="FontFamily" Value="OpenSansRegular" />
         <Setter Property="FontSize" Value="14" />
         <Setter Property="CornerRadius" Value="12" />
         <Setter Property="Padding" Value="12,8" />
@@ -137,7 +145,6 @@
         <Setter Property="TextColor" Value="{StaticResource Danger}" />
         <Setter Property="BorderColor" Value="{StaticResource Danger}" />
         <Setter Property="BorderWidth" Value="1" />
-        <Setter Property="FontFamily" Value="OpenSansRegular" />
         <Setter Property="FontSize" Value="14" />
         <Setter Property="CornerRadius" Value="12" />
         <Setter Property="Padding" Value="12,8" />
@@ -165,7 +172,7 @@
     <Style x:Key="SuccessButton" TargetType="Button">
         <Setter Property="BackgroundColor" Value="{StaticResource AccentGreen}" />
         <Setter Property="TextColor" Value="{StaticResource TextOnAccent}" />
-        <Setter Property="FontFamily" Value="OpenSansSemibold" />
+        <Setter Property="FontAttributes" Value="Bold" />
         <Setter Property="FontSize" Value="17" />
         <Setter Property="CornerRadius" Value="14" />
         <Setter Property="Padding" Value="16,14" />
@@ -174,9 +181,10 @@
             <VisualStateGroupList>
                 <VisualStateGroup x:Name="CommonStates">
                     <VisualState x:Name="Normal" />
+                    <!-- 这里是整个页面唯一的主动作（上传/发送）。按下只压暗，不缩放。 -->
                     <VisualState x:Name="Pressed">
                         <VisualState.Setters>
-                            <Setter Property="Scale" Value="0.985" />
+                            <Setter Property="Opacity" Value="0.85" />
                         </VisualState.Setters>
                     </VisualState>
                     <VisualState x:Name="Disabled">
@@ -190,10 +198,12 @@
         </Setter>
     </Style>
 
+    <!-- 输入框用 SurfacePressed：在这套三档底色里它就是 iOS 的 tertiarySystemFill，
+         即「比卡片再抬一层」的填充。输入框与它所在的卡片同色时只剩一圈描边，看不出是可填的。 -->
     <Style TargetType="Entry">
         <Setter Property="TextColor" Value="{StaticResource TextPrimary}" />
         <Setter Property="PlaceholderColor" Value="{StaticResource TextMuted}" />
-        <Setter Property="BackgroundColor" Value="{StaticResource Surface}" />
+        <Setter Property="BackgroundColor" Value="{StaticResource SurfacePressed}" />
         <Setter Property="FontSize" Value="15" />
         <Setter Property="MinimumHeightRequest" Value="46" />
     </Style>
@@ -201,24 +211,26 @@
     <Style TargetType="Editor">
         <Setter Property="TextColor" Value="{StaticResource TextPrimary}" />
         <Setter Property="PlaceholderColor" Value="{StaticResource TextMuted}" />
-        <Setter Property="BackgroundColor" Value="{StaticResource Surface}" />
+        <Setter Property="BackgroundColor" Value="{StaticResource SurfacePressed}" />
         <Setter Property="FontSize" Value="16" />
         <Setter Property="AutoSize" Value="TextChanges" />
         <Setter Property="MinimumHeightRequest" Value="120" />
     </Style>
 
+    <!-- iOS 的滑块拇指是白的，不是主色；蓝色只留给轨道。 -->
     <Style TargetType="Slider">
         <Setter Property="MinimumTrackColor" Value="{StaticResource Accent}" />
         <Setter Property="MaximumTrackColor" Value="{StaticResource Divider}" />
-        <Setter Property="ThumbColor" Value="{StaticResource Accent}" />
+        <Setter Property="ThumbColor" Value="{StaticResource TextPrimary}" />
     </Style>
 
     <Style TargetType="ActivityIndicator">
         <Setter Property="Color" Value="{StaticResource Accent}" />
     </Style>
 
+    <!-- iOS 的开关打开时是绿的（systemGreen），不是主色 —— 它是「开/关」的语义色。 -->
     <Style TargetType="Switch">
-        <Setter Property="OnColor" Value="{StaticResource Accent}" />
+        <Setter Property="OnColor" Value="{StaticResource AccentGreen}" />
         <Setter Property="ThumbColor" Value="{StaticResource TextPrimary}" />
     </Style>
 

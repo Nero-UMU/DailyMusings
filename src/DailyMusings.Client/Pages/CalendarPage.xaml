@@ -51,7 +51,7 @@
                                     <VerticalStackLayout Grid.Column="1" Spacing="3">
                                         <Label
                                             Text="{Binding Time}"
-                                            FontFamily="OpenSansSemibold"
+                                            FontAttributes="Bold"
                                             FontSize="15" />
                                         <Label
                                             Text="{Binding Summary}"
@@ -87,7 +87,7 @@
                     <Grid ColumnDefinitions="*,Auto" ColumnSpacing="10">
                         <Label
                             x:Name="DetailTitle"
-                            FontFamily="OpenSansSemibold"
+                            FontAttributes="Bold"
                             FontSize="16"
                             VerticalOptions="Center" />
                         <Button

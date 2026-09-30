@@ -4,29 +4,37 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml">
 
     <!--
-        The phone's palette: a near-black background with lifted cards, one cyan-blue accent and one green accent,
-        and a red reserved for destructive actions. The app is used in the dark, one-handed, for a few seconds at a
-        time, so the contrast that matters is 「文字比背景亮多少」 rather than decorative colour.
+        The phone's palette: iOS 深色的三档底色，一个 systemBlue 主色，加绿/红/橙三个语义色。
+
+        键名一个都没改 —— 它们被 Styles.xaml 与三个页面引用，改名就等于把换肤变成结构改动。
+        这里只换取值（docs/开发指导.md §22 与附录 A.38）。
+
+        底色分三档而不是靠投影：Bg 是窗口底 (#000000)，Surface 是卡片 (#1C1C1E)，SurfacePressed 再抬
+        一层 (#2C2C2E)。这样在纯黑上也看得出层次，而且不会像投影那样在深色下发脏。字色同样是三档，
+        三档都保证 ≥ 4.5:1 —— 「在暗处单手看几秒钟」这件事靠的是文字比背景亮多少，不是装饰色。
     -->
 
-    <Color x:Key="Bg">#101418</Color>
-    <Color x:Key="BgElevated">#161B20</Color>
-    <Color x:Key="Surface">#1B2025</Color>
-    <Color x:Key="SurfacePressed">#242B32</Color>
-    <Color x:Key="Divider">#2A3138</Color>
+    <!-- 三档底色 -->
+    <Color x:Key="Bg">#000000</Color>
+    <Color x:Key="BgElevated">#1C1C1E</Color>
+    <Color x:Key="Surface">#1C1C1E</Color>
+    <Color x:Key="SurfacePressed">#2C2C2E</Color>
+    <Color x:Key="Divider">#38383A</Color>
 
-    <Color x:Key="Accent">#4C9AFF</Color>
-    <Color x:Key="AccentPressed">#3B82D6</Color>
-    <Color x:Key="AccentSoft">#1D3350</Color>
-    <Color x:Key="AccentGreen">#3DDC97</Color>
-    <Color x:Key="Danger">#FF6B6B</Color>
-    <Color x:Key="DangerSoft">#3A1F22</Color>
-    <Color x:Key="Warn">#F0B429</Color>
+    <!-- 主色与语义色（iOS 深色） -->
+    <Color x:Key="Accent">#0A84FF</Color>
+    <Color x:Key="AccentPressed">#0A6FD8</Color>
+    <Color x:Key="AccentSoft">#193047</Color>
+    <Color x:Key="AccentGreen">#30D158</Color>
+    <Color x:Key="Danger">#FF453A</Color>
+    <Color x:Key="DangerSoft">#402322</Color>
+    <Color x:Key="Warn">#FF9F0A</Color>
 
-    <Color x:Key="TextPrimary">#E6EDF3</Color>
-    <Color x:Key="TextSecondary">#9AA5B1</Color>
-    <Color x:Key="TextMuted">#6E7A87</Color>
-    <Color x:Key="TextOnAccent">#07121F</Color>
+    <!-- 文字三档：正文 / 次要 / 最暗（对比度 17.0 / 7.7 / 5.2，压在卡片底色上） -->
+    <Color x:Key="TextPrimary">#FFFFFF</Color>
+    <Color x:Key="TextSecondary">#AEAEB2</Color>
+    <Color x:Key="TextMuted">#8E8E93</Color>
+    <Color x:Key="TextOnAccent">#FFFFFF</Color>
     <Color x:Key="Transparent">Transparent</Color>
 
     <SolidColorBrush x:Key="BgBrush" Color="{StaticResource Bg}" />
