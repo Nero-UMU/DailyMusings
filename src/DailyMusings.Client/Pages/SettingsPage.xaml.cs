@@ -139,7 +139,7 @@ public partial class SettingsPage : ContentPage
         var reachable = await _pairing.TestConnectionAsync(CancellationToken.None);
 
         ServerStatus.Text = reachable
-            ? "服务器有响应。接下来用管理页签发的配对码完成配对。"
+            ? "连接成功。请用管理页生成的配对码完成配对。"
             : "连接失败，请检查地址、网络，以及服务端是否在运行。";
     });
 
@@ -160,7 +160,7 @@ public partial class SettingsPage : ContentPage
         if (result.Succeeded)
         {
             PairingCodeEntry.Text = string.Empty;
-            PairingStatus.Text = $"配对成功：{result.DeviceName}。现在可以把本机的随想上传到服务器。";
+            PairingStatus.Text = $"已配对：{result.DeviceName}。";
 
             // The model section only becomes readable once the device has a token, so pairing is exactly when it has
             // to be read. Without this the page kept telling a freshly paired device to go and pair.
@@ -239,7 +239,7 @@ public partial class SettingsPage : ContentPage
 
         PairingState.Text = paired
             ? "此设备已配对，可以上传。"
-            : "此设备尚未配对。到管理页生成配对码后填到下面。";
+            : "尚未配对。请在管理页生成配对码。";
 
         await RefreshLocalUsageAsync();
     }

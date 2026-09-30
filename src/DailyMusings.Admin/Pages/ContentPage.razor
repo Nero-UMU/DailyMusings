@@ -4,7 +4,7 @@
 @inject IServiceScopeFactory ScopeFactory
 @inject ILoggerFactory LoggerFactory
 
-<PageHeader Title="内容管理" Hint="查看、归类和删除稿件；跨日后仍未发布的新稿也可以从这里继续发布。">
+<PageHeader Title="内容管理" Hint="查看稿件、主题和发布状态。">
     <Actions><button class="btn" @onclick="ReloadAsync" disabled="@_busy">刷新</button></Actions>
 </PageHeader>
 
@@ -82,7 +82,7 @@
                 <div class="continuation-zone">
                     <div>
                         <strong>继续发布这一天的新稿</strong>
-                        <p class="hint">这一天已有旧稿公开，但当前稿件尚未发布。发布后会用当前稿件替换旧稿；只有旧文件未被外部修改时才会删除。</p>
+                        <p class="hint">发布后将用当前稿件替换旧稿。若旧文件已在外部修改，将保留旧文件。</p>
                     </div>
                     @if (_confirmContinuePublication == selected.Id)
                     {
@@ -122,7 +122,7 @@
             </div>
 
             <div class="danger-zone">
-                <div><strong>删除这篇稿件</strong><p class="hint">删除正文、历史版本和发布记录，并阻止定时任务再次生成这一天。为避免误删外部修改，已输出的 Markdown 文件会保留。</p></div>
+                <div><strong>删除这篇稿件</strong><p class="hint">正文、历史版本和发布记录将永久删除，这一天也不会自动重新生成。已输出的文件会保留。</p></div>
                 @if (_confirmDeleteArticle == selected.Id)
                 {
                     <div class="actions"><button class="btn-danger" @onclick="DeleteArticleAsync" disabled="@_busy">确认永久删除</button>
@@ -135,7 +135,7 @@
 }
 
 <section class="card topics-card">
-    <div class="card-head"><div><span class="eyebrow">主题库</span><h2>主题管理</h2></div><span class="hint">大模型只能添加主题，删除只能由你操作。</span></div>
+    <div class="card-head"><div><span class="eyebrow">主题库</span><h2>主题管理</h2></div></div>
     <div class="topic-create">
         <input placeholder="输入新主题名称" value="@_newTopicName" @oninput="e => _newTopicName = (string?)e.Value ?? string.Empty" />
         <button class="btn-primary" @onclick="CreateTopicAsync" disabled="@(_busy || string.IsNullOrWhiteSpace(_newTopicName))">添加主题</button>
@@ -163,7 +163,7 @@
         }
         @if (_topics.Count == 0) { <p class="empty-state">主题库还是空的。</p> }
     </div>
-    <p class="hint">主题只有在没有任何稿件使用时才能删除；删除主题不会删除原始素材。</p>
+    <p class="hint">正在被稿件使用的主题不能删除。删除主题不会删除随想。</p>
 </section>
 
 @code {

@@ -17,7 +17,7 @@
     <div>
         <h1 class="page-title">采集</h1>
         <p class="page-hint">
-            按日期核对当天收到的随想和生成的稿件。修订素材请前往「数据管理」，管理稿件请前往「内容管理」。
+            查看指定日期的随想和稿件。
         </p>
     </div>
     <div class="page-actions">
@@ -134,8 +134,7 @@ else
     </div>
 
     <p class="hint">
-        共 @_inputs.Count 条。删除某一条、重试转写这些操作在<a href="/data">数据管理</a>页；
-        音频的保留天数在<a href="/system">系统设置</a>的「保留策略」里配置。
+        共 @_inputs.Count 条。要修订或删除随想，请到<a href="/data">数据管理</a>。
     </p>
 }
 
@@ -144,8 +143,7 @@ else
 @if (_reflection is null)
 {
     <p class="notice info">
-        这一天还没有稿件。请先确保当天至少有一条可用素材，再到<a href="/publishing">发布设置</a>立即生成，
-        或等待设定的自动生成时间。
+        这一天还没有稿件。可到<a href="/publishing">发布设置</a>生成，或等待自动生成。
     </p>
 }
 else
@@ -174,12 +172,12 @@ else
 
         @if (_reflection.Status == ReflectionStatus.StaleByLateInput)
         {
-            <p class="notice warn">这一天在成稿之后又有新的随想，稿件可能已经过时；请到内容管理重新生成。</p>
+            <p class="notice warn">成稿后又新增了随想。请到内容管理重新生成稿件。</p>
         }
 
         @if (_reflection.ConfirmedVersionIsNotWorking)
         {
-            <p class="hint">已确认的版本与当前工作版本不是同一个 —— 工作版本改过但还没重新确认。</p>
+            <p class="hint">当前稿件修改后尚未重新确认。</p>
         }
 
         @if (_reflection.WorkingVersion?.Body is { Length: > 0 } body)

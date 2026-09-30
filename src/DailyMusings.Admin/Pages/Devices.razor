@@ -8,7 +8,7 @@
 @* 设备分区：配对码、已连接设备、已撤销设备。配对码从状态页搬到了这里 —— 它属于「设备」这件事。 *@
 
 <PageHeader Title="设备"
-            Hint="生成配对码以连接手机，并在这里查看、重新授权或移除不再使用的设备。">
+            Hint="连接手机，管理已配对的设备。">
     <Actions>
         <button class="btn btn-primary" @onclick="IssueCodeAsync" disabled="@(_busy || _issuingCode)">
             @(_issuingCode ? "正在签发…" : "生成配对码")
@@ -37,9 +37,7 @@
         <p class="code code-lg">@(code.Code)</p>
 
         <p class="hint">
-            有效期至 @AdminFormat.Utc(code.ExpiresAtUtc)（本地时间 @AdminFormat.When(code.ExpiresAtUtc)）。
-            在客户端里输入它即可完成配对；<strong>此码只显示这一次</strong>，关掉页面就再也看不到，
-            需要时重新签发一个即可（旧码会在到期或使用后失效）。
+            在手机设置页输入配对码。有效期至 @AdminFormat.When(code.ExpiresAtUtc)；关闭此页后无法再次查看。
         </p>
 
         <div class="actions">
@@ -55,8 +53,7 @@
         <strong>新令牌已经签发，旧令牌立即失效。</strong>
         <p class="code code-md">@rotated.Token</p>
         <p>
-            这是<strong>唯一一次</strong>能看到明文令牌的机会，请立刻填进客户端的设置页。
-            离开或刷新页面后就无法再次查看，只能再轮换一次。
+            请立即保存新令牌；离开页面后无法再次查看。
         </p>
         <div class="actions">
             <button class="btn" @onclick="() => CopyAsync(rotated.Token)">复制令牌</button>
@@ -72,7 +69,7 @@
 else if (_devices.Count == 0)
 {
     <div class="card">
-        <p>还没有任何设备。点右上角「生成配对码」，然后在客户端里输入它。</p>
+        <p>还没有设备。生成配对码后，在手机设置页输入。</p>
     </div>
 }
 else
@@ -128,8 +125,7 @@ else
                                             @if (_confirmDelete)
                                             {
                                                 <span class="hint">
-                                                    这会<strong>真正删除</strong>这台设备的记录：令牌哈希不再留在库里。
-                                                    它对已经失效的设备才可用，删除后不可恢复（想再用就重新配对）。
+                                                    删除这台设备的记录后无法恢复。再次使用需重新配对。
                                                 </span>
                                                 <div class="actions">
                                                     <button class="btn-danger btn-sm"
@@ -143,8 +139,7 @@ else
                                             else
                                             {
                                                 <span class="hint">
-                                                    撤回后这台设备立刻失效，客户端会报「令牌无效」，需要重新配对才能继续采集。
-                                                    其他设备不受影响。
+                                                    撤回后，这台设备需要重新配对才能上传。其他设备不受影响。
                                                 </span>
                                                 <div class="actions">
                                                     <button class="btn-danger btn-sm"

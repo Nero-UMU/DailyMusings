@@ -663,10 +663,10 @@ public class AdminSurfaceTests
 
         page.EnsureSuccessStatusCode();
 
-        var specAt = html.IndexOf("博客生成规范", StringComparison.Ordinal);
+        var specAt = html.IndexOf("写作规范</h2>", StringComparison.Ordinal);
         var templateAt = html.IndexOf("Front matter 模板", StringComparison.Ordinal);
 
-        Assert.IsTrue(specAt >= 0, $"发布设置页没有渲染博客生成规范卡片：\n{html}");
+        Assert.IsTrue(specAt >= 0, $"发布设置页没有渲染写作规范卡片：\n{html}");
         Assert.IsTrue(templateAt > specAt, "写作规范卡必须在 Front matter 模板上方。");
         StringAssert.Contains(html, "最少字数");
         StringAssert.Contains(html, "最多字数");

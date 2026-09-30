@@ -163,9 +163,9 @@ public partial class CalendarPage : ContentPage
 
         StatusLabel.Text = _rows.Count == 0
             ? _all.Count == 0
-                ? "本机还没有任何随想。到「今日随想」录一段或写一句。"
+                ? "本机还没有随想。"
                 : $"「{_filter}」没有记录。"
-            : $"共 {_rows.Count} 条（本机共 {_all.Count} 条）。点一条看完整内容和录音。";
+            : $"共 {_rows.Count} 条（本机共 {_all.Count} 条）。";
     }
 
     private bool Matches(PendingCapture capture)
@@ -287,7 +287,7 @@ public partial class CalendarPage : ContentPage
 
         DetailText.Text = string.IsNullOrWhiteSpace(capture.DisplayText)
             ? capture.IsVoice
-                ? "这段录音还没有识别文字。上传后服务端会做识别，识别完成前文字会一直是空的。"
+                ? "暂无识别文字。上传后可在此查看结果。"
                 : "（空）"
             : capture.DisplayText!;
 

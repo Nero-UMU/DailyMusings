@@ -182,7 +182,7 @@ public class PhaseOneFlowTests
 
         Assert.AreEqual(HttpStatusCode.OK, response.StatusCode, $"GET /login failed:\n{html}");
         StringAssert.Contains(html, "action=\"/api/admin/sign-in\"", "The sign-in form must be rendered.");
-        StringAssert.Contains(html, "把一天的碎片", "新的登录页应当显示产品说明，而不是只有一张裸表单。");
+        StringAssert.Contains(html, "管理随想与稿件", "登录页应显示用途说明。");
         StringAssert.Contains(html, "当前是 HTTP 连接", "HTTP 风险只需要在登录前集中提示一次。");
     }
 

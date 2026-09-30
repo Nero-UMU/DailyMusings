@@ -8,10 +8,10 @@
    统计读数是最容易顺手把私人内容泄漏出去的地方（InstanceStatistics 的类型本身就不允许带这些字段）。 *@
 
 <PageHeader Title="状态"
-            Hint="查看今日素材、稿件、设备、后台任务和存储状态。模型与邮件是否可用，请到对应设置页测试。">
+            Hint="今天的记录和实例状态。">
     <Actions>
         <button class="btn" @onclick="RefreshAsync" disabled="@_busy">刷新</button>
-        <a class="btn btn-primary" href="/data">去看数据管理</a>
+        <a class="btn btn-primary" href="/data">查看随想</a>
     </Actions>
 </PageHeader>
 
@@ -49,12 +49,12 @@ else
         <div class="stat">
             <span class="label">已公开导出</span>
             <span class="value">@_statistics.PublishedCount</span>
-            <span class="sub">写出 draft: false 的 Markdown 文件</span>
+            <span class="sub">已写入发布目录</span>
         </div>
         <div class="stat">
             <span class="label">草稿 / 待发布</span>
             <span class="value">@_statistics.DraftReflectionCount / @_statistics.PendingPublicationCount</span>
-            <span class="sub">草稿 = 还没确认的稿件条数</span>
+            <span class="sub">未确认 / 等待发布</span>
         </div>
         <div class="stat">
             <span class="label">累计随想</span>
@@ -69,7 +69,7 @@ else
         <div class="stat">
             <span class="label">主题数</span>
             <span class="value">@_statistics.TopicCount</span>
-            <span class="sub">主题管理在<a href="/content">内容管理</a>页下方</span>
+            <span class="sub"><a href="/content">管理主题</a></span>
         </div>
         <div class="stat">
             <span class="label">设备</span>
@@ -102,12 +102,8 @@ else
     <div class="card-grid">
         <div class="card">
             <div class="card-head">
-                <h2>能力状态</h2>
+                <h2>服务状态</h2>
             </div>
-
-            <p class="hint">
-                这里显示当前可以使用的自动化能力；某项未启用时，可点击说明中的设置页完成配置。
-            </p>
 
             <div class="stack">
                 <div>
@@ -117,11 +113,11 @@ else
                     <span class="hint">
                         @if (_statistics.GenerationEnabled)
                         {
-                            <text>生成时刻到了会往队列里放任务。</text>
+                            <text>按生成计划运行。</text>
                         }
                         else
                         {
-                            <text>未启用时调度器不会生成任何稿件；在<a href="/models">模型管理</a>页配置并启用。</text>
+                            <text>到<a href="/models">模型管理</a>启用。</text>
                         }
                     </span>
                 </div>
@@ -133,11 +129,11 @@ else
                     <span class="hint">
                         @if (_statistics.SmtpConfigured)
                         {
-                            <text>还需要在<a href="/notifications">通知管理</a>页填收件地址并打开至少一个事件开关才会发信。</text>
+                            <text>到<a href="/notifications">通知管理</a>设置收件地址和提醒事件。</text>
                         }
                         else
                         {
-                            <text>未启用时不会发出任何邮件；在<a href="/notifications">通知管理</a>页配置。</text>
+                            <text>到<a href="/notifications">通知管理</a>配置。</text>
                         }
                     </span>
                 </div>
@@ -149,13 +145,12 @@ else
                     <span class="hint">
                         @if (_statistics.SemanticSearchAvailable)
                         {
-                            <text>Embedding 索引与当前配置指纹一致。</text>
+                            <text>历史内容可按语义查找。</text>
                         }
                         else
                         {
                             <text>
-                                语义检索重建中（或未配置 Embedding）：历史检索降级为主题标签与全文匹配，
-                                重建入口在<a href="/system">系统设置</a>页的「语义索引」。
+                                暂时按主题和文字查找历史内容。到<a href="/system">系统设置</a>查看语义索引。
                             </text>
                         }
                     </span>
@@ -166,7 +161,7 @@ else
         <div class="card">
             <div class="card-head">
                 <h2>内容与时间</h2>
-                <a class="btn btn-sm" href="/publishing">去发布设置</a>
+                <a class="btn btn-sm" href="/publishing">发布设置</a>
             </div>
 
             @if (_content is null)
@@ -209,10 +204,6 @@ else
             </span>
         }
     </div>
-
-    <p class="hint">
-        用于确认数据库、录音存储和后台任务是否正常。模型与邮件服务请分别到设置页测试。
-    </p>
 
     @if (_health is null)
     {

@@ -9,7 +9,7 @@
    多出来的那半个格子正好放下内容下方的一行播放条（原生 <audio>：播放/暂停、进度、时长都有了）。 *@
 
 <PageHeader Title="数据管理"
-            Hint="浏览服务器收到的全部随想。可以筛选录音或手写内容、播放录音、修订文字并处理失败项。">
+            Hint="查看和修订已上传的随想。">
     <Actions>
         <button class="btn" @onclick="ReloadAsync" disabled="@_busy">刷新</button>
     </Actions>
@@ -51,8 +51,7 @@
 </div>
 
 <p class="hint">
-    筛选只作用在<strong>本页</strong>已取回的内容上：筛完可能少于 @PageSize 条，翻页会重新取。
-    手写随想没有转写状态，选「转写成功 / 转写中 / 转写失败」时它们不会出现；只看手写请把类型选成「手写」。
+    筛选只作用于当前页。手写随想没有转写状态；只看手写内容，请在「类型」中选择「手写」。
 </p>
 
 @if (_page is null)

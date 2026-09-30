@@ -10,7 +10,7 @@
    每一项都写明「保存后什么时候生效」——端口要重建容器、备份恢复要重启、其余立即生效。 *@
 
 <PageHeader Title="系统设置"
-            Hint="管理服务端口、备份恢复、数据保留、语义索引、诊断日志和管理员账号。需要重启的项目会单独说明。">
+            Hint="备份、保留策略和实例设置。">
     <Actions>
         <button class="btn" @onclick="ReloadAsync" disabled="@_busy">刷新</button>
     </Actions>
@@ -37,8 +37,7 @@
 @if (Overrides.IsListeningPortLocked)
 {
     <p class="hint">
-        这个实例的监听端口由<strong>部署配置</strong>决定：容器的端口映射在启动时就固定了，所以后台不再提供修改。
-        要换端口，改部署文件里的端口映射，再重建容器。
+        端口由部署配置决定。请在部署文件中修改并重建容器。
     </p>
 
     <div class="summary">
@@ -53,15 +52,14 @@
     </div>
 
     <div class="risk">
-        <strong>改端口的唯一一处在部署文件里。</strong>
+        <strong>在部署文件中修改端口。</strong>
         <p>
             改 <code>compose.yaml</code> 里的端口映射（<code>DM_PORT</code>，例如
             <code class="code">DM_PORT=8080</code>），然后重建容器：
         </p>
         <p><code class="code">docker compose up -d</code></p>
         <p>
-            容器内部始终监听 <code>@_effectivePort</code>，所以只需要改宿主机这一侧。
-            <code>@Overrides.ConfigPath</code> 里如果还留着早先的端口覆盖，它会被忽略（这样才不会把映射指到没人监听的端口上）。
+            容器内部端口仍为 <code>@_effectivePort</code>。旧端口覆盖值不会生效。
         </p>
     </div>
 }
@@ -166,8 +164,7 @@ else
         </div>
 
         <p class="hint">
-            备份与内容清理按时刻执行，<strong>不受「是否配置了模型端点」影响</strong>。
-            音频清理时刻在「保留策略」里设置。
+            音频清理时刻在下方「保留策略」中设置。
         </p>
     }
 </div>
@@ -179,8 +176,7 @@ else
     </div>
 
     <p class="hint">
-        两者都<strong>不包含任何 Secret</strong>；备份还会剥掉设备令牌（所以恢复后所有设备都要重新配对），
-        也不包含登录会话所需的密钥。请把备份存放在安全位置。
+        导出和备份不包含密钥。备份恢复后，所有设备都需要重新配对。请妥善保管备份。
     </p>
 
     <div class="actions">
@@ -278,9 +274,7 @@ else
     <div class="risk">
         <strong>还原备份会替换实例的数据，而且要到重启时才真正生效。</strong>
         <p>
-            上传一份备份后，服务器会先<strong>校验</strong>它（是不是本产品的备份、是否来自更新的版本、是否还带着
-            设备令牌），然后暂存；<strong>重启实例</strong>时才会真正替换数据。替换前会把当前数据库另存为
-            <code>pre-restore-*.db</code>，所以恢复错了还有退路。
+            选择备份并校验后，重启实例才会替换数据。替换前会保存当前数据库的副本。
         </p>
 
         <InputFile OnChange="OnArchiveSelectedAsync" accept=".zip" />
@@ -345,13 +339,12 @@ else
 
         <p class="hint">
             <strong>-1 = 永久保留</strong>，<strong>0 = 草稿确认后立即删除</strong>，N = 保留 N 天。
-            录音默认 30 天，随想内容默认 <code>-1</code>。两项各自独立。
+            录音默认 30 天，随想内容默认永久保留。
         </p>
 
         <p class="hint">
-            录音清理只删音频文件，转写与记录保留；内容清理把随想正文置空，记录留作历史文章的来源引用。
-            文章的正文与来源映射不受影响。计时从稿件<strong>被确认</strong>那天开始，转写失败的录音不会被删。
-            立刻清理是排队执行，稍后刷新这一页看结果。
+            清理录音会保留转写和记录；清理内容会保留记录与已生成的稿件。保留天数从稿件确认时开始计算。
+            立即清理需等待任务完成，稍后刷新查看结果。
         </p>
     }
 </div>
@@ -374,7 +367,7 @@ else
     else if (_index.ConfiguredVersion is null)
     {
         <p class="notice info">
-            尚未配置 Embedding 模型。系统仍可通过主题和文字匹配查找历史内容；如需语义检索，请先到「模型管理」配置。
+            尚未配置语义检索模型。仍可按主题和文字查找；要启用语义检索，请到「模型管理」配置。
         </p>
     }
     else
@@ -399,8 +392,7 @@ else
         </div>
 
         <p class="hint">
-            更换 Embedding 模型、维度或 Base URL 会让旧索引失效：语义检索先降级为主题标签与全文匹配，
-            重建完成后自动恢复。
+            更换模型、维度或地址后，请重建索引。重建期间仍可按主题和文字查找。
         </p>
     }
 </div>
@@ -415,13 +407,12 @@ else
     </div>
 
     <p class="hint">
-        默认日志只记录请求 / 任务 ID、状态变化、耗时、重试次数和脱敏错误码。
-        下面是<strong>唯一</strong>会让内容（转写正文、提示词、模型响应）进入日志的开关，它会自动到期。
+        默认日志不记录随想正文。开启临时调试模式后，私人内容可能进入日志。
     </p>
 
     @if (_logs.Count == 0)
     {
-        <p class="notice info">还没有日志行（进程刚启动，或日志级别把一切都过滤掉了）。</p>
+        <p class="notice info">暂无日志。</p>
     }
     else
     {
@@ -499,15 +490,14 @@ else
     else
     {
         <p class="hint">
-            邮件服务器、收件地址、事件开关和测试邮件统一在「通知管理」配置，避免两处表单互相覆盖。
-            邮件只携带日期、标题和状态，不含稿件正文。
+            在「通知管理」设置收件地址与提醒事件。
         </p>
 
         <div class="summary">
             <div class="summary-item">
                 <span class="label">收件地址</span>
                 <span class="value">
-                    @(string.IsNullOrWhiteSpace(_notifications.ToAddress) ? "（未填，什么都发不出去）" : _notifications.ToAddress)
+                    @(string.IsNullOrWhiteSpace(_notifications.ToAddress) ? "（未填写）" : _notifications.ToAddress)
                 </span>
             </div>
             <div class="summary-item">
@@ -523,11 +513,11 @@ else
         <p class="notice @(_notifications.DraftReady || _notifications.JobFailed || _notifications.AutomaticPublication ? "ok" : "warn")">
             @if (_notifications.DraftReady || _notifications.JobFailed || _notifications.AutomaticPublication)
             {
-                <text>至少一个事件开着；只要收件地址非空且 SMTP 已启用，就会按事件发信。</text>
+                <text>已开启提醒事件。</text>
             }
             else
             {
-                <text>三个开关全关：不会发出任何邮件。</text>
+                <text>未开启提醒事件。</text>
             }
         </p>
     }
@@ -539,8 +529,7 @@ else
     </div>
 
     <p class="hint">
-        修改账号或密码前需要验证当前密码。新账号 3–64 位，只能使用字母、数字、点、下划线与连字符；新密码至少 12 位。
-        保存成功后请退出登录，再使用新信息重新登录。
+        新账号需为 3–64 位字母、数字、点、下划线或连字符；新密码至少 12 位。保存后请重新登录。
     </p>
 
     <div class="form-grid">
@@ -583,7 +572,7 @@ else
     </div>
 
     <p class="hint">
-        控制后台检查任务的频率、停机后的稿件补生成，以及写作时如何选择过去的随想。通常保持默认值即可；保存后无需重启。
+        调整自动任务和历史素材的使用方式。通常无需修改默认值。
     </p>
 
     @if (_instance is null)

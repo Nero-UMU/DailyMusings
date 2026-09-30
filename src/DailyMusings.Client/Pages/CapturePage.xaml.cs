@@ -142,8 +142,8 @@ public partial class CapturePage : ContentPage
         ModeButton.Text = _manualMode ? "录音" : "手动输入";
 
         TodayHintLabel.Text = _manualMode
-            ? "写下一句随想，保存到本机后再决定是否上传"
-            : "点一下开始录音，再点一下停止并保存到本机";
+            ? "写下随想，保存到本机"
+            : "点按开始录音";
     }
 
     private void OnToggleModeClicked(object? sender, EventArgs e)
@@ -232,7 +232,7 @@ public partial class CapturePage : ContentPage
         }
 
         RecordStatus.Text = $"已保存到本机（{capture.DurationSeconds:F1} 秒）。";
-        UploadStatus.Text = "已保存到本机。点下面的按钮才会传给服务器。";
+        UploadStatus.Text = "已保存到本机，尚未上传。";
 
         _current = capture;
 
@@ -303,7 +303,7 @@ public partial class CapturePage : ContentPage
 
         if (_canUpload)
         {
-            UploadStatus.Text = "已保存到本机。点下面的按钮才会传给服务器。";
+            UploadStatus.Text = "已保存到本机，尚未上传。";
         }
     });
 
@@ -376,19 +376,19 @@ public partial class CapturePage : ContentPage
 
         if (!hasCurrent)
         {
-            UploadStatus.Text = "先录一段或写一句，再决定要不要上传。";
+            UploadStatus.Text = "先录音或写下随想。";
             return;
         }
 
         if (!_settings.IsConfigured)
         {
-            UploadStatus.Text = "还没配置服务器地址，这条记录会先留在本机。到设置页填好地址即可上传。";
+            UploadStatus.Text = "尚未填写服务器地址。请到设置页填写后再上传。";
             return;
         }
 
         if (!_canUpload)
         {
-            UploadStatus.Text = "还没配对服务器，这条记录会先留在本机。到设置页输入配对码即可上传。";
+            UploadStatus.Text = "尚未配对。请到设置页输入配对码后再上传。";
         }
     }
 
@@ -414,7 +414,7 @@ public partial class CapturePage : ContentPage
 
         if (!_canUpload)
         {
-            UploadStatus.Text = "还没有可用的服务器连接，这条记录仍然留在本机。";
+            UploadStatus.Text = "无法连接服务器，记录仍保存在本机。";
             return;
         }
 
@@ -437,8 +437,8 @@ public partial class CapturePage : ContentPage
             {
                 // A typed note has no 识别 step, so the same sentence would be a small lie on that path.
                 UploadStatus.Text = capture.IsVoice
-                    ? "已上传到服务器，识别回来的文字在上面。"
-                    : "已上传到服务器，这条手写随想上面就是原文。";
+                    ? "已上传，识别完成。"
+                    : "已上传。";
                 return;
             }
 
@@ -483,7 +483,7 @@ public partial class CapturePage : ContentPage
             }
         }
 
-        UploadStatus.Text = "识别还在进行中。打开日历页时，本机会自动把文字补上。";
+        UploadStatus.Text = "正在识别。稍后到日历页查看文字。";
     }
 
     private void SetBusy(bool busy, string? message = null)

@@ -64,7 +64,7 @@
                 <VerticalStackLayout Spacing="12">
                     <Label
                         Style="{StaticResource CaptionLabel}"
-                        Text="录音与识别文字保存在本机，只有在这里删除才会消失。" />
+                        Text="清空后无法恢复本机记录。" />
                     <Label x:Name="LocalUsage" Style="{StaticResource BodyLabel}" />
                     <Button
                         x:Name="ClearLocalButton"
@@ -95,7 +95,7 @@
 
             <Label
                 Style="{StaticResource CaptionLabel}"
-                Text="本机只保存服务器地址与设备令牌，不保存模型密钥或发布凭据。" />
+                Text="本机保存服务器地址和设备令牌。" />
 
         </VerticalStackLayout>
     </ScrollView>

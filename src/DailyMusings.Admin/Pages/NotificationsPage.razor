@@ -10,7 +10,7 @@
    密码、SSL、STARTTLS、收件人邮箱，七项都由用户自己填；不再有「安全方式」下拉，也没有常用邮箱预置。 *@
 
 <PageHeader Title="通知管理"
-            Hint="配置发件邮箱、收件地址和需要提醒的事件。通知只包含日期、标题与状态，不发送稿件正文。">
+            Hint="设置收件地址和需要提醒的事件。">
     <Actions>
         <button class="btn" @onclick="ProbeSmtpAsync" disabled="@_busy">测试连接</button>
         <button class="btn-primary" @onclick="SendTestEmailAsync" disabled="@_busy">发送测试邮件</button>
@@ -18,8 +18,7 @@
 </PageHeader>
 
 <p class="notice warn">
-    <strong>没填收件邮箱，或者三个事件开关全关，就什么都不会发。</strong>
-    需同时满足：已启用发信、收件邮箱非空、至少一个事件开着。
+    发信前，请启用邮件、填写收件地址，并打开至少一个事件开关。
 </p>
 
 @if (_message is not null)
@@ -45,10 +44,10 @@
             <br />
         }
         <span class="hint">
-            这封信发到：<code>@(_testedTo ?? "（没有收件邮箱）")</code>
+            收件地址：<code>@(_testedTo ?? "（未填写）")</code>
             @if (_test.Sent)
             {
-                <text>——去那个邮箱里找「[每日随想] 测试邮件」。</text>
+                <text> · 邮件主题：[每日随想] 测试邮件</text>
             }
         </span>
     </p>
@@ -61,7 +60,7 @@
         @_probe.Detail
         <br />
         <span class="hint">
-            只读了服务器的问候语，不代表能发信——要确认能发，用「发送测试邮件」。
+            连接测试不验证发信；请再发送测试邮件。
         </span>
     </p>
 }
@@ -84,7 +83,7 @@ else
         </div>
 
         <p class="hint">
-            请从邮箱服务商处获取 SMTP 地址、端口和密码。发件人邮箱同时作为登录用户名；保存后发送一封测试邮件确认配置。
+            填写邮箱服务商提供的 SMTP 地址、端口和密码。保存后发送测试邮件。
         </p>
 
         <div class="form-grid">
@@ -107,7 +106,7 @@ else
                        placeholder="noreply@example.com" />
             </label>
             <label>
-                收件人邮箱（通知发给谁）
+                收件人邮箱
                 <input value="@_toAddress" @onchange="e => _toAddress = (string?)e.Value" placeholder="owner@example.com" />
             </label>
         </div>
@@ -124,7 +123,7 @@ else
         {
             <label class="checkbox">
                 <input type="checkbox" role="switch" checked="@_clearPassword" @onchange="e => _clearPassword = e.Value is true" />
-                清除在管理页保存的密码（清除后自动回退到部署配置）
+                清除已保存的密码（可能改用部署配置）
             </label>
         }
 
@@ -134,8 +133,7 @@ else
                 SSL
             </label>
             <p class="hint">
-                勾上 = 连上立刻 TLS 握手，问候语也在隧道里，端口通常是 <strong>465</strong>。
-                别的软件里写作「SSL：是，STARTTLS：否」。
+                通常使用 465 端口。
             </p>
 
             <label class="checkbox">
@@ -143,19 +141,16 @@ else
                 STARTTLS
             </label>
             <p class="hint">
-                勾上 = 先明文打招呼再升级加密，端口通常是 <strong>587</strong>。
-                别的软件里写作「SSL：否，STARTTLS：是」。
+                通常使用 587 端口。
             </p>
         </div>
 
         <p class="hint">
-            <strong>SSL 与 STARTTLS 只能选一个。</strong>常见配置为 465 + SSL，或 587 + STARTTLS；请以邮箱服务商提供的信息为准。
-            使用密码时必须选择一种加密方式。
+            <strong>SSL 与 STARTTLS 只能选一个。</strong>使用密码时必须启用其中一种；以邮箱服务商提供的配置为准。
         </p>
 
         <p class="hint">
-            <strong>密码输入框只提交、不回显</strong>：保存后页面只会显示「密钥来源」，值本身永远不会回到浏览器，
-            也不会进入日志、导出或备份。留空表示继续使用已保存的密码。
+            密码保存后不回显；留空表示保留已保存的密码。
         </p>
 
         <div class="actions">
@@ -181,7 +176,7 @@ else
             <div class="stack">
                 <label class="checkbox">
                     <input type="checkbox" role="switch" checked="@_notificationDraftReady" @onchange="e => _notificationDraftReady = e.Value is true" />
-                    新草稿待处理或到发布时间仍未发布时发信
+                    新草稿待处理或逾期未发布时发信
                 </label>
                 <label class="checkbox">
                     <input type="checkbox" role="switch" checked="@_notificationJobFailed" @onchange="e => _notificationJobFailed = e.Value is true" />
@@ -197,8 +192,7 @@ else
                 </label>
             </div>
 
-            <p class="hint">附上正文只影响「新草稿」与「发布成功」这两类信；失败与超时的信只说明原因。
-                邮件默认走明文，打开等于把稿件复制一份到邮箱里，是否打开由你决定。</p>
+            <p class="hint">仅新草稿和发布成功的邮件可附正文。开启后，稿件会保存在收件邮箱中。</p>
 
             <div class="form-grid">
                 <label>
@@ -213,13 +207,10 @@ else
             </div>
 
             <p class="notice @(_notifications.SmtpConfigured ? "ok" : "warn")">
-                SMTP：@(_notifications.SmtpConfigured ? "已启用" : "未启用，当前不会发出任何邮件")
-                · 收件邮箱：<code>@(string.IsNullOrWhiteSpace(_notifications.ToAddress) ? "（未填，什么都发不出去）" : _notifications.ToAddress)</code>
+                SMTP：@(_notifications.SmtpConfigured ? "已启用" : "未启用")
+                · 收件邮箱：<code>@(string.IsNullOrWhiteSpace(_notifications.ToAddress) ? "（未填写）" : _notifications.ToAddress)</code>
             </p>
 
-            <p class="hint">
-                收件地址在上方「邮件」卡片修改；这里选择哪些事件需要通知，并填写邮件中用于返回管理后台的地址。
-            </p>
         }
     </div>
 }
