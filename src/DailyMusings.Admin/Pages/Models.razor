@@ -66,14 +66,11 @@ else
             else
             {
                 <div class="form-grid">
-                    @if (service != "transcription")
-                    {
-                        <label class="checkbox">
-                            <input type="checkbox" checked="@_enabled.GetValueOrDefault(service)"
-                                   @onchange="e => SetEnabled(service, e.Value is true)" />
-                            启用
-                        </label>
-                    }
+                    <label class="checkbox">
+                        <input type="checkbox" checked="@_enabled.GetValueOrDefault(service)"
+                               @onchange="e => SetEnabled(service, e.Value is true)" />
+                        启用
+                    </label>
                     <label>
                         Base URL
                         <input value="@_baseUrls.GetValueOrDefault(service)" @oninput="e => SetBaseUrl(service, (string?)e.Value)" />
@@ -89,25 +86,18 @@ else
                             </select>
                             <small>必须明确选择协议；系统不会自动判断。</small>
                         </label>
-                        <label>
-                            模型名
-                            <input value="@_models.GetValueOrDefault(service)" @oninput="e => SetModel(service, (string?)e.Value)" />
-                        </label>
                     }
-                    else
-                    {
-                        <label>
-                            模型名
-                            <input value="@_models.GetValueOrDefault(service)" @oninput="e => SetModel(service, (string?)e.Value)" />
-                        </label>
-                    }
+                    <label>
+                        模型名
+                        <input value="@_models.GetValueOrDefault(service)" @oninput="e => SetModel(service, (string?)e.Value)" />
+                    </label>
                     <label>
                         API Key（留空表示不改）
                         <input type="password" autocomplete="new-password" placeholder="留空即保持现状"
                                value="@_passwords.GetValueOrDefault(service)"
                                @oninput="e => SetPassword(service, (string?)e.Value)" />
                     </label>
-                    @if (service != "transcription" && _secretSources.GetValueOrDefault(service) == SecretSource.Ui)
+                    @if (_secretSources.GetValueOrDefault(service) == SecretSource.Ui)
                     {
                         <label class="checkbox">
                             <input type="checkbox" checked="@_clearPassword.GetValueOrDefault(service)"
@@ -311,7 +301,7 @@ else
             .ExecuteAsync(
                 ParseModelService(service),
                 new ModelEndpointUpdate(
-                    service == "transcription" ? true : _enabled.GetValueOrDefault(service),
+                    _enabled.GetValueOrDefault(service),
                     _baseUrls.GetValueOrDefault(service),
                     _models.GetValueOrDefault(service),
                     // The storage name is an implementation detail. It is sent only when the write-only key is

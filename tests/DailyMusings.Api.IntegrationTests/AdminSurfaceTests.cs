@@ -112,6 +112,71 @@ public class AdminSurfaceTests
             "Secret 的内部存储名不应暴露成用户输入项。");
     }
 
+    /// <summary>
+    /// 2026-09-30 用户报的两个缺陷：语音转写卡片的**启用开关**与**清除在管理页保存的 API Key**都不渲染。
+    /// 原因相同——页面对 transcription 特殊处理（保存时强制 enabled=true、渲染时跳过这两个控件），后果是
+    /// 转写**关不掉、密钥也清不掉**。这条测试直接数页面上的勾选框：三个模型卡片各有一个启用开关，
+    /// 而「清除」只在密钥来自管理页时出现。
+    /// </summary>
+    [TestMethod]
+    public async Task Every_model_card_offers_its_enable_switch_and_the_clear_key_option()
+    {
+        await using var instance = await TestInstance.StartAsync();
+        await instance.SignInAsChangedAdministratorAsync();
+
+        using var before = await instance.Client.GetAsync("/models");
+        var beforeHtml = await before.Content.ReadAsStringAsync();
+
+        Assert.AreEqual(
+            3,
+            Occurrences(beforeHtml, "type=\"checkbox\""),
+            "三个模型卡片（生成 / 转写 / Embedding）都要有启用开关。");
+
+        // 通过页面这条路保存一个转写密钥：密钥来源变成「管理页」，清除控件才有意义。
+        using var saved = await instance.Client.PatchAsJsonAsync(
+            "/api/system/model-endpoints/transcription",
+            new UpdateModelEndpointRequest(
+                Enabled: false,
+                BaseUrl: "http://127.0.0.1:9/v1",
+                Model: "stub-whisper",
+                SecretName: null,
+                TimeoutSeconds: null,
+                Dimensions: null,
+                ApiKey: "sk-not-a-real-key",
+                ClearPassword: null,
+                ApiType: "openai_transcription"));
+
+        saved.EnsureSuccessStatusCode();
+
+        using var after = await instance.Client.GetAsync("/models");
+        var html = WebUtility.HtmlDecode(await after.Content.ReadAsStringAsync());
+
+        StringAssert.Contains(html, "清除在管理页保存的 API Key", "保存过密钥之后要能把它清掉。");
+        Assert.AreEqual(
+            4,
+            Occurrences(html, "type=\"checkbox\""),
+            "三个启用开关 + 一个清除控件。");
+
+        // 关掉转写之后，页面必须如实说它停用了——这正是「保存时强制 true」掩盖掉的事实。
+        Assert.IsTrue(
+            html.Contains("已停用", StringComparison.Ordinal),
+            "转写被显式关停时，卡片应当显示「已停用」。");
+    }
+
+    private static int Occurrences(string text, string needle)
+    {
+        var count = 0;
+        var index = 0;
+
+        while ((index = text.IndexOf(needle, index, StringComparison.Ordinal)) >= 0)
+        {
+            count++;
+            index += needle.Length;
+        }
+
+        return count;
+    }
+
     [TestMethod]
     public async Task A_topic_carries_its_origin_and_its_usage_and_can_be_deleted()
     {
