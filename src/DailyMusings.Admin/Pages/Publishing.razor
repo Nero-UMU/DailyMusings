@@ -42,10 +42,8 @@
             <label>每日自动生成时间<input type="time" value="@_generationTime" @onchange="e => _generationTime = (string?)e.Value ?? _generationTime" /></label>
             <label>稿件输出目录<input value="@_draftDirectory" @oninput="e => _draftDirectory = (string?)e.Value ?? string.Empty" /></label>
         </div>
-        <p class="hint">目录是**相对于你映射给实例的数据目录**的路径：映射了
-            <code>/home/atri/data:/var/lib/dailymusings</code>、这里填 <code>aaa/bbb/posts</code>，稿件就会写到
-            宿主上的 <code>/home/atri/data/aaa/bbb/posts</code>。不能使用绝对路径或 <code>..</code>。
-            时间都是 <strong>@_timeZoneId</strong> 时区的墙上时间；时区在系统设置中修改。</p>
+        <p class="hint">相对数据目录，如 <code>aaa/bbb/posts</code>；不接受绝对路径与 <code>..</code>。
+            时间为 <strong>@_timeZoneId</strong> 时区，可在系统设置中修改。</p>
     </section>
 
     <section class="card settings-card">
@@ -57,8 +55,7 @@
             <label>每日自动发布时间<input type="time" value="@_publishTime" @onchange="e => _publishTime = (string?)e.Value ?? _publishTime" /></label>
             <label>稿件发布目录<input value="@_publishedDirectory" @oninput="e => _publishedDirectory = (string?)e.Value ?? string.Empty" /></label>
         </div>
-        <p class="hint">与输出目录同一套规则：相对于你映射给实例的<strong>数据目录</strong>，
-            例如 <code>posts</code> 或 <code>aaa/bbb/posts</code>。</p>
+        <p class="hint">同样相对数据目录，如 <code>posts</code>。</p>
 
         @* 调度预览：把服务端算出来的时刻直接写出来。用户勾了自动发布却什么都不发生时，唯一能解释的是这一行——
            旧版本只显示两个时间输入框，从不说明「哪一天、几点、还差什么」，于是失败只能表现为沉默。 *@
