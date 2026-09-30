@@ -53,9 +53,11 @@ export DM_WORK="$WORK"
 export DM_ADMIN_INITIAL_PASSWORD="$PW"
 export DM_ADMIN_USER=owner
 export DM_ADMIN_PASSWORD="CorrectHorseBattery1"
-# compose 默认把数据放在它同级的 ./data（见根 compose.yaml），所以「实例的 state」就是这个目录。
-# DM_STATE 既接受目录也接受具名卷名；旧名字 DM_VOLUME 仍然认。
-export DM_STATE="$FRESH/data"
+# 根 compose.yaml 默认把两个持久目录放在它同级的 ./data 与 ./config。2026-09-29 起（附录 A.31）：
+# ./config 是状态（库、录音、备份、密钥环），./data 只放 Markdown。
+# DM_STATE / DM_MARKDOWN 既接受目录也接受具名卷名；旧名字 DM_VOLUME 仍然认。
+export DM_STATE="$FRESH/config"
+export DM_MARKDOWN="$FRESH/data"
 
 echo "--- step 2 and 3: administrator initialized, then the archive is uploaded and staged ---"
 python3 restore_verify.py stage "$WORK/restore-source.zip" 2>&1 | tee "$WORK/restore-stage.log"

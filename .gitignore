@@ -18,11 +18,16 @@ coverage*.xml
 *.trx
 
 ## Local runtime data (self-hosted instance state; never commit)
+## 2026-09-29 起本地运行的默认落点是 .dailymusings/（状态 + Markdown 都在这一个目录里，见附录 A.31）；
+## 下面几行保留，是为了拦住「按旧文档手动指到仓库根」时产生的目录（data/ media/ exports/ markdown/ …）。
+.dailymusings/
 data/
 media/
 exports/
 markdown/
+backups/
 keys/
+runtime.json
 *.db
 *.db-shm
 *.db-wal

@@ -235,7 +235,7 @@ public class PhaseOneFlowTests
         // "Docker Compose 环境可以从空目录部署" plus "restart keeps working" boils down to.
         var instance = await TestInstance.StartAsync();
         var root = instance.RootPath;
-        var databasePath = Path.Combine(root, "data", "dailymusings.db");
+        var databasePath = instance.DatabasePath;
 
         try
         {

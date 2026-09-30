@@ -8,7 +8,7 @@ count() {
     find "$1" ${3:-} -type f 2>/dev/null | wc -l | tr -d ' '
 }
 
-echo "MARKDOWN_FILES=$(count /state/markdown)"
+echo "MARKDOWN_FILES=$(count /markdown)"
 echo "MEDIA_FILES=$(count /state/media)"
 echo "BACKUP_FILES=$(find /state/backups -type f -name '*.zip' 2>/dev/null | wc -l | tr -d ' ')"
 echo "EXPORT_DIRS=$(find /state/exports -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l | tr -d ' ')"
@@ -21,4 +21,4 @@ if [ -n "${NEEDLE_0:-}" ] && grep -rqF "$NEEDLE_0" /state 2>/dev/null; then
 fi
 echo "TOKEN_HASH_FOUND=$FOUND"
 
-find /state/markdown -type f 2>/dev/null | sed 's/^/MARKDOWN_FILE=/'
+find /markdown -type f 2>/dev/null | sed 's/^/MARKDOWN_FILE=/'

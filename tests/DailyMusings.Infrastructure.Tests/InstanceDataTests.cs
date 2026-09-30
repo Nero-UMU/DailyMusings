@@ -32,7 +32,8 @@ public class InstanceDataTests
 {
     private static InstancePaths PathsFor(TestDatabase database) => new(new StorageOptions
     {
-        RootPath = database.RootPath,
+        StatePath = database.RootPath,
+        MarkdownRootPath = Path.Combine(database.RootPath, "content"),
         KeyRingPath = Path.Combine(database.RootPath, "keys"),
     });
 
@@ -533,12 +534,19 @@ public class InstanceDataTests
         var archivePath = Path.Combine(sourcePaths.BackupPath, summary.FileName);
 
         // A second, empty instance — "a fresh directory with only the compose file and new secrets" (§15.2 step 1).
+        // 它的状态根刻意是 target 目录下的子目录：恢复是在**下次启动、库还没被打开**时执行的，而 TestDatabase
+        // 已经握着一个连接；把两者指到同一个文件，测出来的只会是「Windows 不许删别人开着的 -wal」。
         await using var target = await TestDatabase.CreateAsync();
-        var targetPaths = PathsFor(target);
+        var targetPaths = new InstancePaths(new StorageOptions
+        {
+            StatePath = Path.Combine(target.RootPath, "state"),
+            MarkdownRootPath = Path.Combine(target.RootPath, "content"),
+        });
         targetPaths.EnsureCreated();
 
         var configuration = Configuration(
-            ("Storage:RootPath", targetPaths.RootPath),
+            ("Storage:StatePath", targetPaths.RootPath),
+            ("Storage:MarkdownRootPath", targetPaths.MarkdownPath),
             ("Storage:KeyRingPath", targetPaths.KeyRingPath));
 
         var stager = new StagedRestoreService(targetPaths, NullLogger<StagedRestoreService>.Instance);
@@ -549,9 +557,8 @@ public class InstanceDataTests
             Assert.IsTrue(validation.IsValid, validation.Detail);
         }
 
-        // The empty instance has no reflections yet; the restore has not been applied.
-        var beforeApply = new SqliteReflectionRepository(target.Accessor);
-        Assert.AreEqual(0, (await beforeApply.ListAllAsync(10, CancellationToken.None)).Count);
+        // 恢复之前，这个空实例连库都还没有——§15.2 第 1 步说的就是「一个全新目录」。
+        Assert.IsFalse(File.Exists(targetPaths.DatabasePath), "A fresh instance starts with no database.");
 
         var applied = await StagedRestoreStartupTask.ApplyAsync(
             configuration,

@@ -38,9 +38,9 @@ public sealed class StagedRestoreService : IRestoreStager
         _logger = logger;
     }
 
-    private string StagingPath => Path.Combine(_paths.DataDirectory, StagingDirectoryName);
+    private string StagingPath => Path.Combine(_paths.RootPath, StagingDirectoryName);
 
-    private string PendingPath => Path.Combine(_paths.DataDirectory, PendingFileName);
+    private string PendingPath => Path.Combine(_paths.RootPath, PendingFileName);
 
     public async Task<RestoreValidation> StageAsync(Stream archive, CancellationToken cancellationToken)
     {

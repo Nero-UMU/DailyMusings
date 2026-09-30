@@ -13,9 +13,10 @@ ROOT="${DM_ROOT:-$(dirname "$VERIFY")}"
 WORK="$ROOT/work"
 INSTANCE="$ROOT/inst-a"
 STATE="$INSTANCE/state"
+MARKDOWN="$INSTANCE/markdown"
 
-mkdir -p "$WORK" "$STATE" "$INSTANCE/keys"
-chmod 777 "$WORK" "$INSTANCE" "$STATE" "$INSTANCE/keys"
+mkdir -p "$WORK" "$STATE" "$INSTANCE/keys" "$MARKDOWN"
+chmod 777 "$WORK" "$INSTANCE" "$STATE" "$INSTANCE/keys" "$MARKDOWN"
 
 # The compose file lives next to the driver scripts but resolves ./state and ./keys relative to itself, so it is
 # copied into the instance directory before it is used.
@@ -53,11 +54,11 @@ fi
 
 # The application writes as its own uid inside the container, so the state it created cannot be removed by the
 # host user that owns the parent directory: the wipe goes through a root container on the same mounts.
-docker run --rm -u 0 -v "$STATE:/state" -v "$INSTANCE/keys:/keys" \
-    --entrypoint /bin/sh dailymusings/server:local -c 'rm -rf /state/* /state/.[!.]* /keys/* /keys/.[!.]*'
+docker run --rm -u 0 -v "$STATE:/state" -v "$INSTANCE/keys:/keys" -v "$MARKDOWN:/markdown" \
+    --entrypoint /bin/sh dailymusings/server:local -c 'rm -rf /state/* /state/.[!.]* /keys/* /keys/.[!.]* /markdown/* /markdown/.[!.]*'
 
-mkdir -p "$STATE" "$INSTANCE/keys"
-chmod 777 "$STATE" "$INSTANCE/keys"
+mkdir -p "$STATE" "$INSTANCE/keys" "$MARKDOWN"
+chmod 777 "$STATE" "$INSTANCE/keys" "$MARKDOWN"
 docker compose -f "$INSTANCE/compose.verify.yaml" up -d
 
 for _ in $(seq 1 90); do

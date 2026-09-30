@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.RegularExpressions;
 using DailyMusings.Contracts;
+using DailyMusings.Infrastructure.Storage;
 using DailyMusings.Server.Composition;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -42,7 +43,17 @@ internal sealed class TestInstance : IAsyncDisposable
 
     public HttpClient Client { get; }
 
+    /// <summary>状态根：库、录音、导出、备份、密钥环都在它下面（附录 A.31）。</summary>
     public string RootPath { get; }
+
+    /// <summary>
+    /// Markdown 根：**只装稿件**，也是后台填的两个输出目录的基准。测试不要另行拼
+    /// <c>RootPath + "markdown"</c>——布局改过一次（A.31），凡是重新推导布局的断言都会在下次改动时失败。
+    /// </summary>
+    public string MarkdownRoot => Path.Combine(RootPath, "content");
+
+    /// <summary>The instance database, where the directory contract puts it.</summary>
+    public string DatabasePath => Path.Combine(RootPath, InstancePaths.DatabaseFileName);
 
     /// <summary>Everything the bootstrap wrote to the terminal. Never contains anything else about the account.</summary>
     public string BootstrapOutput { get; }
@@ -84,7 +95,8 @@ internal sealed class TestInstance : IAsyncDisposable
 
         var settings = new Dictionary<string, string?>(StringComparer.Ordinal)
         {
-            ["Storage:RootPath"] = root,
+            ["Storage:StatePath"] = root,
+            ["Storage:MarkdownRootPath"] = Path.Combine(root, "content"),
 
             // Kept beside the instance root, mirroring production: the key ring must outlive a restart but stay
             // out of the backup set.

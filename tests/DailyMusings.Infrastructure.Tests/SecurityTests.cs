@@ -131,7 +131,8 @@ public class SecurityTests
             // test process's working directory, and the next run would read its own leftover value back.
             var store = new EncryptedUiSecretStore(new InstancePaths(new StorageOptions
             {
-                RootPath = root,
+                StatePath = root,
+                MarkdownRootPath = Path.Combine(root, "content"),
                 KeyRingPath = Path.Combine(root, "keys"),
             }));
             var secrets = (ISecretStore)store;
@@ -165,7 +166,8 @@ public class SecurityTests
         {
             var store = (ISecretStore)new EncryptedUiSecretStore(new InstancePaths(new StorageOptions
             {
-                RootPath = root,
+                StatePath = root,
+                MarkdownRootPath = Path.Combine(root, "content"),
                 KeyRingPath = Path.Combine(root, "keys"),
             }));
 
@@ -189,7 +191,11 @@ public class SecurityTests
 
         try
         {
-            var paths = new InstancePaths(new StorageOptions { RootPath = root });
+            var paths = new InstancePaths(new StorageOptions
+            {
+                StatePath = root,
+                MarkdownRootPath = Path.Combine(root, "content"),
+            });
             paths.EnsureCreated();
 
             foreach (var directory in paths.ManagedDirectories)

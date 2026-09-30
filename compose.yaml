@@ -1,4 +1,4 @@
-# 每日随想：一个文件起一个实例。`docker compose up -d` 直接可用；全部可设置参数见 README 的「部署参数」。
+# 每日随想：一个文件起一个实例。`docker compose up -d` 直接可用；参数与两个目录的分工（data 只放 Markdown、config 放其余状态）见 README 的「部署参数」。
 name: dailymusings
 
 services:

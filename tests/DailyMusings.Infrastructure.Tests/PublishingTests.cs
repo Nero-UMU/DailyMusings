@@ -360,6 +360,43 @@ public class PublishingTests
         Assert.AreEqual(1, ExportedFiles(context, "posts").Length);
     }
 
+    /// <summary>
+    /// 后台填的目录**以映射进来的数据目录为根**（附录 A.31）：映射了
+    /// <c>/home/atri/data:/var/lib/dailymusings</c> 之后填 <c>aaa/bbb/posts</c>，稿件就落在
+    /// <c>/home/atri/data/aaa/bbb/posts</c>。这条测试钉住「填什么就写到哪里」——中间不该再冒出一层没人
+    /// 知道的目录（旧布局里那层叫 <c>markdown/</c>）。
+    /// </summary>
+    [TestMethod]
+    public async Task A_nested_target_directory_is_created_directly_under_the_markdown_root()
+    {
+        await using var context = await PublishingTestContext.CreateAsync();
+        var target = await context.AddTargetAsync("hexo", destination: "aaa/bbb/posts");
+        await context.SeedConfirmedDraftAsync(Day(context));
+
+        var request = await context.Request.ExecuteAsync(
+            Day(context),
+            target.Id,
+            PublicationVisibility.Public,
+            actor: "owner",
+            replaceExistingFile: false,
+            manual: true,
+            CancellationToken.None);
+
+        Assert.IsTrue(request.Queued, request.Detail);
+        await context.QueueAndRunAsync(request.Publication!);
+
+        var nested = Path.Combine(context.Paths.MarkdownPath, "aaa", "bbb", "posts");
+        var files = Directory.Exists(nested)
+            ? Directory.GetFiles(nested, "*.md", SearchOption.AllDirectories)
+            : [];
+
+        Assert.AreEqual(1, files.Length, $"填的路径就是宿主上看到的那条相对路径；实际写在 {nested}。");
+        Assert.AreEqual(
+            files.Length,
+            ExportedFiles(context).Length,
+            "整棵 Markdown 根下只有这一个文件，说明没有再套一层目录（旧布局那层叫 markdown/）。");
+    }
+
     [TestMethod]
     public async Task A_manual_publish_exports_the_confirmed_version_and_records_what_it_wrote()
     {

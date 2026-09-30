@@ -65,9 +65,10 @@ ENV ASPNETCORE_URLS=http://+:18321 \
     ASPNETCORE_ENVIRONMENT=Production \
     DOTNET_NOLOGO=true \
     DOTNET_CLI_TELEMETRY_OPTOUT=true \
-    Storage__RootPath=/var/lib/dailymusings \
-    Storage__KeyRingPath=/var/lib/dailymusings-config/keys \
-    Storage__RuntimeConfigPath=/var/lib/dailymusings-config/runtime.json
+    Storage__StatePath=/var/lib/dailymusings-config \
+    Storage__MarkdownRootPath=/var/lib/dailymusings \
+    Storage__KeyRingPath=keys \
+    Storage__RuntimeConfigPath=runtime.json
 
 EXPOSE 18321
 

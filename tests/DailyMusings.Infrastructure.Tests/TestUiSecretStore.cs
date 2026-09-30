@@ -74,7 +74,8 @@ internal static class TestUiSecretStoreFactory
     {
         var paths = new InstancePaths(new StorageOptions
         {
-            RootPath = rootPath,
+            StatePath = rootPath,
+            MarkdownRootPath = Path.Combine(rootPath, "content"),
 
             // Beside the instance root, exactly like production: the point of the store is that a backup of the
             // instance cannot carry it.

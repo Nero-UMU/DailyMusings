@@ -220,7 +220,8 @@ public class SmtpUiPasswordTests
     {
         var paths = new InstancePaths(new StorageOptions
         {
-            RootPath = database.RootPath,
+            StatePath = database.RootPath,
+            MarkdownRootPath = Path.Combine(database.RootPath, "content"),
             KeyRingPath = Path.Combine(database.RootPath, "keys"),
         });
 

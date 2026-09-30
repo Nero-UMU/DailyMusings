@@ -90,7 +90,8 @@ public class ContentRetentionTests
 
         var paths = new InstancePaths(new StorageOptions
         {
-            RootPath = context.Database.RootPath,
+            StatePath = context.Database.RootPath,
+            MarkdownRootPath = Path.Combine(context.Database.RootPath, "content"),
             KeyRingPath = Path.Combine(context.Database.RootPath, "keys"),
         });
 
@@ -157,7 +158,8 @@ public class ContentRetentionTests
     {
         var paths = new InstancePaths(new StorageOptions
         {
-            RootPath = context.Database.RootPath,
+            StatePath = context.Database.RootPath,
+            MarkdownRootPath = Path.Combine(context.Database.RootPath, "content"),
             KeyRingPath = Path.Combine(context.Database.RootPath, "keys"),
         });
 

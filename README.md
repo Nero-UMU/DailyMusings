@@ -101,15 +101,39 @@ docker compose logs app | grep INITIAL-ADMIN-PASSWORD     # 一次性的管理�
 
 | 变量 | 默认 | 作用 |
 | --- | --- | --- |
-| `DM_IMAGE` | `ghcr.io/nero-umu/dailymusings:latest` | 镜像。固定版本写 `:1.0.1`，或换成你自己的仓库 |
+| `DM_IMAGE` | `ghcr.io/nero-umu/dailymusings:latest` | 镜像。固定版本写 `:1.0.8`，或换成你自己的仓库 |
 | `DM_PORT` | `18321` | 宿主机端口。容器内固定 18321，**只改这一个** |
-| `DM_DATA_DIR` | `./data`（与 compose 同级） | 数据库、录音、备份、导出、`markdown/` 全部稿件 |
-| `DM_CONFIG_DIR` | `./config`（与 compose 同级） | `runtime.json`、登录密钥环、管理页保存的凭据。**单独保护，别混进普通内容备份** |
+| `DM_DATA_DIR` | `./data`（与 compose 同级） | **只放 Markdown**：草稿与正式稿。后台「发布设置」里填的目录都以它为根，所以它可以整份交给 Hexo、也可以整份同步走 |
+| `DM_CONFIG_DIR` | `./config`（与 compose 同级） | **其余全部状态**：SQLite（含 `-wal`/`-shm`）、录音、可读导出、备份包、`runtime.json`、登录密钥环与管理页保存的凭据。**单独保护，别混进普通内容备份** |
 | `DM_ADMIN_PASSWORD` | 不设 | 初始管理员密码（至少 12 位）。不设就随机生成，并只打印一次到容器日志 |
 | `DM_TZ` | `Asia/Shanghai` | 容器日志时区（内容的时区在管理页「发布设置」里，与此无关） |
 | `DM_LOCK_LISTENING_PORT` | `1` | 让部署独占监听端口：`runtime.json` 里残留的端口覆盖被忽略、`PATCH /api/system/listening-port` 返回 409 `instance.port.locked`、管理页「系统设置」那一节变成只读。设成 `0` 回到老行为（后台可以存端口，但你得自己把映射与容器内监听同步好再重建） |
 
 两个目录**不需要预先创建，也不需要 chown**：容器入口会把它们建好、把属主改成容器用户（uid 1654），随后降权运行。
+
+**目录是怎么对应的**：假设你映射了 `/home/atri/data:/var/lib/dailymusings`，后台「发布设置」里填 `aaa/bbb/posts`，稿件就写到宿主上的 `/home/atri/data/aaa/bbb/posts`——**填的就是你在宿主机上看到的那条相对路径**，中间没有别的层级。填 `drafts`、`posts` 这类名字就是数据目录下的一级子目录（也是默认值）。不允许绝对路径、不允许 `..`。
+
+```text
+/home/atri/data                →  /var/lib/dailymusings          # 只放 Markdown
+  drafts/2026-09-30-今天的记录.md
+  aaa/bbb/posts/2026-09-29-昨天的记录.md
+/home/atri/config              →  /var/lib/dailymusings-config   # 其余全部状态
+  dailymusings.db  dailymusings.db-wal
+  media/  exports/  backups/
+  keys/  runtime.json
+```
+
+> **升级到 1.0.8 之前的部署请先挪一次目录**。这是**破坏性变更**：库、录音、备份从数据目录搬进了配置目录，稿件也从 `markdown/` 底下上移了一层。实例**不会自动搬**，直接升级会看到一份空实例（旧的库还在原地，可以随时挪回来）。在宿主机上执行一次：
+>
+> ```bash
+> # 在 compose 所在目录（DM_DATA_DIR / DM_CONFIG_DIR 指向的实际路径）
+> mv "$DM_DATA_DIR"/dailymusings.db* "$DM_CONFIG_DIR"/            # 库，含 -wal / -shm
+> for d in media exports backups; do mv "$DM_DATA_DIR/$d" "$DM_CONFIG_DIR/"; done
+> mv "$DM_DATA_DIR"/markdown/*/ "$DM_DATA_DIR"/                  # 稿件上移一层：去掉 markdown/ 这层
+> rmdir "$DM_DATA_DIR"/markdown "$DM_DATA_DIR"/data 2>/dev/null  # 空的旧目录（有残留会报错，正常）
+> ```
+>
+> 挪完再 `docker compose pull && docker compose up -d`。凭据与密钥环本来就在配置目录里，不用动。
 
 **怎么设**，三种都行：
 
@@ -166,10 +190,10 @@ Base URL、模型名和 API Key 都由你自己指定——项目不捆绑任何
 
 ```bash
 dotnet run --project src/DailyMusings.Server     # 本地起服务（初始密码打印在终端）
-dotnet test                                      # 全量测试：579 项
+dotnet test                                      # 全量测试：596 项
 ```
 
-本地运行时实例状态默认落在当前目录的 `data/`、`media/`、`exports/`、`markdown/`、`backups/`（已 gitignore）；可用 `Storage__RootPath` 等环境变量覆盖。要真正生成草稿，需要指向一个 OpenAI 兼容端点：
+本地运行时两个根默认落在仓库下的 `.dailymusings/state`（状态）与 `.dailymusings/markdown`（Markdown，已 gitignore）；可用 `Storage__StatePath` / `Storage__MarkdownRootPath` 覆盖。要真正生成草稿，需要指向一个 OpenAI 兼容端点：
 
 ```bash
 Generation__Enabled=true \

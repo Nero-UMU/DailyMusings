@@ -808,7 +808,7 @@ public static class OperationsEndpointRouteBuilderExtensions
             current.UpdatedBy,
             current.UpdatedAtUtc?.ToString("o", CultureInfo.InvariantCulture),
             overrides.ConfigPath,
-            configuration["Storage:RootPath"] ?? ".",
+            configuration["Storage:StatePath"] ?? ".",
             configuration["Storage:KeyRingPath"] ?? "keys");
     }
 

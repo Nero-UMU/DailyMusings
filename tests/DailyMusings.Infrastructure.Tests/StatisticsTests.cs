@@ -83,7 +83,7 @@ public class StatisticsTests
         Assert.AreEqual(0, statistics.QueuePending);
         Assert.AreEqual(0, statistics.QueueRunning);
         Assert.AreEqual(0, statistics.QueueFailed);
-        Assert.IsTrue(statistics.DatabaseBytes >= 256, "The reader measures the database file at the path it is given.");
+        Assert.IsTrue(statistics.DatabaseBytes > 0, "The reader measures the real database at the state root.");
         Assert.AreEqual(0, statistics.PublishedCount);
         Assert.AreEqual(0, statistics.PendingPublicationCount);
     }
@@ -126,23 +126,23 @@ public class StatisticsTests
     private static string ReflectionStatusNamesOf(ReflectionStatus status) => status.ToString();
 
     /// <summary>
-    /// The instance's directory contract, with the database file where the contract says it lives.
+    /// The instance's directory contract.
     /// <para>
-    /// This harness keeps its throwaway database beside the root rather than in <c>data/</c>, so the file the
-    /// statistics reader is told to measure is created here explicitly — the reader must measure the file at the
-    /// path it is configured with, and a test that left it missing would be asserting the wrong thing.
+    /// 2026-09-29 起库直接放在状态根下（附录 A.31），而夹具的库本来就躺在它自己的根目录里——于是
+    /// 「统计读的那个文件」就是夹具真正在用的那个库。旧布局下两者不是同一个文件（库在 <c>data/</c> 下），
+    /// 这里曾因此写过一个假的 256 字节文件去凑数；现在不需要了，断言量到的是真实库。
     /// </para>
     /// </summary>
     private static InstancePaths PathsFor(ReflectionTestContext context)
     {
         var paths = new InstancePaths(new StorageOptions
         {
-            RootPath = context.Database.RootPath,
+            StatePath = context.Database.RootPath,
+            MarkdownRootPath = Path.Combine(context.Database.RootPath, "content"),
             KeyRingPath = Path.Combine(context.Database.RootPath, "keys"),
         });
 
         paths.EnsureCreated();
-        File.WriteAllText(paths.DatabasePath, new string('x', 256));
 
         return paths;
     }

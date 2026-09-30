@@ -31,8 +31,8 @@ public static class StagedRestoreStartupTask
 
         var paths = InstancePaths.FromConfiguration(configuration);
 
-        var pending = Path.Combine(paths.DataDirectory, StagedRestoreService.PendingFileName);
-        var payload = Path.Combine(paths.DataDirectory, StagedRestoreService.StagingDirectoryName, "payload");
+        var pending = Path.Combine(paths.RootPath, StagedRestoreService.PendingFileName);
+        var payload = Path.Combine(paths.RootPath, StagedRestoreService.StagingDirectoryName, "payload");
         var stagedDatabase = Path.Combine(payload, StagedRestoreService.DatabaseEntryName);
 
         if (!File.Exists(pending) || !File.Exists(stagedDatabase))
@@ -45,7 +45,7 @@ public static class StagedRestoreStartupTask
         // The current state is kept, not discarded. If the archive turns out to be the wrong one, the operator has
         // something to go back to — and a restore that silently destroys what it replaced would be the single most
         // dangerous operation in the product.
-        var preserved = Path.Combine(paths.DataDirectory, $"pre-restore-{stamp}.db");
+        var preserved = Path.Combine(paths.RootPath, $"pre-restore-{stamp}.db");
         if (File.Exists(paths.DatabasePath))
         {
             File.Copy(paths.DatabasePath, preserved, overwrite: true);
@@ -55,7 +55,7 @@ public static class StagedRestoreStartupTask
         var media = CopyTree(payload, "media", paths.MediaPath);
         var markdown = CopyTree(payload, "markdown", paths.MarkdownPath);
 
-        Directory.Delete(Path.Combine(paths.DataDirectory, StagedRestoreService.StagingDirectoryName), recursive: true);
+        Directory.Delete(Path.Combine(paths.RootPath, StagedRestoreService.StagingDirectoryName), recursive: true);
         File.Delete(pending);
 
         var description =

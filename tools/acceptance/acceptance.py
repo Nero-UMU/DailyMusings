@@ -29,6 +29,9 @@ from zoneinfo import ZoneInfo
 BASE = os.environ.get("DM_BASE", "http://127.0.0.1:18321")
 MAILPIT = os.environ.get("DM_MAILPIT", "http://127.0.0.1:8025")
 STATE = os.environ.get("DM_STATE", "")
+# 2026-09-29 起状态与 Markdown 是两个挂载点（A.31）：STATE 是配置目录（库、录音、备份、密钥），
+# MARKDOWN 是数据目录（只放稿件，后台填的目录以它为根）。
+MARKDOWN = os.environ.get("DM_MARKDOWN", "")
 WORK = os.environ.get("DM_WORK", "")
 ADMIN_INITIAL_PASSWORD = os.environ.get("DM_ADMIN_INITIAL_PASSWORD", "")
 ADMIN_USER = os.environ.get("DM_ADMIN_USER", "owner")
@@ -536,7 +539,7 @@ def main():
 
     def markdown_files():
         """Every file the instance has written under its markdown root, in walk order."""
-        root = os.path.join(STATE, "markdown", "hexo")
+        root = os.path.join(MARKDOWN, "hexo")
         found = []
         for directory, _dirs, names in os.walk(root):
             for name in names:

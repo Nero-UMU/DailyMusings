@@ -67,7 +67,7 @@ public class JobRecoveryTests
             // the record is simply left running, which is the state this test is about.
             await first.StopAsync();
 
-            var databasePath = Path.Combine(root, "data", "dailymusings.db");
+            var databasePath = first.DatabasePath;
             Assert.IsTrue(File.Exists(databasePath), $"The instance database must exist at {databasePath}.");
 
             Assert.AreEqual(

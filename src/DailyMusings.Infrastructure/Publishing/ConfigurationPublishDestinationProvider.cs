@@ -32,6 +32,12 @@ public sealed class ConfigurationPublishDestinationProvider : IPublishDestinatio
     /// normalized away: silently rewriting somebody's configured path would hide a mistake, and the mistake here
     /// is one that writes files outside the mounted volume.
     /// </summary>
+    /// <summary>
+    /// 把后台填的目录解析成绝对路径。基准是**映射进来的数据目录**（<see cref="InstancePaths.MarkdownPath"/>）：
+    /// 用户映射了 <c>/home/atri/data:/var/lib/dailymusings</c> 并填 <c>aaa/bbb/posts</c>，文件就落在
+    /// <c>/home/atri/data/aaa/bbb/posts</c>——填什么就是宿主上看到的那条相对路径，不需要理解任何中间层级
+    /// （附录 A.31）。
+    /// </summary>
     private string ResolveMarkdownDirectory(PublishTarget target)
     {
         var reference = target.DestinationReference;
@@ -47,7 +53,7 @@ public sealed class ConfigurationPublishDestinationProvider : IPublishDestinatio
         {
             throw new UseCaseException(
                 "publish.markdown.path_not_relative",
-                "A Markdown target's directory must be relative to the instance's markdown root.");
+                "目录要写成相对于数据目录的路径，例如 aaa/bbb/posts；不要写绝对路径。");
         }
 
         foreach (var segment in trimmed.Split('/', StringSplitOptions.RemoveEmptyEntries))
@@ -56,7 +62,7 @@ public sealed class ConfigurationPublishDestinationProvider : IPublishDestinatio
             {
                 throw new UseCaseException(
                     "publish.markdown.path_escapes_root",
-                    "A Markdown target may not point outside the instance's markdown root.");
+                    "目录不能跳出数据目录（不允许 ..）。");
             }
         }
 
@@ -67,7 +73,7 @@ public sealed class ConfigurationPublishDestinationProvider : IPublishDestinatio
         {
             throw new UseCaseException(
                 "publish.markdown.path_escapes_root",
-                "A Markdown target may not point outside the instance's markdown root.");
+                "目录不能跳出数据目录（不允许 ..）。");
         }
 
         return resolved;

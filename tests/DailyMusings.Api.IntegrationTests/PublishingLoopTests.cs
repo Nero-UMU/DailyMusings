@@ -77,7 +77,7 @@ public class PublishingLoopTests
         Assert.AreEqual("device:", publication.TriggeredBy![..7], "§11.1 records which device asked.");
 
         // The file is where the target said, named after the content day, and it is a draft.
-        var fileName = Path.Combine(instance.RootPath, "markdown", "drafts", publication.RemoteId!);
+        var fileName = Path.Combine(instance.MarkdownRoot, "drafts", publication.RemoteId!);
         Assert.IsTrue(File.Exists(fileName), $"Expected {fileName}. Found: {Describe(instance)}");
 
         var content = await File.ReadAllTextAsync(fileName);
@@ -117,7 +117,7 @@ public class PublishingLoopTests
         publish.EnsureSuccessStatusCode();
         var publication = await WaitForPublicationAsync(instance, contentDate, PublicationStatusNames.Published);
         Assert.AreEqual(publishedVersionId, publication.ReflectionVersionId);
-        var publishedDirectory = Path.Combine(instance.RootPath, "markdown", "posts");
+        var publishedDirectory = Path.Combine(instance.MarkdownRoot, "posts");
         var oldFile = Path.Combine(publishedDirectory, publication.RemoteId!);
         Assert.IsTrue(File.Exists(oldFile));
 
@@ -577,7 +577,7 @@ public class PublishingLoopTests
 
     private static string Describe(TestInstance instance)
     {
-        var root = Path.Combine(instance.RootPath, "markdown");
+        var root = instance.MarkdownRoot;
         return Directory.Exists(root)
             ? string.Join(", ", Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
             : "no markdown directory";

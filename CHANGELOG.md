@@ -6,6 +6,44 @@
 
 ---
 
+## 2026-09-29（第十一轮，随 v1.0.8）磁盘布局按「内容 / 状态」切分：data 只放 Markdown
+
+**需求**（用户提出，四条）：①现在的磁盘放置位置要改；②`data` 下只放 Markdown；③其他都放 `config` 下；④后台填的目录要以**映射目录**为根——映射了 `/home/atri/data:/var/lib/dailymusings`、想把正式稿放在 `/home/atri/data/aaa/bbb/posts`，页面里就该填 `aaa/bbb/posts`，而不是只填 `posts`。
+
+**改之前的布局与它的两个缺陷**：
+
+```text
+<数据目录>/               # /var/lib/dailymusings
+  data/dailymusings.db  media/  exports/  backups/  markdown/drafts|posts
+<配置目录>/               # /var/lib/dailymusings-config
+  keys/  runtime.json
+```
+
+1. **要给人看的东西和实例内部状态混在一个目录里**：数据目录是「会整份同步走、会交给 Hexo」的那个，而它里面同时躺着库、录音、备份包和能签发登录 Cookie 的密钥环。按字面理解去用它（整个目录同步走），带走的就是全部状态。
+2. **页面里填的路径与宿主上看到的路径之间隔着一层只存在于代码里的 `markdown/`**：页面写 `posts`，文件落在 `<数据目录>/markdown/posts`；没有办法从页面推断文件到底在哪。
+
+**改之后的布局**：
+
+```text
+<数据目录>（DM_DATA_DIR → /var/lib/dailymusings）        # 只放 Markdown
+  drafts/2026-09-30-今天的记录.md                       # 后台填 drafts
+  aaa/bbb/posts/2026-09-29-昨天的记录.md                # 后台填 aaa/bbb/posts
+<配置目录>（DM_CONFIG_DIR → /var/lib/dailymusings-config）  # 其余全部状态
+  dailymusings.db  dailymusings.db-wal
+  media/  exports/  backups/  keys/  runtime.json
+```
+
+- 配置项随之改名并各归其位：`Storage__StatePath`（= 配置目录）与 `Storage__MarkdownRootPath`（= 数据目录）；`KeyRingPath` / `RuntimeConfigPath` 改为**相对状态根**解析（默认 `keys`、`runtime.json`），因此不再依赖进程工作目录。库从 `<状态根>/data/` 上移到状态根本身。
+- **后台填的目录只有一个基准**：数据目录。绝对路径与 `..` 依旧被拒（`publish.markdown.path_not_relative` / `publish.markdown.path_escapes_root`，报错文案改成中文并给出示例）。管理页两个目录字段的说明与发布卡片各加了一句带例子的提示。
+- 本地开发（`dotnet run`）的默认落点改成 `.dailymusings/state` 与 `.dailymusings/markdown`（一个 gitignore 目录装完，不再把库、录音、备份散在仓库根）。
+
+**破坏性变更，且不做自动迁移**（用户明确同意「不用管迁移，现在可以破坏性更新」）：升级后实例会在新位置建一份空库，旧内容不会自己出现；旧库仍在原地，随时可以挪回来。README「部署参数」与使用手册 §3.3 给了一次性命令（`data/ media/ exports/ backups/` 进配置目录，`markdown/` 下的子目录上移一层）。**不写自动迁移的理由**：跨两个挂载点搬库与媒体属于「错了就没有回头路」的操作，而这次迁移的形状完全取决于用户自己怎么摆目录——与其猜，不如给一条看得懂的命令。凭据与密钥环本来就在配置目录里，不需要动。
+
+**回归方式**：新增 `A_nested_target_directory_is_created_directly_under_the_markdown_root`（填 `aaa/bbb/posts` 就落在 `<Markdown 根>/aaa/bbb/posts`，且整棵 Markdown 根下只有这一个文件）；目录契约由 `SecurityTests` 里遍历 `ManagedDirectories` 的测试覆盖。**布局变更顺带暴露了三处「测试自己重新推导布局」的地方，一并修正**：`StatisticsTests` 曾写一个假的 256 字节库文件去迁就旧布局（现在量的是真实库）；`InstanceDataTests` 的恢复测试让目标库与 `TestDatabase` 的活连接撞在同一个文件上（删 `-wal` 报锁），改为把目标状态根指到子目录并断言「新实例连库都还没有」；集成测试里硬编码的 `<RootPath>/markdown/...`、`<RootPath>/data/dailymusings.db` 改成由 `TestInstance.MarkdownRoot` / `DatabasePath` 统一解析。定案记录见 [`docs/开发指导.md`](docs/开发指导.md) 附录 **A.31**，§5 正文重写了两个根的职责与相对路径规则。
+
+全量测试 596 项绿（Domain 242 / Application 43 / Infrastructure 182 / Client 48 / Api.Integration 81）。
+---
+
 ## 2026-09-29（第十轮，随 v1.0.7）修复：撤销过的设备删不掉（撞外键 → 500 → 页面只给一句「请稍后重试」）
 
 **现象**：管理页「设备」里，已撤回的记录点「确认删除这条记录」删不掉，并弹出「操作没有完成，请稍后重试；如果问题持续，请查看系统设置中的运行日志」。
