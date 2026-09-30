@@ -24,7 +24,7 @@
                         Keyboard="Url" />
                     <Label
                         Style="{StaticResource CaptionLabel}"
-                        Text="填写每日随想服务端的完整地址，例如 http://192.168.1.10:18321。保存后先测试连接，再进行设备配对。" />
+                        Text="服务端地址，含端口，例如 http://192.168.1.10:18321。" />
                     <Grid ColumnDefinitions="*,*" ColumnSpacing="10">
                         <Button Text="保存地址" Clicked="OnSaveServerClicked" />
                         <Button
@@ -64,7 +64,7 @@
                 <VerticalStackLayout Spacing="12">
                     <Label
                         Style="{StaticResource CaptionLabel}"
-                        Text="录音与识别文字都保存在本机，上传成功后也不会被删掉。只有你在这里删除时才会消失。" />
+                        Text="录音与识别文字保存在本机，只有在这里删除才会消失。" />
                     <Label x:Name="LocalUsage" Style="{StaticResource BodyLabel}" />
                     <Button
                         x:Name="ClearLocalButton"
@@ -95,7 +95,7 @@
 
             <Label
                 Style="{StaticResource CaptionLabel}"
-                Text="客户端只保存服务器地址和设备令牌，不保存模型密钥或发布凭据。草稿、主题与发布都在服务端的管理页里。" />
+                Text="本机只保存服务器地址与设备令牌，不保存模型密钥或发布凭据。" />
 
         </VerticalStackLayout>
     </ScrollView>

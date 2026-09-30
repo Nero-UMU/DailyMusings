@@ -113,7 +113,7 @@ public sealed class MergeTopicsUseCase
     {
         if (sourceId == targetId)
         {
-            throw new UseCaseException("topic.merge.self", "A topic cannot be merged into itself.");
+            throw new UseCaseException("topic.merge.self", "主题不能合并到它自己。");
         }
 
         var source = await RenameTopicUseCase.RequireTopicAsync(_topics, sourceId, cancellationToken).ConfigureAwait(false);
@@ -124,7 +124,7 @@ public sealed class MergeTopicsUseCase
             // Merging into a tombstone would leave the material pointing at a topic that no list shows.
             throw new UseCaseException(
                 "topic.merge.target_retired",
-                "The target topic has itself been merged and cannot receive material.");
+                "目标主题自己已经被合并走了，不能再接收内容。");
         }
 
         var now = _clock.UtcNow;

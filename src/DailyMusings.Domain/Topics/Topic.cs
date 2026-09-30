@@ -104,12 +104,12 @@ public sealed class Topic
 
         if (target == Id)
         {
-            throw new DomainException("topic.merge.self", "A topic cannot be merged into itself.");
+            throw new DomainException("topic.merge.self", "主题不能合并到它自己。");
         }
 
         if (target.IsEmpty)
         {
-            throw new DomainException("topic.merge.target_empty", "A merge target is required.");
+            throw new DomainException("topic.merge.target_empty", "要指定合并到哪个主题。");
         }
 
         MergedIntoId = target;
@@ -123,7 +123,7 @@ public sealed class Topic
         var trimmed = name.Trim();
         if (trimmed.Length > 128)
         {
-            throw new DomainException("topic.name.too_long", "A topic name may not exceed 128 characters.");
+            throw new DomainException("topic.name.too_long", "主题名不能超过 128 个字。");
         }
     }
 

@@ -30,7 +30,7 @@ public sealed record ContentRetentionPolicy(int Days)
         {
             throw new DomainException(
                 "retention.days.out_of_range",
-                "Content retention must be a number of days, 0 to delete on confirmation, or -1 to keep forever.");
+                "内容保留要填天数：0 = 草稿确认后立即删除，-1 = 永久保留。");
         }
     }
 

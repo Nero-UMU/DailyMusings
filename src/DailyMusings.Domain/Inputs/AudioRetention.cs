@@ -30,7 +30,7 @@ public sealed record AudioRetentionPolicy(int Days)
         {
             throw new DomainException(
                 "retention.days.out_of_range",
-                "Audio retention must be a number of days, 0 to delete on confirmation, or -1 to keep forever.");
+                "录音保留要填天数：0 = 草稿确认后立即删除，-1 = 永久保留。");
         }
     }
 

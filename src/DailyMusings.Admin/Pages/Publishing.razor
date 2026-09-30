@@ -62,11 +62,11 @@
         <p class="hint schedule-preview">
             今天（@_today）的自动生成时刻是 <strong>@Local(_generationSlot)</strong>；
             这一天的稿件在 <strong>@Local(_publishSlot)</strong> 自动发布
-            @(_publishIsSameDay ? "（发布时间晚于生成时间，所以是当天）" : "（发布时间早于生成时间，所以是次日）")。
+            @(_publishIsSameDay ? "（当天）" : "（次日）")。
         </p>
         <p class="hint">@AutoPublishStateText()</p>
 
-        <p class="notice warn slim">自动发布会按上面的时间，自己把已确认的稿件写成 <code>draft: false</code> 的文件；不会绕过内容核验，也不会公开未经确认的稿件。勾选即生效，保存后立即按新开关执行。</p>
+        <p class="notice warn slim">自动发布会把已确认的稿件按上面的时间写成 <code>draft: false</code> 的文件；未经确认的稿件不会公开。</p>
     </section>
 </div>
 
@@ -75,8 +75,7 @@
         <div><span class="eyebrow">模型</span><h2>博客生成规范</h2></div>
         <button class="btn btn-sm" @onclick="ResetWritingRules" disabled="@_busy">恢复默认清单</button>
     </div>
-    <p class="hint">这些规范会在生成时前置给文章模型，与当天的随想一起提交。默认条目可以直接改写或删掉；
-        全部删掉也有效，那时只会告诉模型篇幅和人称。</p>
+    <p class="hint">生成时与当天的随想一起提交给文章模型。默认条目可以改写或删除。</p>
 
     <div class="form-grid compact-grid">
         <label>最少字数

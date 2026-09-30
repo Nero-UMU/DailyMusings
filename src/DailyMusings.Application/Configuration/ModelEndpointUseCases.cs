@@ -231,7 +231,7 @@ public sealed class UpdateModelEndpointUseCase
             {
                 throw new UseCaseException(
                     "model.dimensions.not_applicable",
-                    "Only the embedding endpoint has a dimension.");
+                    "只有 Embedding 端点有维度。");
             }
 
             await SetAsync(

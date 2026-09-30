@@ -141,7 +141,7 @@ public sealed class Reflection
             {
                 throw new DomainException(
                     "reflection.regeneration.overwrites_manual_edits",
-                    "Regeneration would move a hand-edited version out of the working slot. " +
+                    "重新生成会把手工改过的那一版挤出工作稿位置。 " +
                     "Explicit user confirmation is required.");
             }
 
@@ -176,7 +176,7 @@ public sealed class Reflection
         {
             throw new DomainException(
                 "reflection.confirm.not_working_version",
-                "Only the version currently in the working slot can be confirmed.");
+                "只有当前工作稿可以被确认。");
         }
 
         Transition(ReflectionStatus.Confirmed, at);
@@ -209,7 +209,7 @@ public sealed class Reflection
         {
             throw new DomainException(
                 "reflection.version.none",
-                "This day has no version to switch between yet.");
+                "这一天还没有可切换的版本。");
         }
 
         if (Status == ReflectionStatus.Generating)
@@ -218,7 +218,7 @@ public sealed class Reflection
             // would either be overwritten or would silently discard the result.
             throw new DomainException(
                 "reflection.version.switch_while_generating",
-                "Versions cannot be switched while a generation is in progress.");
+                "正在生成时不能切换版本。");
         }
 
         if (versionId == WorkingVersionId)
@@ -230,7 +230,7 @@ public sealed class Reflection
         {
             throw new DomainException(
                 "reflection.version.not_in_slots",
-                "Only the initial, previous or current version can be made the working version.");
+                "只有初稿、上一版或当前版可以设为工作稿。");
         }
 
         var displaced = WorkingVersionId;

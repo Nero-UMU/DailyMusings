@@ -183,7 +183,7 @@ public sealed class FileMarkdownWriter : IMarkdownWriter
         {
             throw new DomainException(
                 "markdown.path.escapes_root",
-                "The export directory resolves outside the instance's markdown root.");
+                "导出目录跑到了数据目录之外。");
         }
 
         return full;

@@ -111,13 +111,13 @@ docker compose logs app | grep INITIAL-ADMIN-PASSWORD     # 一次性的管理�
 
 两个目录**不需要预先创建，也不需要 chown**：容器入口会把它们建好、把属主改成容器用户（uid 1654），随后降权运行。
 
-**目录是怎么对应的**：假设你映射了 `/home/atri/data:/var/lib/dailymusings`，后台「发布设置」里填 `aaa/bbb/posts`，稿件就写到宿主上的 `/home/atri/data/aaa/bbb/posts`——**填的就是你在宿主机上看到的那条相对路径**，中间没有别的层级。填 `drafts`、`posts` 这类名字就是数据目录下的一级子目录（也是默认值）。不允许绝对路径、不允许 `..`。
+**目录是怎么对应的**：假设你映射了 `/srv/dailymusings/data:/var/lib/dailymusings`，后台「发布设置」里填 `aaa/bbb/posts`，稿件就写到宿主上的 `/srv/dailymusings/data/aaa/bbb/posts`——**填的就是你在宿主机上看到的那条相对路径**，中间没有别的层级。填 `drafts`、`posts` 这类名字就是数据目录下的一级子目录（也是默认值）。不允许绝对路径、不允许 `..`。
 
 ```text
-/home/atri/data                →  /var/lib/dailymusings          # 只放 Markdown
+/srv/dailymusings/data                →  /var/lib/dailymusings          # 只放 Markdown
   drafts/2026-09-30-今天的记录.md
   aaa/bbb/posts/2026-09-29-昨天的记录.md
-/home/atri/config              →  /var/lib/dailymusings-config   # 其余全部状态
+/srv/dailymusings/config       →  /var/lib/dailymusings-config   # 其余全部状态
   dailymusings.db  dailymusings.db-wal
   media/  exports/  backups/
   keys/  runtime.json

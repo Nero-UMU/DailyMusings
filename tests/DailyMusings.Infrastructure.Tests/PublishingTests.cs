@@ -362,8 +362,8 @@ public class PublishingTests
 
     /// <summary>
     /// 后台填的目录**以映射进来的数据目录为根**（附录 A.31）：映射了
-    /// <c>/home/atri/data:/var/lib/dailymusings</c> 之后填 <c>aaa/bbb/posts</c>，稿件就落在
-    /// <c>/home/atri/data/aaa/bbb/posts</c>。这条测试钉住「填什么就写到哪里」——中间不该再冒出一层没人
+    /// <c>/srv/dailymusings/data:/var/lib/dailymusings</c> 之后填 <c>aaa/bbb/posts</c>，稿件就落在
+    /// <c>/srv/dailymusings/data/aaa/bbb/posts</c>。这条测试钉住「填什么就写到哪里」——中间不该再冒出一层没人
     /// 知道的目录（旧布局里那层叫 <c>markdown/</c>）。
     /// </summary>
     [TestMethod]

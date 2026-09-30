@@ -126,7 +126,7 @@ public sealed class SetAutomaticPublishUseCase
         // The audit record needs a name, and §4.1 gives an instance exactly one administrator, so the account is
         // the honest source for it — better than trusting a name that arrived in the request body.
         var account = await _accounts.GetAsync(cancellationToken).ConfigureAwait(false)
-            ?? throw new UseCaseException("admin.not_initialized", "The instance has no administrator yet.");
+            ?? throw new UseCaseException("admin.not_initialized", "这个实例还没有管理员。");
 
         if (enabled)
         {

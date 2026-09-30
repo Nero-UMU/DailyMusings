@@ -54,7 +54,7 @@ public sealed record MarkdownTemplate(string Text)
             // Without it the export would produce everything except the article.
             throw new DomainException(
                 "markdown.template.no_body",
-                "The template must contain the {body} placeholder.");
+                "模板必须包含 {body} 占位符。");
         }
     }
 

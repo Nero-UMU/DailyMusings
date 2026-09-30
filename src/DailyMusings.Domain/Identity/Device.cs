@@ -110,7 +110,7 @@ public sealed class Device
     {
         if (IsRevoked)
         {
-            throw new DomainException("device.revoked", "The device has been revoked.");
+            throw new DomainException("device.revoked", "这台设备的授权已被撤回。");
         }
     }
 }

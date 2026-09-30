@@ -68,12 +68,12 @@ public sealed class PairingCode
     {
         if (IsRedeemed)
         {
-            throw new DomainException("pairing.code.already_used", "The pairing code has already been used.");
+            throw new DomainException("pairing.code.already_used", "这个配对码已经被用过了。");
         }
 
         if (at >= ExpiresAtUtc)
         {
-            throw new DomainException("pairing.code.expired", "The pairing code has expired.");
+            throw new DomainException("pairing.code.expired", "配对码已过期。");
         }
     }
 
@@ -84,7 +84,7 @@ public sealed class PairingCode
 
         if (deviceId.IsEmpty)
         {
-            throw new DomainException("pairing.code.device_required", "A redeemed code must name its device.");
+            throw new DomainException("pairing.code.device_required", "已兑换的配对码必须写明设备。");
         }
 
         UsedAtUtc = at;

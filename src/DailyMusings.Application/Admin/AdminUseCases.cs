@@ -190,11 +190,11 @@ public sealed class ChangeAdminCredentialsUseCase
         CancellationToken cancellationToken)
     {
         var account = await _accounts.GetAsync(cancellationToken).ConfigureAwait(false)
-            ?? throw new UseCaseException("admin.not_initialized", "The administrator account does not exist yet.");
+            ?? throw new UseCaseException("admin.not_initialized", "管理员账号还没有创建。");
 
         if (!_passwordHasher.Verify(currentPassword, account.PasswordHash))
         {
-            throw new UseCaseException("admin.current_password.invalid", "The current password is incorrect.");
+            throw new UseCaseException("admin.current_password.invalid", "当前密码不正确。");
         }
 
         AdminAccount.ValidateUsername(newUsername);
@@ -205,7 +205,7 @@ public sealed class ChangeAdminCredentialsUseCase
         {
             throw new DomainException(
                 "admin.credentials.unchanged",
-                "The new credentials are identical to the current ones.");
+                "新账号与新密码和现在的一样，没有需要保存的变化。");
         }
 
         account.ChangeCredentials(newUsername, _passwordHasher.Hash(newPassword), _clock.UtcNow);

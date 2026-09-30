@@ -596,7 +596,7 @@ public sealed class RunUnsourcedStatementCheckUseCase
         }
 
         var reflection = await _reflections.FindByIdAsync(version.ReflectionId, cancellationToken).ConfigureAwait(false)
-            ?? throw new UseCaseException("reflection.unknown", "The version's reflection no longer exists.");
+            ?? throw new UseCaseException("reflection.unknown", "这个版本所属的稿件已经不存在了。");
 
         var dayInputs = await _inputs
             .ListByContentDateAsync(reflection.ContentDate, cancellationToken)

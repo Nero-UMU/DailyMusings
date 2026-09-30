@@ -263,7 +263,7 @@ public sealed class AssignReflectionVersionTopicsUseCase
 
         if (reflection.WorkingVersionId is not { } versionId)
         {
-            throw new UseCaseException("reflection.version.unknown", "This day has no working version to re-file.");
+            throw new UseCaseException("reflection.version.unknown", "这一天还没有工作稿可以改归主题。");
         }
 
         // Every referenced topic has to exist and still be active. Filing an article under a tombstone would
@@ -298,7 +298,7 @@ public sealed class AssignReflectionVersionTopicsUseCase
         await _reflections.SetVersionTopicsAsync(versionId, ordered, cancellationToken).ConfigureAwait(false);
 
         var updated = await _reflections.FindVersionAsync(versionId, cancellationToken).ConfigureAwait(false)
-            ?? throw new UseCaseException("reflection.version.unknown", "This day has no working version to re-file.");
+            ?? throw new UseCaseException("reflection.version.unknown", "这一天还没有工作稿可以改归主题。");
 
         await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
 

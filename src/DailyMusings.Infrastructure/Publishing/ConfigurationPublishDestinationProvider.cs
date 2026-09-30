@@ -34,8 +34,8 @@ public sealed class ConfigurationPublishDestinationProvider : IPublishDestinatio
     /// </summary>
     /// <summary>
     /// 把后台填的目录解析成绝对路径。基准是**映射进来的数据目录**（<see cref="InstancePaths.MarkdownPath"/>）：
-    /// 用户映射了 <c>/home/atri/data:/var/lib/dailymusings</c> 并填 <c>aaa/bbb/posts</c>，文件就落在
-    /// <c>/home/atri/data/aaa/bbb/posts</c>——填什么就是宿主上看到的那条相对路径，不需要理解任何中间层级
+    /// 用户映射了 <c>/srv/dailymusings/data:/var/lib/dailymusings</c> 并填 <c>aaa/bbb/posts</c>，文件就落在
+    /// <c>/srv/dailymusings/data/aaa/bbb/posts</c>——填什么就是宿主上看到的那条相对路径，不需要理解任何中间层级
     /// （附录 A.31）。
     /// </summary>
     private string ResolveMarkdownDirectory(PublishTarget target)

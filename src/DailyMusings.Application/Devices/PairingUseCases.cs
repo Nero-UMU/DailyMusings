@@ -75,7 +75,7 @@ public sealed class RedeemPairingCodeUseCase
         var codeHash = _secretGenerator.HashPairingCode(code);
 
         var stored = await _codes.FindByCodeHashAsync(codeHash, cancellationToken).ConfigureAwait(false)
-            ?? throw new DomainException("pairing.code.unknown", "The pairing code is not valid.");
+            ?? throw new DomainException("pairing.code.unknown", "配对码无效。");
 
         // Specific, actionable failures: expired and already-used are different user problems.
         stored.EnsureRedeemable(now);
@@ -90,7 +90,7 @@ public sealed class RedeemPairingCodeUseCase
         if (!redeemed)
         {
             // Another request burned the code between the read and the write.
-            throw new DomainException("pairing.code.already_used", "The pairing code has already been used.");
+            throw new DomainException("pairing.code.already_used", "这个配对码已经被用过了。");
         }
 
         return new RedeemedDevice(device.Id, device.Name, token.Plaintext);

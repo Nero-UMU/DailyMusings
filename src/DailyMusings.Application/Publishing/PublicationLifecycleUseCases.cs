@@ -198,7 +198,7 @@ public sealed class CheckRemoteUseCase
             ?? throw new UseCaseException("publication.unknown", $"No publication with id {publicationId}.");
 
         var target = await _targets.FindByIdAsync(publication.PublishTargetId, cancellationToken).ConfigureAwait(false)
-            ?? throw new UseCaseException("publish.target.unknown", "The publish target no longer exists.");
+            ?? throw new UseCaseException("publish.target.unknown", "这个发布目标已经不存在了。");
 
         var destination = await _destinations.ResolveAsync(target, cancellationToken).ConfigureAwait(false);
         var version = await _reflections
@@ -359,7 +359,7 @@ public sealed class ResolveRemoteDivergenceUseCase
                 // contract so a client that offers it gets a refusal that explains itself rather than a 404.
                 throw new UseCaseException(
                     "publication.pull.not_supported",
-                    "A Markdown export cannot be pulled back; read the file instead.");
+                    "Markdown 导出是单向的，不能从文件拉回；请直接读那个文件。");
 
             default:
                 throw new UseCaseException("publication.divergence.unknown_action", $"Unknown action {action}.");

@@ -9,8 +9,8 @@ namespace DailyMusings.Infrastructure.Storage;
 /// </para>
 /// <list type="bullet">
 /// <item><see cref="MarkdownRootPath"/>（容器里是 <c>DM_DATA_DIR</c> 映射进来的目录）——**只放 Markdown**。
-/// 后台「发布设置」里的稿件输出目录与稿件发布目录都以它为根：映射了 <c>/home/atri/data:/var/lib/dailymusings</c>
-/// 之后填 <c>aaa/bbb/posts</c>，文件就落在 <c>/home/atri/data/aaa/bbb/posts</c>。因为它只装稿件，可以整个交给
+/// 后台「发布设置」里的稿件输出目录与稿件发布目录都以它为根：映射了 <c>/srv/dailymusings/data:/var/lib/dailymusings</c>
+/// 之后填 <c>aaa/bbb/posts</c>，文件就落在 <c>/srv/dailymusings/data/aaa/bbb/posts</c>。因为它只装稿件，可以整个交给
 /// Hexo，也可以整份同步走。</item>
 /// <item><see cref="StatePath"/>（容器里是 <c>DM_CONFIG_DIR</c> 映射进来的目录）——**其余全部状态**：SQLite、
 /// 录音、可读导出、备份包、DataProtection 密钥环、管理页保存的凭据、运行时覆盖文件。这些是实例的内部状态，

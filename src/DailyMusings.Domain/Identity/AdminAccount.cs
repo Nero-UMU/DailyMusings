@@ -104,7 +104,7 @@ public sealed partial class AdminAccount
         {
             throw new DomainException(
                 "admin.username.charset",
-                "A username may contain only letters, digits, dot, underscore and hyphen.");
+                "账号只能使用字母、数字、点、下划线与连字符。");
         }
     }
 

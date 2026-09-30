@@ -211,7 +211,7 @@ public sealed class InputEntry
         EnsureNotDeleted();
         if (SourceType != InputSourceType.Voice)
         {
-            throw new DomainException("input.transcription.not_voice", "Only voice entries are transcribed.");
+            throw new DomainException("input.transcription.not_voice", "只有语音随想会转写。");
         }
 
         if (TranscriptionStatus is not (TranscriptionStatus.Pending or TranscriptionStatus.Failed))
@@ -290,7 +290,7 @@ public sealed class InputEntry
         {
             throw new DomainException(
                 "input.transcript.not_ready",
-                "A transcript can only be revised after transcription succeeded.");
+                "转写成功后才能修改转写文字。");
         }
 
         RevisedTranscript = string.IsNullOrWhiteSpace(revisedTranscript) ? null : revisedTranscript.Trim();
@@ -441,7 +441,7 @@ public sealed class InputEntry
     {
         if (IsDeleted)
         {
-            throw new DomainException("input.deleted", "The input has been deleted.");
+            throw new DomainException("input.deleted", "这条随想已经被删除了。");
         }
     }
 }

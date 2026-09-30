@@ -80,7 +80,7 @@ public sealed class UpdateContentSettingsUseCase
         {
             throw new UseCaseException(
                 "content.publish_window.invalid",
-                "The publish window must be at least one minute.");
+                "发布窗口至少要有 1 分钟。");
         }
 
         // -1 means "keep forever" (decision A.1); anything below that is a typo.
@@ -88,7 +88,7 @@ public sealed class UpdateContentSettingsUseCase
         {
             throw new UseCaseException(
                 "content.retention.invalid",
-                "Audio retention must be a number of days, or -1 to keep recordings forever.");
+                "录音保留要填天数，或填 -1 表示永久保留。");
         }
 
         // Same shape and same reasoning as the audio window above. Kept as a separate setting rather than reusing
@@ -98,7 +98,7 @@ public sealed class UpdateContentSettingsUseCase
         {
             throw new UseCaseException(
                 "content.retention.invalid",
-                "Content retention must be a number of days, or -1 to keep captured content forever.");
+                "内容保留要填天数，或填 -1 表示永久保留。");
         }
 
 

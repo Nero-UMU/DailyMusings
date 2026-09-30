@@ -283,12 +283,12 @@ public sealed class RetryTranscriptionUseCase
 
         if (entry.SourceType != InputSourceType.Voice)
         {
-            throw new DomainException("input.retry.not_voice", "Only voice entries have a transcription to retry.");
+            throw new DomainException("input.retry.not_voice", "只有语音随想有转写可以重试。");
         }
 
         if (!entry.HasAudio)
         {
-            throw new DomainException("input.retry.audio_missing", "The audio for this entry is no longer available.");
+            throw new DomainException("input.retry.audio_missing", "这条随想的录音已经不在了。");
         }
 
         entry.RetryTranscription();

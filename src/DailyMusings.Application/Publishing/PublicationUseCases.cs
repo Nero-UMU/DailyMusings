@@ -347,7 +347,7 @@ public sealed class RunPublicationUseCase
         {
             throw new PermanentExternalFailureException(
                 "publication.target_missing",
-                "The publish target no longer exists.");
+                "这个发布目标已经不存在了。");
         }
 
         var settings = await _settings.GetAsync(cancellationToken).ConfigureAwait(false);
