@@ -50,6 +50,25 @@ public class AdminSurfaceTests
     }
 
     /// <summary>
+    /// 设备页的「复制」按钮靠 Admin 项目里的 <c>admin-copy.js</c>；脚本没被引用（或没进产物）时，按钮会直接
+    /// 报错。这条只守「页面引用了它」——「文件确实进了产物」由 deploy/Dockerfile 的断言负责，那是这类缺陷
+    /// 在这个项目里的既定拦截位置（`_framework/blazor.web.js` 那次就是这么修的）。
+    /// </summary>
+    [TestMethod]
+    public async Task The_devices_page_loads_the_clipboard_helper()
+    {
+        await using var instance = await TestInstance.StartAsync();
+        await instance.SignInAsChangedAdministratorAsync();
+
+        using var response = await instance.Client.GetAsync("/devices");
+        var html = WebUtility.HtmlDecode(await response.Content.ReadAsStringAsync());
+
+        Assert.IsTrue(
+            html.Contains("_content/DailyMusings.Admin/admin-copy.js", StringComparison.Ordinal),
+            $"设备页没有引用剪贴板脚本，明文 HTTP 下「复制配对码」会必然失败：\n{html}");
+    }
+
+    /// <summary>
     /// Under a deployment that owns the port, the system page must not offer the edit at all: a form that saves a
     /// value the published mapping cannot follow is a button whose only outcome is an instance nobody can reach.
     /// The section stays — it becomes a statement of where the port is decided.

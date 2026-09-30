@@ -30,6 +30,9 @@
     @* Static SSR for the shell: the forms post to real endpoints and need the HTTP request context, while the
        data pages opt into interactivity themselves. *@
     <Routes />
+    @* 剪贴板兜底：明文 HTTP 下 navigator.clipboard 不存在，复制按钮需要 document.execCommand 那条路。
+       放在 blazor.web.js 之前，免得首次点击时函数还没定义。 *@
+    <script src="_content/DailyMusings.Admin/admin-copy.js"></script>
     <script src="_framework/blazor.web.js"></script>
 </body>
 

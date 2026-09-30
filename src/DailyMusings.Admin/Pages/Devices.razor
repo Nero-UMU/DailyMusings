@@ -438,28 +438,54 @@ else
     }
 
     /// <summary>
-    /// 复制到剪贴板。走 <c>navigator.clipboard</c>，它在明文 HTTP 下被浏览器禁用（只有 HTTPS 与 localhost 可用），
-    /// 所以失败不是异常情况而是一种正常结果：提示手动选中复制，而不是让操作者以为按钮坏了。
+    /// 复制到剪贴板。走 <c>window.dmCopy</c>（Admin 项目的 <c>admin-copy.js</c>）：它先试
+    /// <c>navigator.clipboard</c>，失败再退回 <c>document.execCommand('copy')</c>。
+    /// <para>
+    /// 这里此前只走 <c>navigator.clipboard</c>，于是明文 HTTP 下（本实例的默认形态：局域网、VPN）
+    /// 那个对象是 <c>undefined</c>，按钮**必然**失败，页面还把结果说成「浏览器没有允许自动复制」。
+    /// 实测过：同一个明文页面上 <c>document.execCommand('copy')</c> 返回 true 且内容真的进了剪贴板，
+    /// 所以那不是浏览器做不到，只是没写兜底。禁用自动复制也没有换来安全 —— 这串码在明文 HTTP 上
+    /// 本来就在网络里裸传，而且照样显示在页面上，手动选中一样能复制。
+    /// </para>
     /// </summary>
     private async Task CopyAsync(string value)
     {
         _message = null;
         _error = null;
 
+        var outcome = new CopyOutcome();
         var failure = await AdminOperation.RunAsync(
             async () =>
             {
-                await Js.InvokeVoidAsync("navigator.clipboard.writeText", value);
+                outcome = await Js.InvokeAsync<CopyOutcome>("dmCopy", value);
             },
             Logger);
 
-        if (failure is null)
+        if (failure is not null)
         {
-            _message = "已复制到剪贴板。";
+            _error = failure;
             return;
         }
 
-        // The JS exception text is a browser message and would be noise here; what matters is what to do instead.
-        _message = "浏览器没有允许自动复制（明文 HTTP 下会禁用剪贴板）。请在上面的框里手动选中后复制。";
+        if (outcome.Ok)
+        {
+            _message = outcome.Secure
+                ? "已复制到剪贴板。"
+                : "已复制到剪贴板。当前是明文 HTTP 连接，这串码在传输途中可能被看到。";
+            return;
+        }
+
+        // 两条路都失败（浏览器策略、权限被拒、页面失焦）：这时才让人手动选中。
+        _message = "浏览器不允许自动复制。请在上面的框里手动选中后复制。";
+    }
+
+    /// <summary><c>dmCopy</c> 的返回值，字段名与 JS 里返回的对象对应。</summary>
+    private sealed class CopyOutcome
+    {
+        public bool Ok { get; set; }
+
+        public bool Secure { get; set; }
+
+        public string? How { get; set; }
     }
 }

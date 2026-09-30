@@ -28,9 +28,11 @@ RUN dotnet publish src/DailyMusings.Server/DailyMusings.Server.csproj \
 # The admin pages reference _framework/blazor.web.js, and the framework does not publish it unless the host project
 # itself contains a Razor component. Without the script the pages render and every button on them silently does
 # nothing, which is a defect nobody sees until they try to use the page — so the build fails here instead of shipping
-# that. The stylesheet is asserted alongside it for the same reason.
+# that. The stylesheet and the clipboard helper are asserted alongside it for the same reason: a missing
+# admin-copy.js only shows up as a broken 复制 button on the devices page, and only over plain HTTP.
 RUN test -f /app/wwwroot/_framework/blazor.web.js \
-    && test -f /app/wwwroot/_content/DailyMusings.Admin/admin.css
+    && test -f /app/wwwroot/_content/DailyMusings.Admin/admin.css \
+    && test -f /app/wwwroot/_content/DailyMusings.Admin/admin-copy.js
 
 # Runtime stage.
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
