@@ -53,7 +53,7 @@ public sealed class ConfigurationPublishDestinationProvider : IPublishDestinatio
         {
             throw new UseCaseException(
                 "publish.markdown.path_not_relative",
-                "目录要写成相对于数据目录的路径，例如 aaa/bbb/posts；不要写绝对路径。");
+                "目录要写成相对于数据目录的路径；不要写绝对路径。");
         }
 
         foreach (var segment in trimmed.Split('/', StringSplitOptions.RemoveEmptyEntries))
