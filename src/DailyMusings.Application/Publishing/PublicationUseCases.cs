@@ -151,13 +151,12 @@ public sealed class RequestPublicationUseCase
             return new PublicationRequestResult(PublicationRequestOutcome.Refused, "publish.target.unknown", "That publish target does not exist.", null, null);
         }
 
-        // Which version this request is about (附录 A.33, 2026-09-30):
+        // Which version this request is about (附录 A.33、A.36, 2026-09-30):
         //
-        // - **手动发布**仍然只发「已确认」的那一版。管理页在点「发布稿件」时会先替你确认，所以人工路径没有变化；
-        //   直接调接口的人得到的回答也仍然是「先确认」。
+        // - **手动发布**只发「已确认」的那一版。管理页在点「发布稿件」时会先替你确认，所以人工路径没有变化；
+        //   直接调接口的人得到的回答仍然是「先确认」。
         // - **自动发布**在目标勾选了「允许自动公开发布」时发**当天的工作稿**：勾选本身就是那个授权，不再要求先有
-        //   人确认（用户要求：勾上就到点自动发布当天生成的稿件）。它不会顺手把稿件标记为已确认——确认意味着
-        //   「人核验过」，并且会启动录音/内容的保留计时、冻结这一天的重新生成，那些副作用不该由一个勾选触发。
+        //   人确认。发布成功之后由 RunPublicationUseCase 把这一天标为已确认（A.36：没人管就等于认可）。
         // - 目标**没勾选**时，自动路径仍要求已确认：§11.1 原来的「默认只生成私人草稿，由你核验后才发布」对它成立。
         var versionId = manual
             ? reflection.Status == ReflectionStatus.Confirmed ? reflection.ConfirmedVersionId : null
@@ -452,6 +451,7 @@ public sealed class RunPublicationUseCase
                 payload,
                 publishPublicly,
                 settings.HexoFrontMatterTemplate,
+                settings.CreateCalendar().TimeZone.TimeZoneInfo,
                 cancellationToken).ConfigureAwait(false);
 
             foreach (var previous in previousPublications)
@@ -477,6 +477,25 @@ public sealed class RunPublicationUseCase
             }
 
             await _publications.UpdateAsync(publication, cancellationToken).ConfigureAwait(false);
+
+            // 附录 A.36（2026-09-30）：勾了自动公开而没有人干预时，没有干预即视为认可——
+            // 公开发布成功后把这一天确认为「已确认」，页面不再停在「待核验」。
+            //
+            // 走到 Published 的自动发布必然来自勾选了自动公开的目标（domain 里 `PublicationPlanner` 只在
+            // 「目标勾选 + 请求公开」时才给 PublishPublicly），所以这里不需要再判一次开关。
+            //
+            // 刻意不走 ConfirmReflectionUseCase：那条路要求来源核查跑完、并且要求显式接受无依据的句子，
+            // 那是留给人的确认闸门；「没人管就等于认可」是另一回事，两者不能混。工作稿与已发布版本必须同一版，
+            // 否则说明这一天已经走到别的版本上（那种情况下由失效逻辑处理，不在这里确认）。
+            if (outcome.Outcome == PublicationRunOutcome.Published &&
+                publication.Trigger == PublicationTrigger.Automatic &&
+                reflection.WorkingVersionId == publication.ReflectionVersionId &&
+                reflection.Status != ReflectionStatus.Confirmed)
+            {
+                reflection.Confirm(publication.ReflectionVersionId, _clock.UtcNow);
+                await _reflections.UpdateAsync(reflection, cancellationToken).ConfigureAwait(false);
+            }
+
             await NotifyAsync(publication, publication.Status, target.Name, publication.ErrorCode, cancellationToken)
                 .ConfigureAwait(false);
 
@@ -512,11 +531,12 @@ public sealed class RunPublicationUseCase
         PublicationPayload payload,
         bool publishPublicly,
         string hexoFrontMatterTemplate,
+        TimeZoneInfo contentTimeZone,
         CancellationToken cancellationToken)
     {
         // Visibility means one thing for a file: whether Hexo is told this post is still a draft. That is the
         // front matter's `draft` field, and it is the whole of what "公开" can be for the only target kind left.
-        var document = MarkdownDocument.From(version, contentDate, isDraft: !publishPublicly);
+        var document = MarkdownDocument.From(version, contentDate, contentTimeZone, isDraft: !publishPublicly);
         var content = new MarkdownTemplate(hexoFrontMatterTemplate).Render(document);
 
         var baseName = MarkdownFileName.BaseName(contentDate, document.Slug);

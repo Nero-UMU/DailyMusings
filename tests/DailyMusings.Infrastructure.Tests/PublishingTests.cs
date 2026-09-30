@@ -726,7 +726,7 @@ public class PublishingTests
     {
         await using var context = await PublishingTestContext.CreateAsync();
         var target = await context.AddTargetAsync("hexo", PublishTargetType.Markdown, destination: "drafts");
-        await context.SeedConfirmedDraftAsync(Day(context), title: "今天的记录");
+        var (_, version) = await context.SeedConfirmedDraftAsync(Day(context), title: "今天的记录");
 
         var request = await context.Request.ExecuteAsync(
             Day(context), target.Id, PublicationVisibility.Draft, "owner", false, true, CancellationToken.None);
@@ -739,7 +739,13 @@ public class PublishingTests
 
         var content = await ReadExportedAsync(context, "drafts", stored.RemoteId!);
         StringAssert.Contains(content, "title: \"今天的记录\"");
-        StringAssert.Contains(content, "date: 2026-03-11 00:00:00");
+
+        // 附录 A.37：date/updated 现在是稿件自己的时刻（按配置时区渲染），不再是内容日的午夜。
+        var expected = TimeZoneInfo
+            .ConvertTime(version.CreatedAtUtc, context.Content.Settings.CreateCalendar().TimeZone.TimeZoneInfo)
+            .ToString("yyyy-MM-dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture);
+        StringAssert.Contains(content, $"date: {expected}");
+        StringAssert.Contains(content, $"updated: {expected}");
         StringAssert.Contains(content, "draft: true");
         StringAssert.Contains(content, "第一段。");
     }
@@ -961,10 +967,10 @@ public class PublishingTests
         Assert.AreEqual(PublicationStatus.Published, stored!.Status);
 
         var after = await context.Reflections.FindByIdAsync(reflection.Id, CancellationToken.None);
-        Assert.AreNotEqual(
+        Assert.AreEqual(
             ReflectionStatus.Confirmed,
             after!.Status,
-            "自动发布不是「确认」：确认要由人来做，保留计时也不该被一个勾选启动。");
+            "附录 A.36：勾了自动公开而用户没有干预，公开发布成功即视为认可——页面不该停在「待核验」。");
     }
 
     /// <summary>

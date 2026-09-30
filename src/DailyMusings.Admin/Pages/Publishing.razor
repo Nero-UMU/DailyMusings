@@ -66,7 +66,7 @@
         </p>
         <p class="hint">@AutoPublishStateText()</p>
 
-        <p class="notice warn slim">自动公开开启时，到点把当天生成的稿件写成 <code>draft: false</code> 的文件；没开启时只写
+        <p class="notice warn slim">自动公开开启时，到点把当天生成的稿件写成 <code>draft: false</code> 的文件并视作已确认；没开启时只写
             <code>draft: true</code> 的草稿。已公开的文件不会被自动替换。</p>
     </section>
 </div>
@@ -369,7 +369,7 @@
             _ when TodayPublicationStatus() == PublicationStatus.Published => "今天已经发布过了。",
             ReflectionStatus.Confirmed => "今天已确认，到上面的时刻会自动发布。",
             _ => _automaticPublish
-                ? "今天还没确认；已开启自动公开，到点会直接发布这一版。"
+                ? "今天还没确认；已开启自动公开，到点发布这一版并视为已确认。"
                 : "今天还没确认；没开自动公开时，自动发布只处理已确认的稿件。",
         };
 

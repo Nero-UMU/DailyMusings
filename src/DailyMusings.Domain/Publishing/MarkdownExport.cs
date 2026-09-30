@@ -94,10 +94,12 @@ public sealed record MarkdownTemplate(string Text)
     private static string Value(string name, MarkdownDocument document) => name switch
     {
         "title" => YamlScalar.Escape(document.Title),
-        "date" => document.ContentDate.Value
-            .ToDateTime(TimeOnly.MinValue)
-            .ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture),
-        "updated" => document.UpdatedAtUtc.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture),
+
+        // 2026-09-30（附录 A.37）：两个时间都是**稿件自己的时刻**，都按配置的内容时区渲染。
+        // 它们刻意来自两个不同的来源：date 是这一版生成的时刻，updated 是它最后一次改动的时刻——
+        // 现在两者通常相同，但重新生成/编辑时 updated 会走、date 不会，所以不能共用一个值。
+        "date" => document.GeneratedAt.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture),
+        "updated" => document.UpdatedAt.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture),
         "tags" => YamlScalar.FlowSequence(document.Tags),
         "categories" => YamlScalar.FlowSequence(document.Categories),
         "draft" => document.IsDraft ? "true" : "false",
@@ -144,23 +146,43 @@ public sealed record MarkdownDocument(
     IReadOnlyList<string> Tags,
     IReadOnlyList<string> Categories,
     ContentDate ContentDate,
-    DateTimeOffset UpdatedAtUtc,
+
+    /// <summary>这一版**生成**的时刻，已换算到配置的内容时区（front matter 的 <c>date</c>）。</summary>
+    DateTimeOffset GeneratedAt,
+
+    /// <summary>这一版**最后一次改动**的时刻，同样在配置的内容时区里（front matter 的 <c>updated</c>）。</summary>
+    DateTimeOffset UpdatedAt,
+
     bool IsDraft,
     string Slug)
 {
     /// <summary>
-    /// Builds the document for a version. The post date is the <em>content day</em>, not today: §7 makes that
-    /// day the day the material belongs to, and a blog whose dates drift from that would misreport when things
-    /// happened — which is the same promise the recall boundary protects.
+    /// Builds the document for a version.
+    /// <para>
+    /// 2026-09-30 改变过（附录 A.37）：front matter 的 <c>date</c> 曾经是**内容日期的 00:00:00**，而
+    /// <c>updated</c> 是按 **UTC** 打印的——于是同一份文件里出现两个都不对的时间（用户看到 06:45:28，
+    /// 本地其实是 14:45:28）。现在两个时间都是稿件自己的时刻，并且都按**配置的内容时区**渲染：
+    /// <c>date</c> = 这一版生成的时刻，<c>updated</c> = 这一版最后一次改动的时刻。它们现在通常相等，
+    /// 但语义不同（重新生成会同时刷新两者，编辑只动 <c>updated</c>），所以是两个字段而不是一个。
+    /// </para>
     /// </summary>
     /// <param name="isDraft">
     /// What the front matter's <c>draft</c> field says, and the only thing visibility can mean for a file: Hexo
     /// does not generate a post whose <c>draft</c> is true, so "publish publicly" for a Markdown target is exactly
     /// this flag being false. Defaults to draft, which is §11.1's default outcome for anything unattended.
     /// </param>
-    public static MarkdownDocument From(ReflectionVersion version, ContentDate contentDate, bool isDraft = true)
+    /// <param name="timeZone">
+    /// The configured content time zone (§7). Required rather than optional: an optional parameter is how the two
+    /// timestamps above silently became UTC in the first place.
+    /// </param>
+    public static MarkdownDocument From(
+        ReflectionVersion version,
+        ContentDate contentDate,
+        TimeZoneInfo timeZone,
+        bool isDraft = true)
     {
         ArgumentNullException.ThrowIfNull(version);
+        ArgumentNullException.ThrowIfNull(timeZone);
 
         return new MarkdownDocument(
             version.Title,
@@ -169,7 +191,8 @@ public sealed record MarkdownDocument(
             version.Tags,
             version.Categories,
             contentDate,
-            version.EditedAtUtc ?? version.CreatedAtUtc,
+            TimeZoneInfo.ConvertTime(version.CreatedAtUtc, timeZone),
+            TimeZoneInfo.ConvertTime(version.EditedAtUtc ?? version.CreatedAtUtc, timeZone),
             IsDraft: isDraft,
             Slug: MarkdownSlug.From(version.Title));
     }

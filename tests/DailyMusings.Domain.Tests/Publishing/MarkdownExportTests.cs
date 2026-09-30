@@ -1,4 +1,5 @@
 using DailyMusings.Domain.Publishing;
+using DailyMusings.Domain.Time;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace DailyMusings.Domain.Tests.Publishing;
@@ -22,7 +23,10 @@ public class MarkdownExportTests
             tags ?? ["记录", "录音"],
             categories ?? ["随想"],
             TestFactory.Day(10),
-            TestFactory.Noon,
+
+            // 两个时间字段语义不同，但在「没被重新编辑过」的普通情形下就是同一个值。
+            GeneratedAt: TestFactory.Noon,
+            UpdatedAt: TestFactory.Noon,
             IsDraft: true,
             Slug: MarkdownSlug.From(title));
 
@@ -32,7 +36,12 @@ public class MarkdownExportTests
         var text = MarkdownTemplate.DefaultTemplate.Render(Document());
 
         StringAssert.Contains(text, "title: \"今天的记录\"");
-        StringAssert.Contains(text, "date: 2026-03-10 00:00:00");
+
+        // date/updated 是稿件自己的时刻（这里直接构造文档，所以就是 TestFactory.Noon）。
+        // 具体的时区换算由 The_front_matter_times_are_the_drafts_own_times_in_the_configured_zone 钉住。
+        var stamp = TestFactory.Noon.ToString("yyyy-MM-dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture);
+        StringAssert.Contains(text, $"date: {stamp}");
+        StringAssert.Contains(text, $"updated: {stamp}");
         StringAssert.Contains(text, "tags: [\"记录\", \"录音\"]");
         StringAssert.Contains(text, "categories: [\"随想\"]");
         StringAssert.Contains(text, "draft: true");
@@ -215,16 +224,41 @@ public class MarkdownExportTests
     }
 
     [TestMethod]
-    public void The_document_uses_the_content_day_not_the_day_it_was_exported()
+    public void The_document_carries_the_content_day_and_starts_as_a_draft()
     {
-        // §7's content day is when the material belongs; a post dated the export day would misreport when the
-        // things in it happened, which is the same promise the recall boundary protects.
+        // §7 的内容日期仍是文件名的日期与文档的 ContentDate；2026-09-30 起 front matter 的 date 换成了
+        // 稿件自己的生成时刻（附录 A.37），那是同一份文件里两件不同的事。
         var reflection = TestFactory.NewReflection(TestFactory.Day(10));
         var version = TestFactory.NewVersion(reflection);
 
-        var document = MarkdownDocument.From(version, TestFactory.Day(10));
+        var document = MarkdownDocument.From(version, TestFactory.Day(10), ContentTimeZone.FromId("Asia/Shanghai").TimeZoneInfo);
 
         Assert.AreEqual(TestFactory.Day(10), document.ContentDate);
         Assert.IsTrue(document.IsDraft, "An exported draft stays a draft until the user says otherwise.");
+    }
+
+    /// <summary>
+    /// 附录 A.37（2026-09-30 用户反馈）：线上文件里出现 <c>date: 2026-09-30 00:00:00</c>（内容日的午夜）与
+    /// <c>updated: 2026-09-30 06:45:28</c>（其实是 UTC），两个都不对。现在两个时间都取自稿件本身、都按配置的
+    /// 内容时区渲染：<c>date</c> = 这一版生成的时刻，<c>updated</c> = 这一版最后一次改动的时刻。
+    /// </summary>
+    [TestMethod]
+    public void The_front_matter_times_are_the_drafts_own_times_in_the_configured_zone()
+    {
+        var zone = ContentTimeZone.FromId("Asia/Shanghai").TimeZoneInfo;
+        var reflection = TestFactory.NewReflection(TestFactory.Day(10));
+        var version = TestFactory.NewVersion(reflection);
+
+        var document = MarkdownDocument.From(version, TestFactory.Day(10), zone);
+        var text = MarkdownTemplate.DefaultTemplate.Render(document);
+
+        var expectedGenerated = TimeZoneInfo.ConvertTime(version.CreatedAtUtc, zone).ToString("yyyy-MM-dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture);
+
+        StringAssert.Contains(text, $"date: {expectedGenerated}");
+        StringAssert.Contains(text, $"updated: {expectedGenerated}");
+        Assert.AreNotEqual(
+            $"{TestFactory.Day(10).Value:yyyy-MM-dd} 00:00:00",
+            expectedGenerated,
+            "内容日的午夜是旧行为，正是用户看到的那一行错误时间。");
     }
 }

@@ -47,7 +47,7 @@ public sealed class ExportWorkingDraftUseCase
             PublishTargetType.Markdown,
             settings.DraftDirectory);
         var destination = await _destinations.ResolveAsync(target, cancellationToken).ConfigureAwait(false);
-        var document = MarkdownDocument.From(version, contentDate, isDraft: true);
+        var document = MarkdownDocument.From(version, contentDate, settings.CreateCalendar().TimeZone.TimeZoneInfo, isDraft: true);
         var content = new MarkdownTemplate(settings.HexoFrontMatterTemplate).Render(document);
         var write = await _markdown.WriteAsync(
             new MarkdownWriteRequest(

@@ -156,7 +156,7 @@ public sealed class SchedulePublicationsUseCase
 
             foreach (var target in targets)
             {
-                // 附录 A.33（2026-09-30 用户要求）：勾选了「允许自动公开发布」的目标发**当天的工作稿**——勾选本身就是
+                // 附录 A.33（2026-09-30）：勾选了「允许自动公开发布」的目标发**当天的工作稿**——勾选本身就是
                 // 那个授权，不再要求先有人确认；没勾选的目标保持 §11.1 原文，只发已确认的稿。
                 var versionToPublish = target.AutomaticPublishEnabled
                     ? reflection.WorkingVersionId

@@ -269,6 +269,7 @@ public sealed class CheckRemoteUseCase
                     MarkdownDocument.From(
                         version,
                         reflection.ContentDate,
+                        settings.CreateCalendar().TimeZone.TimeZoneInfo,
                         isDraft: publication.Status != PublicationStatus.Published)));
     }
 }

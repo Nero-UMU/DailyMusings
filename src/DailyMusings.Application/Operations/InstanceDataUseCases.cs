@@ -264,7 +264,7 @@ public sealed class BuildInstanceDataUseCase
                 {
                     // The article itself, rendered the same way the Markdown target renders it, so the export is
                     // readable on its own rather than only through a viewer this project wrote.
-                    var document = MarkdownDocument.From(version, reflection.ContentDate);
+                    var document = MarkdownDocument.From(version, reflection.ContentDate, settings.CreateCalendar().TimeZone.TimeZoneInfo);
                     files.Add(new ExportedFile(
                         $"markdown/{MarkdownFileName.BaseName(reflection.ContentDate, document.Slug)}.md",
                         MarkdownTemplate.DefaultTemplate.Render(document)));

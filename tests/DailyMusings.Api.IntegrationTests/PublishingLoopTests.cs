@@ -81,7 +81,16 @@ public class PublishingLoopTests
         Assert.IsTrue(File.Exists(fileName), $"Expected {fileName}. Found: {Describe(instance)}");
 
         var content = await File.ReadAllTextAsync(fileName);
-        StringAssert.Contains(content, $"date: {contentDate} 00:00:00");
+        // 附录 A.37：date/updated 都是稿件自己的生成时刻（按配置时区），不再是内容日的午夜。
+        // 具体时区换算由域测试钉住，这里只断言形状与两者一致（这一版没有被重新编辑过）。
+        var dateLine = content.Split('\n').First(line => line.StartsWith("date:", StringComparison.Ordinal)).Trim();
+        var updatedLine = content.Split('\n').First(line => line.StartsWith("updated:", StringComparison.Ordinal)).Trim();
+        Assert.IsTrue(System.Text.RegularExpressions.Regex.IsMatch(dateLine, @"^date: \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$"), dateLine);
+        Assert.IsTrue(System.Text.RegularExpressions.Regex.IsMatch(updatedLine, @"^updated: \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$"), updatedLine);
+        Assert.AreEqual(
+            dateLine["date: ".Length..],
+            updatedLine["updated: ".Length..],
+            "没被重新编辑过时，两个时刻的值是同一个。");
         StringAssert.Contains(content, "draft: true");
 
         // And nothing was mailed: this was a manual action, and §12's events are about things that happen without
