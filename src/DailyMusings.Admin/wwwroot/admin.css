@@ -1,5 +1,5 @@
 /* ============================================================================
-   每日随想 · 管理页样式
+   每日随想 · 管理页样式（Apple / iOS 深色，见 docs/开发指导.md §22 与附录 A.38）
    ----------------------------------------------------------------------------
    八个功能分区共用一套设计令牌与语义化类名（.app/.sidebar/.nav/.content/.card/
    .btn/.table/…），页面只组合这些类，不写内联布局。
@@ -8,38 +8,78 @@
      ① 危险操作（撤回授权、删除随想、还原备份）与普通操作在视觉上分得开（.btn-danger/.risk）；
      ② 窄屏（<900px）侧栏折叠成顶部菜单，而不是把内容挤没。
 
-   调色板按规格固定：主色 #3B82F6、危险 #EF4444、成功 #10B981、正文 #1F2937、
-   次要文字 #6B7280、背景 #F5F7FA、卡片 #FFFFFF。
+   调色板按 iOS 深色规格固定，且**只从下面的 :root 取**：主色是 systemBlue #0A84FF，
+   危险 #FF453A，成功 #30D158，警告 #FF9F0A；底色分三层 #000000 → #1C1C1E → #2C2C2E；
+   文字 #FFFFFF / rgba(235,235,245,.60)。本文件不允许再出现令牌之外的硬编码颜色值。
    ========================================================================== */
 
 :root {
-    color-scheme: light;
+    color-scheme: dark;
 
-    /* 主色与语义色 */
-    --primary: #3B82F6;
-    --primary-dark: #2563EB;
-    --primary-soft: #EFF6FF;
-    --danger: #EF4444;
-    --danger-dark: #DC2626;
-    --danger-soft: #FEF2F2;
-    --ok: #10B981;
-    --ok-soft: #ECFDF5;
-    --warn: #F59E0B;
-    --warn-soft: #FFFBEB;
+    /* ── 分层：iOS 深色用三层底色表达深度，不用投影 ── */
+    --bg: #000000;              /* systemBackground：窗口底 */
+    --card: #1C1C1E;            /* secondarySystemBackground：卡片 */
+    --card-2: #2C2C2E;          /* tertiarySystemBackground：抬起的行、输入格、分段槽 */
+    --card-3: #3A3A3C;          /* quaternary：分段控件的选中片 */
+    --head-bg: #2C2C2E;         /* 表头 / 分组表头 / 次级面板 */
+    --logo-bg: #FFFFFF;         /* logo 位图本身是白底，给它一块白瓷砖 */
 
-    /* 文字与背景 */
-    --text: #1F2937;
-    --muted: #6B7280;
-    --border: #E5E7EB;
-    --border-strong: #D1D5DB;
-    --bg: #F5F7FA;
-    --card: #FFFFFF;
-    --head-bg: #F9FAFB;
+    /* ── 分隔线 ── */
+    --border: rgba(84, 84, 88, 0.65);
+    --border-strong: #48484A;
 
-    /* 形状与尺寸 */
-    --radius: 12px;
-    --radius-sm: 8px;
-    --shadow: 0 1px 2px rgba(17, 24, 39, 0.04), 0 1px 3px rgba(17, 24, 39, 0.06);
+    /* ── 文字（三层） ── */
+    --text: #FFFFFF;                        /* label */
+    --muted: rgba(235, 235, 245, 0.60);     /* secondaryLabel */
+
+    /* ── 语义色（iOS 深色） ──
+       深色下 hover/按下是「变亮」而不是变暗；--*-dark 是历史名字，含义是强调态。 */
+    --primary: #0A84FF;         /* systemBlue */
+    --primary-dark: #409CFF;
+    --primary-soft: rgba(10, 132, 255, 0.18);
+    --primary-border: rgba(10, 132, 255, 0.45);
+    --danger: #FF453A;          /* systemRed */
+    --danger-dark: #FF6961;
+    --danger-soft: rgba(255, 69, 58, 0.16);
+    --danger-border: rgba(255, 69, 58, 0.40);
+    --danger-text: #FF8A80;
+    --ok: #30D158;              /* systemGreen */
+    --ok-soft: rgba(48, 209, 88, 0.16);
+    --ok-border: rgba(48, 209, 88, 0.40);
+    --ok-text: #6EE7A0;
+    --warn: #FF9F0A;            /* systemOrange */
+    --warn-soft: rgba(255, 159, 10, 0.16);
+    --warn-border: rgba(255, 159, 10, 0.40);
+    --warn-text: #FFCB6B;
+    --info-text: #7FBFFF;
+    --on-accent: #FFFFFF;
+    --ring: rgba(10, 132, 255, 0.22);   /* 选中环：深色下用它代替投影 */
+
+    /* ── 日志控制台 ── */
+    --log-bg: #000000;
+    --log-text: #E5E5EA;
+    --log-time: rgba(235, 235, 245, 0.55);   /* 0.40 时压在纯黑上是 3.25:1，读不清；0.55 得 5.4:1 */
+    --log-level: var(--primary-dark);
+    --log-warn: #FFD60A;
+    --log-error: var(--danger);
+
+    /* ── 登录页左栏（深色渐变） ── */
+    --hero-a: #050A14;
+    --hero-b: #0A2540;
+    --hero-text: #F5F5F7;
+    --hero-kicker: #7FBFFF;
+    --hero-chip-border: rgba(235, 235, 245, 0.20);
+
+    /* ── 形状与尺寸 ── */
+    --radius: 14px;             /* 卡片：12–16px */
+    --radius-sm: 10px;          /* 控件：10px */
+    --radius-lg: 20px;          /* 大容器：20px */
+    --shadow: none;             /* 深色不用投影；深度由上面的分层色表达 */
+
+    /* 动效：iOS 的缓动与用时 */
+    --ease: cubic-bezier(0.32, 0.72, 0, 1);
+    --dur: 150ms;
+
     --control-h: 36px;
     --sidebar-w: 220px;
 
@@ -47,7 +87,8 @@
     --cell-h: 64px;
 
     --mono: ui-monospace, "Cascadia Mono", SFMono-Regular, Consolas, "Liberation Mono", monospace;
-    --sans: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, "Segoe UI Variable Text",
+        "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
 }
 
 * {
@@ -110,7 +151,7 @@ hr {
 }
 
 code {
-    background: #F3F4F6;
+    background: var(--card-2);
     border-radius: 6px;
     font-family: var(--mono);
     font-size: 0.85em;
@@ -195,7 +236,7 @@ pre code {
 
 /* 品牌标记是 logo 位图（白底），所以这里不再有背景色与字号——那些是它还是「每」字时的样式。 */
 .brand-mark {
-    background: #fff;
+    background: var(--logo-bg);
     border: 1px solid var(--border);
     border-radius: 10px;
     display: inline-flex;
@@ -311,8 +352,8 @@ pre code {
 
 /* 登录页：信息与表单分栏，窄屏时自然收成一张卡片。 */
 .login-page {
-    background: #f8fafc;
-    border-radius: 1.4rem;
+    background: var(--bg);
+    border-radius: var(--radius-lg);
     display: grid;
     grid-template-columns: minmax(0, 1.08fr) minmax(22rem, 0.92fr);
     min-height: min(720px, calc(100vh - 5rem));
@@ -321,9 +362,9 @@ pre code {
 
 .login-hero {
     background:
-        radial-gradient(circle at 12% 18%, rgba(147, 197, 253, 0.2), transparent 32%),
-        linear-gradient(145deg, #0f172a, #172554);
-    color: #e2e8f0;
+        radial-gradient(circle at 12% 18%, var(--primary-soft), transparent 32%),
+        linear-gradient(145deg, var(--hero-a), var(--hero-b));
+    color: var(--hero-text);
     display: flex;
     flex-direction: column;
     justify-content: space-between;
@@ -340,7 +381,7 @@ pre code {
 
 /* 登录页左栏是深色底，白底 logo 在这里正好当一枚小图章。 */
 .login-mark {
-    background: #fff;
+    background: var(--logo-bg);
     border-radius: 0.8rem;
     display: inline-flex;
     height: 2.55rem;
@@ -349,14 +390,14 @@ pre code {
 }
 
 .login-kicker {
-    color: #93c5fd;
+    color: var(--hero-kicker);
     font-size: 0.72rem;
     font-weight: 800;
     letter-spacing: 0.18em;
 }
 
 .login-hero-copy h1 {
-    color: #fff;
+    color: var(--hero-text);
     font-size: clamp(2.15rem, 4vw, 3.65rem);
     letter-spacing: -0.045em;
     line-height: 1.12;
@@ -364,7 +405,7 @@ pre code {
 }
 
 .login-hero-copy p {
-    color: #cbd5e1;
+    color: var(--muted);
     font-size: 1rem;
     max-width: 34rem;
 }
@@ -376,9 +417,9 @@ pre code {
 }
 
 .login-capabilities span {
-    border: 1px solid rgba(226, 232, 240, 0.2);
+    border: 1px solid var(--hero-chip-border);
     border-radius: 999px;
-    color: #cbd5e1;
+    color: var(--muted);
     font-size: 0.8rem;
     padding: 0.35rem 0.7rem;
 }
@@ -422,9 +463,9 @@ pre code {
 
 .login-security-warning {
     background: var(--warn-soft);
-    border: 1px solid #fde68a;
+    border: 1px solid var(--warn-border);
     border-radius: var(--radius-sm);
-    color: #78350f;
+    color: var(--warn-text);
     padding: 0.75rem 0.85rem;
 }
 
@@ -434,7 +475,7 @@ pre code {
 }
 
 .login-security-warning .checkbox {
-    color: #78350f;
+    color: var(--warn-text);
     font-size: 0.82rem;
 }
 
@@ -597,7 +638,7 @@ button,
     justify-content: center;
     padding: 0 0.85rem;
     text-decoration: none;
-    transition: background 0.12s ease, border-color 0.12s ease;
+    transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease);
     white-space: nowrap;
 }
 
@@ -618,7 +659,7 @@ button[disabled],
 button.btn-primary {
     background: var(--primary);
     border-color: var(--primary);
-    color: #fff;
+    color: var(--on-accent);
     font-weight: 600;
 }
 
@@ -631,7 +672,7 @@ button.btn-primary {
 button.btn-danger {
     background: var(--danger);
     border-color: var(--danger);
-    color: #fff;
+    color: var(--on-accent);
     font-weight: 600;
 }
 
@@ -843,39 +884,39 @@ label.checkbox input {
 
 .notice.ok {
     background: var(--ok-soft);
-    border-color: #A7F3D0;
+    border-color: var(--ok-border);
     border-left-color: var(--ok);
-    color: #065F46;
+    color: var(--ok-text);
 }
 
 .notice.error {
     background: var(--danger-soft);
-    border-color: #FECACA;
+    border-color: var(--danger-border);
     border-left-color: var(--danger);
-    color: #991B1B;
+    color: var(--danger-text);
 }
 
 .notice.warn {
     background: var(--warn-soft);
-    border-color: #FDE68A;
+    border-color: var(--warn-border);
     border-left-color: var(--warn);
-    color: #92400E;
+    color: var(--warn-text);
 }
 
 .notice.info {
     background: var(--primary-soft);
-    border-color: #BFDBFE;
+    border-color: var(--primary-border);
     border-left-color: var(--primary);
-    color: #1E40AF;
+    color: var(--info-text);
 }
 
 /* 需要用户明确知情才继续的操作：开启自动发布、开启调试模式、还原备份 … */
 .risk {
     background: var(--danger-soft);
-    border: 1px solid #FECACA;
+    border: 1px solid var(--danger-border);
     border-left: 3px solid var(--danger);
     border-radius: var(--radius-sm);
-    color: #7F1D1D;
+    color: var(--danger-text);
     margin: 0.9rem 0;
     padding: 0.85rem 1rem;
 }
@@ -918,20 +959,20 @@ label.checkbox input {
 
 .badge-ok {
     background: var(--ok-soft);
-    border-color: #A7F3D0;
-    color: #047857;
+    border-color: var(--ok-border);
+    color: var(--ok-text);
 }
 
 .badge-err {
     background: var(--danger-soft);
-    border-color: #FECACA;
-    color: #B91C1C;
+    border-color: var(--danger-border);
+    color: var(--danger-text);
 }
 
 .badge-warn {
     background: var(--warn-soft);
-    border-color: #FDE68A;
-    color: #B45309;
+    border-color: var(--warn-border);
+    color: var(--warn-text);
 }
 
 .badge-muted {
@@ -980,7 +1021,7 @@ label.checkbox input {
 }
 
 .table tbody tr:hover td {
-    background: #FAFBFC;
+    background: var(--card-2);
 }
 
 .table td .actions {
@@ -1119,7 +1160,7 @@ label.checkbox input {
 }
 
 .data-row:hover {
-    background: #FAFBFC;
+    background: var(--card-2);
 }
 
 .data-cell {
@@ -1165,9 +1206,9 @@ label.checkbox input {
 /* ── 日志 ────────────────────────────────────────────────────────── */
 
 .log {
-    background: #111827;
+    background: var(--log-bg);
     border-radius: var(--radius-sm);
-    color: #E5E7EB;
+    color: var(--log-text);
     font-family: var(--mono);
     font-size: 0.75rem;
     line-height: 1.55;
@@ -1183,19 +1224,19 @@ label.checkbox input {
 }
 
 .log-time {
-    color: #9CA3AF;
+    color: var(--log-time);
 }
 
 .log-level {
-    color: #93C5FD;
+    color: var(--log-level);
 }
 
 .log-warn {
-    color: #FCD34D;
+    color: var(--log-warn);
 }
 
 .log-error {
-    color: #FCA5A5;
+    color: var(--log-error);
 }
 
 /* ── 响应式：窄屏把侧栏折叠成顶部菜单 ───────────────────────────── */
@@ -1263,13 +1304,13 @@ label.checkbox input {
     }
 
     .login-page {
-        background: #f8fafc;
+        background: var(--bg);
         grid-template-columns: 1fr;
         min-height: auto;
     }
 
     .login-hero {
-        background: linear-gradient(135deg, #0f172a, #1e3a8a);
+        background: linear-gradient(135deg, var(--hero-a), var(--hero-b));
         gap: 2rem;
         padding: 1.5rem;
     }
@@ -1302,8 +1343,8 @@ label.checkbox input {
     margin-bottom: 1rem;
 }
 
-.action-card { min-height: 12rem; display: flex; justify-content: space-between; gap: 1.25rem; align-items: flex-end; border-top: 3px solid #6d5dfc; }
-.public-card { border-top-color: #ef8354; }
+.action-card { min-height: 12rem; display: flex; justify-content: space-between; gap: 1.25rem; align-items: flex-end; border-top: 3px solid var(--primary); }
+.public-card { border-top-color: var(--ok); }
 .action-card h2, .settings-card h2, .template-card h2 { margin: .2rem 0 .55rem; }
 .action-state { display: flex; flex-direction: column; align-items: flex-end; gap: .75rem; min-width: 9rem; }
 .eyebrow { color: var(--muted); font-size: .75rem; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
@@ -1327,34 +1368,34 @@ label.checkbox input {
 
 /* Content library */
 .library-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .8rem; margin-bottom: 1rem; }
-.library-summary div { padding: 1rem; border: 1px solid var(--border); border-radius: .9rem; background: var(--surface); }
+.library-summary div { padding: 1rem; border: 1px solid var(--border); border-radius: .9rem; background: var(--card-2); }
 .library-summary strong { display: block; font-size: 1.55rem; }
 .library-summary span { color: var(--muted); font-size: .82rem; }
 .library-toolbar { display: flex; justify-content: space-between; gap: 1rem; align-items: center; margin-bottom: 1rem; }
-.segmented { display: flex; padding: .2rem; border-radius: .65rem; background: #f2f3f7; }
+.segmented { display: flex; padding: .2rem; border-radius: .65rem; background: var(--card-2); }
 .segmented button { border: 0; background: transparent; padding: .55rem .85rem; border-radius: .5rem; }
-.segmented button.active { background: var(--surface); box-shadow: 0 2px 8px rgb(20 25 40 / 10%); font-weight: 700; }
+.segmented button.active { background: var(--card-3); font-weight: 600; }
 .library-search { max-width: 22rem; }
 .article-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 26rem), 1fr)); gap: .8rem; }
 .article-card { border: 1px solid var(--border); border-radius: .85rem; overflow: hidden; }
-.article-card.selected { border-color: #6d5dfc; box-shadow: 0 0 0 2px rgb(109 93 252 / 12%); }
+.article-card.selected { border-color: var(--primary); box-shadow: 0 0 0 2px var(--ring); }
 .article-open { display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; width: 100%; height: auto; min-height: 8.5rem; border: 0; background: transparent; text-align: left; white-space: normal; padding: 1rem; color: inherit; }
 .article-open h2 { width: 100%; font-size: 1.05rem; margin: .3rem 0; overflow-wrap: anywhere; white-space: normal; }
 .article-open p { display: -webkit-box; overflow: hidden; color: var(--muted); margin: 0; line-height: 1.55; white-space: normal; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
 .article-date { color: var(--muted); font-size: .74rem; font-weight: 700; letter-spacing: .08em; }
 .article-meta { display: flex; gap: .4rem; flex-wrap: wrap; padding: 0 1rem 1rem; }
-.topic-chip { padding: .2rem .5rem; border-radius: 999px; background: #f0edff; color: #5546cc; font-size: .75rem; }
-.reader-card { border-top: 3px solid #6d5dfc; }
+.topic-chip { padding: .2rem .5rem; border-radius: 999px; background: var(--primary-soft); color: var(--primary-dark); font-size: .75rem; }
+.reader-card { border-top: 3px solid var(--primary); }
 .reader-card .card-head { align-items: flex-start; gap: 1.5rem; }
 .reader-card .card-head > div { min-width: 0; }
 .reader-card h2 { margin: .25rem 0; }
 .reader-card .card-head h2 { overflow-wrap: anywhere; }
 .reader-card .card-head button { flex: 0 0 auto; }
-.continuation-zone { display: flex; justify-content: space-between; gap: 1rem; align-items: center; margin-top: 1.25rem; padding: 1rem; border: 1px solid #b8d4ff; border-radius: .8rem; background: #f5f9ff; }
+.continuation-zone { display: flex; justify-content: space-between; gap: 1rem; align-items: center; margin-top: 1.25rem; padding: 1rem; border: 1px solid var(--primary-border); border-radius: .8rem; background: var(--primary-soft); }
 .continuation-zone p { margin: .25rem 0 0; }
 .continuation-zone > button, .continuation-zone > .actions { flex: 0 0 auto; }
-.reader-document { max-width: 56rem; margin: 1.4rem auto 0; padding: 1.5rem clamp(1rem, 3vw, 2.25rem); border: 1px solid var(--border); border-radius: .85rem; background: #fff; }
-.article-summary { font-size: 1.05rem; line-height: 1.7; color: var(--muted); border-left: 3px solid #c8c0ff; margin: 0 0 1.5rem; padding-left: 1rem; }
+.reader-document { max-width: 56rem; margin: 1.4rem auto 0; padding: 1.5rem clamp(1rem, 3vw, 2.25rem); border: 1px solid var(--border); border-radius: .85rem; background: var(--card); }
+.article-summary { font-size: 1.05rem; line-height: 1.7; color: var(--muted); border-left: 3px solid var(--primary); margin: 0 0 1.5rem; padding-left: 1rem; }
 .article-body { overflow-wrap: anywhere; white-space: pre-wrap; line-height: 1.9; }
 .topic-editor { margin-top: 1.25rem; padding: 1.25rem; border: 1px solid var(--border); border-radius: .85rem; background: var(--head-bg); }
 .topic-editor h3 { margin-bottom: .2rem; }
@@ -1362,7 +1403,7 @@ label.checkbox input {
 .topic-option { display: grid; grid-template-columns: auto 1fr; gap: .15rem .45rem; align-items: center; padding: .55rem .7rem; border: 1px solid var(--border); border-radius: .7rem; }
 .topic-option input { grid-row: 1 / 3; width: auto; }
 .topic-option small { color: var(--muted); }
-.danger-zone { display: flex; justify-content: space-between; gap: 1rem; align-items: center; margin-top: 1rem; padding: 1rem; border: 1px solid #f0c4c4; border-radius: .8rem; background: #fff8f8; }
+.danger-zone { display: flex; justify-content: space-between; gap: 1rem; align-items: center; margin-top: 1rem; padding: 1rem; border: 1px solid var(--danger-border); border-radius: .8rem; background: var(--danger-soft); }
 .danger-zone p { margin: .25rem 0 0; }
 .topic-create { display: grid; grid-template-columns: 1fr auto; gap: .7rem; margin-bottom: 1rem; }
 .topic-list { display: grid; }
