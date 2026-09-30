@@ -27,14 +27,13 @@
 
     <Style TargetType="Label">
         <Setter Property="TextColor" Value="{StaticResource TextPrimary}" />
-        <Setter Property="FontSize" Value="15" />
+        <Setter Property="FontSize" Value="17" />
         <Setter Property="LineBreakMode" Value="WordWrap" />
     </Style>
 
-    <!-- Large Title。三个页面都关掉了 Shell 的导航栏（NavBarIsVisible=False），页面标题就是这个
-         Label，所以放大它就能拿到 iOS 大标题的观感，不必改任何页面标记。 -->
+    <!-- The top label uses the large-title size. -->
     <Style x:Key="TitleLabel" TargetType="Label">
-        <Setter Property="FontSize" Value="28" />
+        <Setter Property="FontSize" Value="34" />
         <Setter Property="FontAttributes" Value="Bold" />
         <Setter Property="TextColor" Value="{StaticResource TextPrimary}" />
     </Style>
@@ -53,7 +52,7 @@
     </Style>
 
     <Style x:Key="BodyLabel" TargetType="Label">
-        <Setter Property="FontSize" Value="15" />
+        <Setter Property="FontSize" Value="17" />
         <Setter Property="TextColor" Value="{StaticResource TextPrimary}" />
     </Style>
 
@@ -63,15 +62,15 @@
         <Setter Property="TextColor" Value="{StaticResource TextPrimary}" />
     </Style>
 
-    <!-- A card: the lifted surface everything sits on. -->
+    <!-- Grouped surfaces use fill and inset separators instead of outlines. -->
     <Style x:Key="Card" TargetType="Border">
         <Setter Property="BackgroundColor" Value="{StaticResource Surface}" />
-        <Setter Property="Stroke" Value="{StaticResource Divider}" />
-        <Setter Property="StrokeThickness" Value="1" />
+        <Setter Property="Stroke" Value="{StaticResource Transparent}" />
+        <Setter Property="StrokeThickness" Value="0" />
         <Setter Property="Padding" Value="16" />
         <Setter Property="StrokeShape">
             <Setter.Value>
-                <RoundRectangle CornerRadius="14" />
+                <RoundRectangle CornerRadius="16" />
             </Setter.Value>
         </Setter>
     </Style>
@@ -81,14 +80,26 @@
         <Setter Property="Color" Value="{StaticResource Divider}" />
     </Style>
 
+    <Style x:Key="InputWell" TargetType="Border">
+        <Setter Property="BackgroundColor" Value="{StaticResource SurfacePressed}" />
+        <Setter Property="Stroke" Value="{StaticResource Transparent}" />
+        <Setter Property="StrokeThickness" Value="0" />
+        <Setter Property="Padding" Value="4,2" />
+        <Setter Property="StrokeShape">
+            <Setter.Value>
+                <RoundRectangle CornerRadius="12" />
+            </Setter.Value>
+        </Setter>
+    </Style>
+
     <Style TargetType="Button">
         <Setter Property="BackgroundColor" Value="{StaticResource Accent}" />
         <Setter Property="TextColor" Value="{StaticResource TextOnAccent}" />
         <Setter Property="FontAttributes" Value="Bold" />
-        <Setter Property="FontSize" Value="15" />
-        <Setter Property="CornerRadius" Value="12" />
+        <Setter Property="FontSize" Value="17" />
+        <Setter Property="CornerRadius" Value="14" />
         <Setter Property="Padding" Value="16,12" />
-        <Setter Property="MinimumHeightRequest" Value="46" />
+        <Setter Property="MinimumHeightRequest" Value="50" />
         <Setter Property="BorderWidth" Value="0" />
         <Setter Property="VisualStateManager.VisualStateGroups">
             <VisualStateGroupList>
@@ -111,16 +122,15 @@
         </Setter>
     </Style>
 
-    <!-- A button that is not the point of the screen: outline only, so the accent stays scarce. -->
+    <!-- Secondary actions use a tinted fill. -->
     <Style x:Key="GhostButton" TargetType="Button">
-        <Setter Property="BackgroundColor" Value="{StaticResource Surface}" />
-        <Setter Property="TextColor" Value="{StaticResource TextPrimary}" />
-        <Setter Property="BorderColor" Value="{StaticResource Divider}" />
-        <Setter Property="BorderWidth" Value="1" />
-        <Setter Property="FontSize" Value="14" />
+        <Setter Property="BackgroundColor" Value="{StaticResource AccentSoft}" />
+        <Setter Property="TextColor" Value="{StaticResource Accent}" />
+        <Setter Property="BorderWidth" Value="0" />
+        <Setter Property="FontSize" Value="15" />
         <Setter Property="CornerRadius" Value="12" />
         <Setter Property="Padding" Value="12,8" />
-        <Setter Property="MinimumHeightRequest" Value="40" />
+        <Setter Property="MinimumHeightRequest" Value="44" />
         <Setter Property="VisualStateManager.VisualStateGroups">
             <VisualStateGroupList>
                 <VisualStateGroup x:Name="CommonStates">
@@ -143,12 +153,11 @@
     <Style x:Key="DangerButton" TargetType="Button">
         <Setter Property="BackgroundColor" Value="{StaticResource DangerSoft}" />
         <Setter Property="TextColor" Value="{StaticResource Danger}" />
-        <Setter Property="BorderColor" Value="{StaticResource Danger}" />
-        <Setter Property="BorderWidth" Value="1" />
-        <Setter Property="FontSize" Value="14" />
+        <Setter Property="BorderWidth" Value="0" />
+        <Setter Property="FontSize" Value="15" />
         <Setter Property="CornerRadius" Value="12" />
         <Setter Property="Padding" Value="12,8" />
-        <Setter Property="MinimumHeightRequest" Value="40" />
+        <Setter Property="MinimumHeightRequest" Value="44" />
         <Setter Property="VisualStateManager.VisualStateGroups">
             <VisualStateGroupList>
                 <VisualStateGroup x:Name="CommonStates">
@@ -171,7 +180,7 @@
 
     <Style x:Key="SuccessButton" TargetType="Button">
         <Setter Property="BackgroundColor" Value="{StaticResource AccentGreen}" />
-        <Setter Property="TextColor" Value="{StaticResource TextOnAccent}" />
+        <Setter Property="TextColor" Value="{StaticResource Bg}" />
         <Setter Property="FontAttributes" Value="Bold" />
         <Setter Property="FontSize" Value="17" />
         <Setter Property="CornerRadius" Value="14" />
@@ -204,8 +213,8 @@
         <Setter Property="TextColor" Value="{StaticResource TextPrimary}" />
         <Setter Property="PlaceholderColor" Value="{StaticResource TextMuted}" />
         <Setter Property="BackgroundColor" Value="{StaticResource SurfacePressed}" />
-        <Setter Property="FontSize" Value="15" />
-        <Setter Property="MinimumHeightRequest" Value="46" />
+        <Setter Property="FontSize" Value="17" />
+        <Setter Property="MinimumHeightRequest" Value="50" />
     </Style>
 
     <Style TargetType="Editor">

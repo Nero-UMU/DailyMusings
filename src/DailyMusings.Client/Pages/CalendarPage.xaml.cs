@@ -10,11 +10,12 @@ namespace DailyMusings.Client.Pages;
 /// <summary>One row of the archive: when it was, what it is, what it says, and how far it has got.</summary>
 public sealed record CalendarRow(
     string Id,
-    string Glyph,
+    string Kind,
     string Time,
     string Summary,
     string State,
-    Color StateColor);
+    Color StateColor,
+    bool ShowDivider);
 
 /// <summary>
 /// 日历 (phone spec §3.3): the recordings and notes kept on this device, newest first, with the filter the user
@@ -145,15 +146,17 @@ public partial class CalendarPage : ContentPage
 
         _rows.Clear();
 
-        foreach (var capture in filtered)
+        for (var index = 0; index < filtered.Count; index++)
         {
+            var capture = filtered[index];
             _rows.Add(new CalendarRow(
                 capture.Id,
-                capture.IsVoice ? "🎙" : "⌨",
+                capture.IsVoice ? "录音" : "手写",
                 FormatTime(capture.CreatedAtUtc),
                 Summarize(capture),
                 DescribeState(capture),
-                StateColor(capture)));
+                StateColor(capture),
+                index < filtered.Count - 1));
         }
 
         FilterButton.Text = $"筛选 · {_filter}";
@@ -263,8 +266,8 @@ public partial class CalendarPage : ContentPage
         var local = capture.CreatedAtUtc.ToLocalTime();
 
         DetailTitle.Text = capture.IsVoice
-            ? $"🎙 {local:yyyy-MM-dd HH:mm} · {(capture.DurationSeconds ?? 0):F1} 秒 · {DescribeState(capture)}"
-            : $"⌨ {local:yyyy-MM-dd HH:mm} · {DescribeState(capture)}";
+            ? $"录音 · {local:yyyy-MM-dd HH:mm} · {(capture.DurationSeconds ?? 0):F1} 秒 · {DescribeState(capture)}"
+            : $"手写 · {local:yyyy-MM-dd HH:mm} · {DescribeState(capture)}";
 
         var playable = capture.IsVoice && capture.LocalAudioPath is { Length: > 0 } path && File.Exists(path);
 

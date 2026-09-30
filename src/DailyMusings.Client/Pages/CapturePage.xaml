@@ -26,7 +26,7 @@
                     x:Name="ModeButton"
                     Grid.Column="1"
                     Style="{StaticResource GhostButton}"
-                    Text="⌨ 手动输入"
+                    Text="手动输入"
                     VerticalOptions="Center"
                     Clicked="OnToggleModeClicked" />
             </Grid>
@@ -62,10 +62,10 @@
 
             <!-- Manual mode: the same slot, an editor instead of a circle. -->
             <VerticalStackLayout x:Name="ManualPanel" Spacing="12" IsVisible="False">
-                <Editor
-                    x:Name="TextEditor"
-                    Placeholder="写下一句随想…"
-                    HeightRequest="150" />
+                <Border Style="{StaticResource InputWell}">
+                    <Editor x:Name="TextEditor" BackgroundColor="{StaticResource Transparent}"
+                            Placeholder="写下一句随想…" HeightRequest="150" />
+                </Border>
                 <Button
                     x:Name="SaveTextButton"
                     Text="保存到本机"
@@ -118,8 +118,9 @@
                         </Grid>
                     </VerticalStackLayout>
 
-                    <ScrollView x:Name="TranscriptScroll" HeightRequest="132" IsVisible="False">
-                        <Label x:Name="TranscriptLabel" Style="{StaticResource TranscriptLabel}" />
+                    <ScrollView x:Name="TranscriptScroll" MaximumHeightRequest="132" IsVisible="False"
+                                BackgroundColor="{StaticResource SurfacePressed}">
+                        <Label x:Name="TranscriptLabel" Style="{StaticResource TranscriptLabel}" Margin="12" />
                     </ScrollView>
 
                     <Button

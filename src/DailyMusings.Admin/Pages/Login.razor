@@ -3,60 +3,49 @@
 @inject IHttpContextAccessor HttpContextAccessor
 
 <div class="login-page">
-    <section class="login-hero" aria-label="每日随想介绍">
+    <section class="login-card">
         <div class="login-brand"><img class="login-mark" src="_content/DailyMusings.Admin/logo.png" alt="" /><span>每日随想</span></div>
-        <div class="login-hero-copy">
-            <span class="login-kicker">DAILY MUSINGS</span>
-            <h1>把一天的碎片，<br />整理成值得留下的文字。</h1>
-            <p>从录音与随手记，到核验、归类和 Markdown 发布，都在一个安静的个人空间里完成。</p>
+        <p class="login-tagline">把一天的碎片，整理成值得留下的文字。</p>
+        <div class="login-card-head">
+            <h2>欢迎回来</h2>
+            <p>登录后查看今日素材、管理稿件并调整发布计划。</p>
         </div>
-        <div class="login-capabilities"><span>录音转写</span><span>稿件核验</span><span>定时发布</span></div>
-    </section>
 
-    <section class="login-panel">
-        <div class="login-card">
-            <div class="login-card-head">
-                <span class="login-kicker">管理后台</span>
-                <h2>欢迎回来</h2>
-                <p>登录后查看今日素材、管理稿件并调整发布计划。</p>
-            </div>
+        @if (Message is not null)
+        {
+            <p class="notice error">@Message</p>
+        }
 
-            @if (Message is not null)
+        @if (Changed)
+        {
+            <p class="notice ok">账号信息已更新，请重新登录。</p>
+        }
+
+        <form method="post" action="@ApiRoutes.AdminSignIn" data-enhance="false" class="form login-form">
+            <label>
+                账号
+                <input name="username" autocomplete="username" placeholder="请输入管理员账号" required autofocus />
+            </label>
+            <label>
+                密码
+                <input name="password" type="password" autocomplete="current-password" placeholder="请输入密码" required />
+            </label>
+
+            @if (IsInsecure)
             {
-                <p class="notice error">@Message</p>
+                <div class="login-security-warning">
+                    <strong>当前是 HTTP 连接</strong>
+                    <p>登录信息可能被同一网络中的其他人看到。建议通过 HTTPS 或可信的局域网、VPN 访问。</p>
+                    <label class="checkbox">
+                        <input type="checkbox" name="acknowledgeRisk" value="yes" required />
+                        我了解风险并继续登录
+                    </label>
+                </div>
             }
 
-            @if (Changed)
-            {
-                <p class="notice ok">账号信息已更新，请重新登录。</p>
-            }
-
-            <form method="post" action="@ApiRoutes.AdminSignIn" data-enhance="false" class="form login-form">
-                <label>
-                    账号
-                    <input name="username" autocomplete="username" placeholder="请输入管理员账号" required autofocus />
-                </label>
-                <label>
-                    密码
-                    <input name="password" type="password" autocomplete="current-password" placeholder="请输入密码" required />
-                </label>
-
-                @if (IsInsecure)
-                {
-                    <div class="login-security-warning">
-                        <strong>当前是 HTTP 连接</strong>
-                        <p>登录信息可能被同一网络中的其他人看到。建议通过 HTTPS 或可信的局域网、VPN 访问。</p>
-                        <label class="checkbox">
-                            <input type="checkbox" name="acknowledgeRisk" value="yes" required />
-                            我了解风险并继续登录
-                        </label>
-                    </div>
-                }
-
-                <button type="submit" class="btn-primary btn-block login-submit">登录</button>
-            </form>
-            <p class="login-footnote">这是你的单用户私有实例。</p>
-        </div>
+            <button type="submit" class="btn-primary btn-block login-submit">登录</button>
+        </form>
+        <p class="login-footnote">这是你的单用户私有实例。</p>
     </section>
 </div>
 

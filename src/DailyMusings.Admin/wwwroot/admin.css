@@ -67,24 +67,20 @@
     --log-warn: #FFD60A;
     --log-error: var(--danger);
 
-    /* ── 登录页左栏（深色渐变） ── */
-    --hero-a: #050A14;
-    --hero-b: #0A2540;
-    --hero-text: #F5F5F7;
-    --hero-kicker: #7FBFFF;
-    --hero-chip-border: rgba(235, 235, 245, 0.20);
-
     /* ── 形状与尺寸 ── */
     --radius: 14px;             /* 卡片：12–16px */
+    --radius-nav: 12px;
     --radius-sm: 10px;          /* 控件：10px */
     --radius-lg: 20px;          /* 大容器：20px */
     --shadow: none;             /* 深色不用投影；深度由上面的分层色表达 */
+    --section-gap: 24px;
+    --item-gap: 16px;
 
     /* 动效：iOS 的缓动与用时 */
     --ease: cubic-bezier(0.32, 0.72, 0, 1);
     --dur: 150ms;
 
-    --control-h: 36px;
+    --control-h: 40px;
     --sidebar-w: 220px;
 
     /* 数据管理页的单元格基准高度：手写一行 = --cell-h，录音一行 = 1.5 × --cell-h */
@@ -278,42 +274,59 @@ pre code {
 
 .nav a {
     align-items: center;
-    border-radius: var(--radius-sm);
+    border-radius: var(--radius-nav);
     color: var(--text);
     display: flex;
     font-size: 0.9375rem;
     gap: 0.6rem;
-    padding: 0.5rem 0.6rem;
+    min-height: 44px;
+    padding: 0.6rem 0.75rem;
     text-decoration: none;
 }
 
 .nav a:hover {
-    background: var(--bg);
+    background: var(--card-2);
     text-decoration: none;
 }
 
-/* 选中项：底色 + 左侧色条，两处同时变化，不靠颜色单独表达。 */
+/* 选中项是一整块圆角底，靠底色与字重一起标示当前位置。 */
 .nav a.active {
-    background: var(--primary-soft);
-    color: var(--primary-dark);
-    font-weight: 600;
-    position: relative;
-}
-
-.nav a.active::before {
-    background: var(--primary);
-    border-radius: 0 2px 2px 0;
-    content: "";
-    inset: 6px auto 6px 0;
-    position: absolute;
-    width: 3px;
+    background: var(--card-2);
+    color: var(--text);
+    font-weight: 650;
 }
 
 .nav-icon {
-    flex: 0 0 1.25rem;
-    font-size: 1rem;
-    line-height: 1;
-    text-align: center;
+    fill: none;
+    flex: 0 0 20px;
+    height: 20px;
+    stroke: currentColor;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 1.8;
+    width: 20px;
+}
+
+.nav a.active .nav-icon {
+    color: var(--primary);
+}
+
+.logout-icon {
+    display: none;
+    fill: none;
+    height: 18px;
+    stroke: currentColor;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 1.8;
+    width: 18px;
+}
+
+.icon-sprite {
+    height: 0;
+    overflow: hidden;
+    position: absolute;
+    width: 0;
 }
 
 .sidebar-footer {
@@ -357,25 +370,14 @@ pre code {
     padding: 1.5rem 1.75rem;
 }
 
-/* 登录页：信息与表单分栏，窄屏时自然收成一张卡片。 */
+/* 登录页聚焦在一张分组卡片上。 */
 .login-page {
-    background: var(--bg);
-    border-radius: var(--radius-lg);
-    display: grid;
-    grid-template-columns: minmax(0, 1.08fr) minmax(22rem, 0.92fr);
-    min-height: min(720px, calc(100vh - 5rem));
-    overflow: hidden;
-}
-
-.login-hero {
-    background:
-        radial-gradient(circle at 12% 18%, var(--primary-soft), transparent 32%),
-        linear-gradient(145deg, var(--hero-a), var(--hero-b));
-    color: var(--hero-text);
+    background: radial-gradient(circle at 50% 38%, var(--primary-soft), transparent 42%), var(--bg);
+    align-items: center;
     display: flex;
-    flex-direction: column;
-    justify-content: space-between;
-    padding: clamp(2rem, 5vw, 4.75rem);
+    justify-content: center;
+    min-height: calc(100vh - 9rem);
+    padding: 2rem 1rem;
 }
 
 .login-brand {
@@ -386,7 +388,7 @@ pre code {
     gap: 0.7rem;
 }
 
-/* 登录页左栏是深色底，白底 logo 在这里正好当一枚小图章。 */
+/* 白底 logo 留一块白色图章。 */
 .login-mark {
     background: var(--logo-bg);
     border-radius: 0.8rem;
@@ -396,51 +398,31 @@ pre code {
     width: 2.55rem;
 }
 
-.login-kicker {
-    color: var(--hero-kicker);
-    font-size: 0.72rem;
-    font-weight: 800;
-    letter-spacing: 0.18em;
-}
-
-.login-hero-copy h1 {
-    color: var(--hero-text);
-    font-size: clamp(2.15rem, 4vw, 3.65rem);
-    letter-spacing: -0.045em;
-    line-height: 1.12;
-    margin: 1rem 0 1.25rem;
-}
-
-.login-hero-copy p {
-    color: var(--muted);
-    font-size: 1rem;
-    max-width: 34rem;
-}
-
-.login-capabilities {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.55rem;
-}
-
-.login-capabilities span {
-    border: 1px solid var(--hero-chip-border);
-    border-radius: 999px;
-    color: var(--muted);
-    font-size: 0.8rem;
-    padding: 0.35rem 0.7rem;
-}
-
-.login-panel {
-    align-items: center;
-    display: flex;
-    justify-content: center;
-    padding: clamp(1.5rem, 5vw, 4.75rem);
-}
-
 .login-card {
-    max-width: 25rem;
+    background: var(--glass-strong);
+    backdrop-filter: saturate(180%) blur(20px);
+    -webkit-backdrop-filter: saturate(180%) blur(20px);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    max-width: 27rem;
+    padding: 2rem;
     width: 100%;
+}
+
+.login-card .login-brand {
+    justify-content: center;
+    margin-bottom: 0.5rem;
+}
+
+.login-tagline {
+    color: var(--muted);
+    font-size: 0.8125rem;
+    margin: 0 0 1.75rem;
+    text-align: center;
+}
+
+.login-card-head {
+    text-align: center;
 }
 
 .login-card-head h2 {
@@ -529,11 +511,11 @@ pre code {
 
 .card {
     background: var(--card);
-    border: 1px solid var(--border);
+    border: 0;
     border-radius: var(--radius);
     box-shadow: var(--shadow);
     margin-bottom: 1rem;
-    padding: 1rem 1.125rem;
+    padding: 1.25rem 1.375rem;
 }
 
 .card-head {
@@ -555,8 +537,9 @@ pre code {
 
 .card-grid {
     display: grid;
-    gap: 1rem;
+    gap: var(--item-gap);
     grid-template-columns: repeat(auto-fit, minmax(330px, 1fr));
+    margin-bottom: var(--section-gap);
 }
 
 .card-grid .card {
@@ -567,17 +550,17 @@ pre code {
 
 .stat-grid {
     display: grid;
-    gap: 0.75rem;
+    gap: var(--item-gap);
     grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-    margin-bottom: 1rem;
+    margin-bottom: var(--section-gap);
 }
 
 .stat {
     background: var(--card);
-    border: 1px solid var(--border);
+    border: 0;
     border-radius: var(--radius);
     box-shadow: var(--shadow);
-    padding: 0.75rem 0.9rem;
+    padding: 1rem;
 }
 
 .stat .label {
@@ -636,10 +619,10 @@ pre code {
 button,
 .btn {
     align-items: center;
-    background: var(--card);
-    border: 1px solid var(--border-strong);
+    background: var(--primary-soft);
+    border: 0;
     border-radius: var(--radius-sm);
-    color: var(--text);
+    color: var(--primary-dark);
     cursor: pointer;
     display: inline-flex;
     font: inherit;
@@ -647,7 +630,7 @@ button,
     gap: 0.4rem;
     height: var(--control-h);
     justify-content: center;
-    padding: 0 0.85rem;
+    padding: 0 1rem;
     text-decoration: none;
     transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease);
     white-space: nowrap;
@@ -655,8 +638,7 @@ button,
 
 button:hover:not([disabled]),
 .btn:hover {
-    background: var(--bg);
-    border-color: var(--muted);
+    background: var(--primary-border);
     text-decoration: none;
 }
 
@@ -669,32 +651,27 @@ button[disabled],
 .btn-primary,
 button.btn-primary {
     background: var(--primary);
-    border-color: var(--primary);
     color: var(--on-accent);
     font-weight: 600;
 }
 
 .btn-primary:hover:not([disabled]) {
     background: var(--primary-dark);
-    border-color: var(--primary-dark);
 }
 
 .btn-danger,
 button.btn-danger {
     background: var(--danger);
-    border-color: var(--danger);
     color: var(--on-accent);
     font-weight: 600;
 }
 
 .btn-danger:hover:not([disabled]) {
     background: var(--danger-dark);
-    border-color: var(--danger-dark);
 }
 
 .btn-ghost {
     background: transparent;
-    border-color: var(--border-strong);
     color: var(--muted);
 }
 
@@ -779,19 +756,23 @@ button:focus-visible,
 
 input[type="checkbox"] {
     display: inline-block;
-    height: 16px;
+    height: 18px;
     margin: 0;
     padding: 0;
     vertical-align: -2px;
-    width: 16px;
+    width: 18px;
 }
 
 label.checkbox {
     align-items: center;
     display: flex;
+    flex-direction: row-reverse;
     font-size: 0.9375rem;
-    gap: 0.5rem;
-    margin-bottom: 0.5rem;
+    gap: 1rem;
+    justify-content: space-between;
+    margin-bottom: 0;
+    min-height: 48px;
+    padding: 0.5rem 0;
 }
 
 label.checkbox input {
@@ -847,13 +828,13 @@ label.checkbox input {
 .toolbar {
     align-items: flex-end;
     background: var(--card);
-    border: 1px solid var(--border);
+    border: 0;
     border-radius: var(--radius);
     box-shadow: var(--shadow);
     display: flex;
     flex-wrap: wrap;
     gap: 0.75rem;
-    margin-bottom: 1rem;
+    margin-bottom: var(--section-gap);
     padding: 0.75rem 1rem;
 }
 
@@ -1002,10 +983,10 @@ label.checkbox input {
 
 .table-wrap {
     background: var(--card);
-    border: 1px solid var(--border);
+    border: 0;
     border-radius: var(--radius);
     box-shadow: var(--shadow);
-    margin-bottom: 1rem;
+    margin-bottom: var(--section-gap);
     overflow-x: auto;
 }
 
@@ -1019,7 +1000,7 @@ label.checkbox input {
 .table th,
 .table td {
     border-bottom: 1px solid var(--border);
-    padding: 0.6rem 0.75rem;
+    padding: 0.85rem 0.9rem;
     text-align: left;
     vertical-align: top;
 }
@@ -1039,8 +1020,8 @@ label.checkbox input {
     border-bottom: 0;
     background-image: linear-gradient(var(--border), var(--border));
     background-repeat: no-repeat;
-    background-position: 0.75rem 100%;
-    background-size: calc(100% - 0.75rem) 1px;
+    background-position: 0.9rem 100%;
+    background-size: calc(100% - 0.9rem) 1px;
 }
 
 /* 组内最后一行不画线：分组的边界已经由卡片边缘表达了。 */
@@ -1149,10 +1130,10 @@ label.checkbox input {
 
 .data-list {
     background: var(--card);
-    border: 1px solid var(--border);
+    border: 0;
     border-radius: var(--radius);
     box-shadow: var(--shadow);
-    margin-bottom: 1rem;
+    margin-bottom: var(--section-gap);
     overflow: hidden;
 }
 
@@ -1282,13 +1263,16 @@ label.checkbox input {
     /* 折叠成顶部菜单之后它真的会盖住滚动的内容，所以这里的毛玻璃是有作用的：导航条下面
        滚过的表格被糊掉，而不是被一块实心色挡死。 */
     .sidebar {
-        background: var(--glass-strong);
+        align-items: center;
+        background: var(--glass);
         backdrop-filter: saturate(180%) blur(20px);
         -webkit-backdrop-filter: saturate(180%) blur(20px);
         border-bottom: 1px solid var(--border);
         border-right: 0;
+        display: grid;
         flex: 0 0 auto;
-        height: auto;
+        grid-template-columns: auto minmax(0, 1fr) auto;
+        height: 64px;
         position: sticky;
         top: 0;
         width: 100%;
@@ -1296,29 +1280,39 @@ label.checkbox input {
     }
 
     .brand {
-        padding: 0.6rem 0.9rem;
+        border-bottom: 0;
+        padding: 0.5rem 0.75rem;
+    }
+
+    .brand-text small {
+        display: none;
     }
 
     .nav {
         flex-direction: row;
         gap: 0.25rem;
         overflow-x: auto;
-        padding: 0.4rem 0.6rem;
+        overflow-y: hidden;
+        padding: 0.4rem;
     }
 
     .nav a {
         font-size: 0.9rem;
-        padding: 0.35rem 0.5rem;
+        min-height: 40px;
+        padding: 0.45rem 0.65rem;
         white-space: nowrap;
-    }
-
-    .nav a.active::before {
-        display: none;
     }
 
     .sidebar-footer {
         border-top: 0;
-        padding: 0 0.6rem 0.6rem;
+        padding: 0 0.75rem 0 0.25rem;
+    }
+
+    .sidebar-footer button {
+        font-size: 0.8125rem;
+        height: 36px;
+        padding: 0 0.6rem;
+        width: auto;
     }
 
     .main,
@@ -1344,23 +1338,23 @@ label.checkbox input {
     }
 
     .login-page {
-        background: var(--bg);
-        grid-template-columns: 1fr;
-        min-height: auto;
+        min-height: calc(100vh - 5rem);
+        padding: 1rem;
+    }
+}
+
+@media (max-width: 600px) {
+    .brand-text,
+    .sidebar-footer .logout-label {
+        display: none;
     }
 
-    .login-hero {
-        background: linear-gradient(135deg, var(--hero-a), var(--hero-b));
-        gap: 2rem;
-        padding: 1.5rem;
+    .sidebar-footer button {
+        width: 40px;
     }
 
-    .login-hero-copy h1 {
-        font-size: 2rem;
-    }
-
-    .login-panel {
-        padding: 2rem 1.25rem;
+    .logout-icon {
+        display: block;
     }
 }
 
@@ -1391,8 +1385,75 @@ label.checkbox input {
 .settings-card { margin: 0; }
 .compact-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .full-row { grid-column: 1 / -1; }
-.switch-line { display: flex; gap: .5rem; align-items: center; font-weight: 600; }
+.switch-line { display: flex; flex-direction: row-reverse; gap: 1rem; align-items: center; justify-content: space-between; font-weight: 600; min-height: 48px; }
 .switch-line input { width: auto; }
+
+/* Form settings use a switch; multi-select topic checkboxes keep their checkmark semantics. */
+label.checkbox input[type="checkbox"],
+label.switch-line input[type="checkbox"] {
+    appearance: none;
+    -webkit-appearance: none;
+    background: var(--border-strong);
+    border: 0;
+    border-radius: 999px;
+    cursor: pointer;
+    flex: 0 0 44px;
+    height: 28px;
+    margin: 0;
+    position: relative;
+    transition: background var(--dur) var(--ease);
+    width: 44px;
+}
+
+label.checkbox input[type="checkbox"]::before,
+label.switch-line input[type="checkbox"]::before {
+    background: var(--text);
+    border-radius: 50%;
+    content: "";
+    height: 22px;
+    left: 3px;
+    position: absolute;
+    top: 3px;
+    transition: transform var(--dur) var(--ease);
+    width: 22px;
+}
+
+label.checkbox input[type="checkbox"]:checked,
+label.switch-line input[type="checkbox"]:checked {
+    background: var(--ok);
+}
+
+label.checkbox input[type="checkbox"]:checked::before,
+label.switch-line input[type="checkbox"]:checked::before {
+    transform: translateX(16px);
+}
+
+label.checkbox input[type="checkbox"]:focus-visible,
+label.switch-line input[type="checkbox"]:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 3px;
+}
+
+.login-security-warning label.checkbox {
+    flex-direction: row;
+    justify-content: flex-start;
+    min-height: 0;
+    padding: 0;
+}
+
+.login-security-warning label.checkbox input[type="checkbox"] {
+    appearance: auto;
+    -webkit-appearance: checkbox;
+    background: transparent;
+    border-radius: 0;
+    flex: 0 0 18px;
+    height: 18px;
+    width: 18px;
+}
+
+.login-security-warning label.checkbox input[type="checkbox"]::before {
+    content: none;
+}
 .slim { margin-bottom: 0; }
 .template-editor { min-height: 18rem; font: .86rem/1.55 ui-monospace, SFMono-Regular, Consolas, monospace; }
 .writing-rules { display: grid; gap: .6rem; margin: .8rem 0; }

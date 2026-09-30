@@ -139,7 +139,7 @@ public partial class CapturePage : ContentPage
     {
         RecordPanel.IsVisible = !_manualMode;
         ManualPanel.IsVisible = _manualMode;
-        ModeButton.Text = _manualMode ? "🎙 录音" : "⌨ 手动输入";
+        ModeButton.Text = _manualMode ? "录音" : "手动输入";
 
         TodayHintLabel.Text = _manualMode
             ? "写下一句随想，保存到本机后再决定是否上传"

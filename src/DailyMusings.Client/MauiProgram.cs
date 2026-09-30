@@ -6,6 +6,7 @@ using DailyMusings.Client.Core.Settings;
 using DailyMusings.Client.Pages;
 using DailyMusings.Client.Services;
 using Microsoft.Extensions.Logging;
+using Microsoft.Maui.Handlers;
 
 namespace DailyMusings.Client;
 
@@ -14,6 +15,14 @@ public static class MauiProgram
 	public static MauiApp CreateMauiApp()
 	{
 		var builder = MauiApp.CreateBuilder();
+
+#if ANDROID
+		// The Android default draws an underline over the rounded input well.
+		EntryHandler.Mapper.AppendToMapping("InputWell", (handler, _) =>
+			handler.PlatformView.BackgroundTintList = Android.Content.Res.ColorStateList.ValueOf(Android.Graphics.Color.Transparent));
+		EditorHandler.Mapper.AppendToMapping("InputWell", (handler, _) =>
+			handler.PlatformView.BackgroundTintList = Android.Content.Res.ColorStateList.ValueOf(Android.Graphics.Color.Transparent));
+#endif
 
 		builder
 			.UseMauiApp<App>()

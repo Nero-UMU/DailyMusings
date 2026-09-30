@@ -67,7 +67,7 @@ else
             {
                 <div class="form-grid">
                     <label class="checkbox">
-                        <input type="checkbox" checked="@_enabled.GetValueOrDefault(service)"
+                        <input type="checkbox" role="switch" checked="@_enabled.GetValueOrDefault(service)"
                                @onchange="e => SetEnabled(service, e.Value is true)" />
                         启用
                     </label>
@@ -100,7 +100,7 @@ else
                     @if (_secretSources.GetValueOrDefault(service) == SecretSource.Ui)
                     {
                         <label class="checkbox">
-                            <input type="checkbox" checked="@_clearPassword.GetValueOrDefault(service)"
+                            <input type="checkbox" role="switch" checked="@_clearPassword.GetValueOrDefault(service)"
                                    @onchange="e => SetClearPassword(service, e.Value is true)" />
                             清除在管理页保存的 API Key
                         </label>

@@ -89,7 +89,7 @@ else
 
         <div class="form-grid">
             <label class="checkbox">
-                <input type="checkbox" checked="@_smtpEnabled" @onchange="e => _smtpEnabled = e.Value is true" />
+                <input type="checkbox" role="switch" checked="@_smtpEnabled" @onchange="e => _smtpEnabled = e.Value is true" />
                 启用发信
             </label>
             <label>
@@ -123,14 +123,14 @@ else
         @if (_smtp.PasswordSource == SecretSource.Ui)
         {
             <label class="checkbox">
-                <input type="checkbox" checked="@_clearPassword" @onchange="e => _clearPassword = e.Value is true" />
+                <input type="checkbox" role="switch" checked="@_clearPassword" @onchange="e => _clearPassword = e.Value is true" />
                 清除在管理页保存的密码（清除后自动回退到部署配置）
             </label>
         }
 
         <div class="stack">
             <label class="checkbox">
-                <input type="checkbox" checked="@_useSsl" @onchange="e => _useSsl = e.Value is true" />
+                <input type="checkbox" role="switch" checked="@_useSsl" @onchange="e => _useSsl = e.Value is true" />
                 SSL
             </label>
             <p class="hint">
@@ -139,7 +139,7 @@ else
             </p>
 
             <label class="checkbox">
-                <input type="checkbox" checked="@_useStartTls" @onchange="e => _useStartTls = e.Value is true" />
+                <input type="checkbox" role="switch" checked="@_useStartTls" @onchange="e => _useStartTls = e.Value is true" />
                 STARTTLS
             </label>
             <p class="hint">
@@ -180,19 +180,19 @@ else
         {
             <div class="stack">
                 <label class="checkbox">
-                    <input type="checkbox" checked="@_notificationDraftReady" @onchange="e => _notificationDraftReady = e.Value is true" />
+                    <input type="checkbox" role="switch" checked="@_notificationDraftReady" @onchange="e => _notificationDraftReady = e.Value is true" />
                     新草稿待处理或到发布时间仍未发布时发信
                 </label>
                 <label class="checkbox">
-                    <input type="checkbox" checked="@_notificationJobFailed" @onchange="e => _notificationJobFailed = e.Value is true" />
+                    <input type="checkbox" role="switch" checked="@_notificationJobFailed" @onchange="e => _notificationJobFailed = e.Value is true" />
                     任务最终失败时发信
                 </label>
                 <label class="checkbox">
-                    <input type="checkbox" checked="@_notificationAutomatic" @onchange="e => _notificationAutomatic = e.Value is true" />
+                    <input type="checkbox" role="switch" checked="@_notificationAutomatic" @onchange="e => _notificationAutomatic = e.Value is true" />
                     自动发布有结果时发信
                 </label>
                 <label class="checkbox">
-                    <input type="checkbox" checked="@_notificationContent" @onchange="e => _notificationContent = e.Value is true" />
+                    <input type="checkbox" role="switch" checked="@_notificationContent" @onchange="e => _notificationContent = e.Value is true" />
                     邮件里附上稿件正文
                 </label>
             </div>

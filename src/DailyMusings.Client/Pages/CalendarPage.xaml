@@ -36,40 +36,32 @@
 
                 <Label x:Name="StatusLabel" Style="{StaticResource CaptionLabel}" />
 
-                <CollectionView x:Name="RecordList" SelectionMode="None">
-                    <CollectionView.ItemTemplate>
-                        <DataTemplate x:DataType="pages:CalendarRow">
-                            <Border Style="{StaticResource Card}" Padding="14" Margin="0,5">
-                                <Border.GestureRecognizers>
-                                    <TapGestureRecognizer Tapped="OnRowTapped" CommandParameter="{Binding Id}" />
-                                </Border.GestureRecognizers>
-                                <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
-                                    <Label
-                                        Text="{Binding Glyph}"
-                                        FontSize="18"
-                                        VerticalOptions="Center" />
-                                    <VerticalStackLayout Grid.Column="1" Spacing="3">
-                                        <Label
-                                            Text="{Binding Time}"
-                                            FontAttributes="Bold"
-                                            FontSize="15" />
-                                        <Label
-                                            Text="{Binding Summary}"
-                                            Style="{StaticResource CaptionLabel}"
-                                            MaxLines="2"
-                                            LineBreakMode="TailTruncation" />
-                                    </VerticalStackLayout>
-                                    <Label
-                                        Grid.Column="2"
-                                        Text="{Binding State}"
-                                        TextColor="{Binding StateColor}"
-                                        FontSize="12"
-                                        VerticalOptions="Center" />
+                <Border Style="{StaticResource Card}" Padding="0">
+                    <CollectionView x:Name="RecordList" SelectionMode="None">
+                        <CollectionView.ItemTemplate>
+                            <DataTemplate x:DataType="pages:CalendarRow">
+                                <Grid RowDefinitions="Auto,1" Padding="16,0">
+                                    <Grid.GestureRecognizers>
+                                        <TapGestureRecognizer Tapped="OnRowTapped" CommandParameter="{Binding Id}" />
+                                    </Grid.GestureRecognizers>
+                                    <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12" Padding="0,14" MinimumHeightRequest="64">
+                                        <Label Text="{Binding Kind}" FontSize="13" TextColor="{StaticResource TextSecondary}"
+                                               VerticalOptions="Center" />
+                                        <VerticalStackLayout Grid.Column="1" Spacing="3">
+                                            <Label Text="{Binding Time}" FontAttributes="Bold" FontSize="17" />
+                                            <Label Text="{Binding Summary}" Style="{StaticResource CaptionLabel}"
+                                                   MaxLines="2" LineBreakMode="TailTruncation" />
+                                        </VerticalStackLayout>
+                                        <Label Grid.Column="2" Text="{Binding State}" TextColor="{Binding StateColor}"
+                                               FontSize="13" VerticalOptions="Center" />
+                                    </Grid>
+                                    <BoxView Grid.Row="1" HeightRequest="1" Color="{StaticResource Divider}"
+                                             Margin="32,0,0,0" IsVisible="{Binding ShowDivider}" />
                                 </Grid>
-                            </Border>
-                        </DataTemplate>
-                    </CollectionView.ItemTemplate>
-                </CollectionView>
+                            </DataTemplate>
+                        </CollectionView.ItemTemplate>
+                    </CollectionView>
+                </Border>
 
             </VerticalStackLayout>
         </ScrollView>
@@ -124,9 +116,11 @@
                         </Grid>
                     </VerticalStackLayout>
 
-                    <ScrollView HeightRequest="300">
-                        <Label x:Name="DetailText" Style="{StaticResource TranscriptLabel}" />
-                    </ScrollView>
+                    <Border Style="{StaticResource InputWell}" Padding="0">
+                        <ScrollView MaximumHeightRequest="300" BackgroundColor="{StaticResource Transparent}">
+                            <Label x:Name="DetailText" Style="{StaticResource TranscriptLabel}" Margin="12" />
+                        </ScrollView>
+                    </Border>
 
                     <Button
                         x:Name="DetailDeleteButton"

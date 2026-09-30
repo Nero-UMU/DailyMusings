@@ -157,7 +157,7 @@ else
         </div>
 
         <label class="checkbox">
-            <input type="checkbox" checked="@_backupEnabled" @onchange="e => _backupEnabled = e.Value is true" />
+            <input type="checkbox" role="switch" checked="@_backupEnabled" @onchange="e => _backupEnabled = e.Value is true" />
             每晚自动备份
         </label>
 

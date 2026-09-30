@@ -17,7 +17,7 @@
             Route="today"
             ContentTemplate="{DataTemplate pages:CapturePage}">
             <ShellContent.Icon>
-                <FontImageSource Glyph="🎙" Size="22" />
+                <FileImageSource File="tab_today.png" />
             </ShellContent.Icon>
         </ShellContent>
 
@@ -26,7 +26,7 @@
             Route="calendar"
             ContentTemplate="{DataTemplate pages:CalendarPage}">
             <ShellContent.Icon>
-                <FontImageSource Glyph="📅" Size="22" />
+                <FileImageSource File="tab_calendar.png" />
             </ShellContent.Icon>
         </ShellContent>
 
@@ -35,7 +35,7 @@
             Route="settings"
             ContentTemplate="{DataTemplate pages:SettingsPage}">
             <ShellContent.Icon>
-                <FontImageSource Glyph="🔧" Size="22" />
+                <FileImageSource File="tab_settings.png" />
             </ShellContent.Icon>
         </ShellContent>
     </TabBar>

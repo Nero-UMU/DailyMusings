@@ -18,10 +18,10 @@
 
             <Border Style="{StaticResource Card}">
                 <VerticalStackLayout Spacing="12">
-                    <Entry
-                        x:Name="ServerUrlEntry"
-                        Placeholder="http://192.168.1.10:18321"
-                        Keyboard="Url" />
+                    <Border Style="{StaticResource InputWell}">
+                        <Entry x:Name="ServerUrlEntry" BackgroundColor="{StaticResource Transparent}"
+                               Placeholder="http://192.168.1.10:18321" Keyboard="Url" />
+                    </Border>
                     <Label
                         Style="{StaticResource CaptionLabel}"
                         Text="服务端地址，含端口，例如 http://192.168.1.10:18321。" />
@@ -42,10 +42,10 @@
             <Border Style="{StaticResource Card}">
                 <VerticalStackLayout Spacing="12">
                     <Label x:Name="PairingState" Style="{StaticResource BodyLabel}" />
-                    <Entry
-                        x:Name="PairingCodeEntry"
-                        Placeholder="在管理页生成配对码后填到这里"
-                        MaxLength="32" />
+                    <Border Style="{StaticResource InputWell}">
+                        <Entry x:Name="PairingCodeEntry" BackgroundColor="{StaticResource Transparent}"
+                               Placeholder="在管理页生成配对码后填到这里" MaxLength="32" />
+                    </Border>
                     <Grid ColumnDefinitions="*,*" ColumnSpacing="10">
                         <Button Text="配对" Clicked="OnPairClicked" />
                         <Button
