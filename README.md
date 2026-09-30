@@ -217,6 +217,8 @@ dotnet build src/DailyMusings.Client -f net10.0-android -c Release -t:SignAndroi
 docker compose -f compose.yaml -f deploy/compose.yaml up -d --build
 ```
 
+打一版发布（推 tag → CI 出多架构镜像与签名 APK → 核对 → 记账）的完整步骤与坑，见 [`docs/发布校验值.md`](docs/发布校验值.md) 的「维护者发布流程」一节。
+
 测试之外还有两层验收脚本：`tools/deploy/` 把工作树部署到远程主机并做部署后自检，`tools/acceptance/` 对着真实部署跑端到端与恢复验证。用法与最近结果见各自目录的 README。
 
 ### 目录结构
@@ -239,7 +241,7 @@ docs/         开发指导.md（唯一事实源）、快速部署.md、使用手
 | [`docs/快速部署.md`](docs/快速部署.md) | 新用户最短路径：一份 compose、起服务、装 APK、配对，以及参数表与排障 |
 | [`docs/使用手册.md`](docs/使用手册.md) | 面向使用者与实例管理员：部署、密钥、首次登录与配对、每个管理页、备份与八步恢复、升级、排障 |
 | [`docs/开发指导.md`](docs/开发指导.md) | 产品约束、领域模型、时间与生成规则、API 边界、测试策略与完成定义。**唯一事实源**，附录 A 是逐条设计定案 |
-| [`docs/发布校验值.md`](docs/发布校验值.md) | 产物校验值、复现构建命令与验收状态（如实写明未覆盖的部分） |
+| [`docs/发布校验值.md`](docs/发布校验值.md) | **维护者发布流程**（打 tag → CI 出镜像与 APK → 核对 → 记账，含发布路径上的三个坑）、产物校验值、复现构建命令与验收状态（如实写明未覆盖的部分） |
 | [`CHANGELOG.md`](CHANGELOG.md) | 每一轮改动的动机、备选方案、定案理由与验收结果；仍然有效的实现取舍与历史路径 |
 | [`tools/acceptance/README.md`](tools/acceptance/README.md) | 端到端验收与恢复验证脚本的用法与执行结果 |
 
