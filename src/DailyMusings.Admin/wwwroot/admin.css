@@ -22,7 +22,7 @@
     --card-2: #2C2C2E;          /* tertiarySystemBackground：抬起的行、输入格、分段槽 */
     --card-3: #3A3A3C;          /* quaternary：分段控件的选中片 */
     --head-bg: #2C2C2E;         /* 表头 / 分组表头 / 次级面板 */
-    --logo-bg: #FFFFFF;         /* logo 位图本身是白底，给它一块白瓷砖 */
+    --logo-bg: #0C1C34;         /* logo 位图自带这层藏青底（满幅）；这一格只在图没加载出来时可见 */
 
     /* 毛玻璃面板的底：同样是 --card 那个色，但带透明度，好让 backdrop-filter 有东西可糊 */
     --glass: rgba(28, 28, 30, 0.72);
@@ -237,7 +237,7 @@ pre code {
     text-decoration: none;
 }
 
-/* 品牌标记是 logo 位图（白底），所以这里不再有背景色与字号——那些是它还是「每」字时的样式。 */
+/* 品牌标记是 logo 位图，它自带藏青底并已处理成满幅，所以这里只负责圆角与描边。 */
 .brand-mark {
     background: var(--logo-bg);
     border: 1px solid var(--border);
@@ -388,7 +388,7 @@ pre code {
     gap: 0.7rem;
 }
 
-/* 白底 logo 留一块白色图章。 */
+/* 登录页左栏的 logo 图章：同样靠位图自带的藏青底，这里只给圆角与尺寸。 */
 .login-mark {
     background: var(--logo-bg);
     border-radius: 0.8rem;

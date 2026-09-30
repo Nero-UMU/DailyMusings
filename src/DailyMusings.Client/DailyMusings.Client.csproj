@@ -43,12 +43,17 @@
 	</PropertyGroup>
 
 	<ItemGroup>
-		<!-- App Icon：单张位图（原图无 alpha 通道，白底），Color 是自适应图标的底色。取白而不是品牌紫，
-		     否则四角会露出一圈紫色边框。 -->
-		<MauiIcon Include="Resources\AppIcon\appicon.png" Color="#FFFFFF" />
+		<!-- App Icon：单张位图。logo 自带深色底（藏青 #0C1C34），所以这里取同一个藏青而不是白——
+		     取白的话，自适应图标被系统裁形时四角会露出一圈白边。图本身已经处理成满幅（导出时留下的
+		     黑边已填成藏青），且内容缩到 80%，落在自适应图标中央 66.7% 的安全区内。
 
-		<!-- Splash Screen：同一图案，白底配白底色，图案居中；BaseSize 是这个图案在启动图里的基准尺寸。 -->
-		<MauiSplashScreen Include="Resources\Splash\splash.png" Color="#FFFFFF" BaseSize="128,128" />
+		     ⚠ 改这个 Color（或换图）之后，**本地构建要先删掉 obj/<配置>/<tfm>/resizetizer 再构建**。
+		     那个目录会缓存生成的背景层，只改 Color 不会让它失效：实测过一次，前台已经换成新图了，
+		     背景却还是 MAUI 默认的紫 #512BD4。CI 是干净环境，不受影响。 -->
+		<MauiIcon Include="Resources\AppIcon\appicon.png" Color="#0C1C34" />
+
+		<!-- Splash Screen：同一图案，底色取 logo 自己的藏青，图案居中；BaseSize 是这个图案在启动图里的基准尺寸。 -->
+		<MauiSplashScreen Include="Resources\Splash\splash.png" Color="#0C1C34" BaseSize="128,128" />
 
 		<!-- Images -->
 		<MauiImage Include="Resources\Images\*" />
