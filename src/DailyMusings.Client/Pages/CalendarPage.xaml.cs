@@ -234,6 +234,13 @@ public partial class CalendarPage : ContentPage
 
     private async void OnRowTapped(object? sender, TappedEventArgs e) => await GuardAsync(async () =>
     {
+        // 双保险：正常情况下背板已经把点击消费掉了，但即使某个平台上没挡住，弹层开着时也不许从列表里
+        // 打开另一条——否则用户会以为自己点的是弹层里的内容，实际上却换了对象。
+        if (DetailOverlay.IsVisible)
+        {
+            return;
+        }
+
         if (e.Parameter is not string captureId)
         {
             return;
@@ -272,7 +279,10 @@ public partial class CalendarPage : ContentPage
         var playable = capture.IsVoice && capture.LocalAudioPath is { Length: > 0 } path && File.Exists(path);
 
         DetailPlayback.IsVisible = playable;
-        DetailDeleteButton.IsVisible = capture.IsVoice;
+
+        // 删除按钮对录音与手写都显示。底层 DeleteAsync 是类型无关的：先删记录，再按 {id}.* 扫音频文件，
+        // 手写没有匹配的音频，那个循环自然什么都不做。此前这里是 IsVisible = capture.IsVoice，
+        // 于是手写记录根本没有删除入口。
 
         if (playable)
         {
@@ -319,6 +329,15 @@ public partial class CalendarPage : ContentPage
     }
 
     private void OnCloseDetailClicked(object? sender, EventArgs e) => CloseDetail();
+
+    /// <summary>
+    /// 弹层背板上的点击：**故意什么都不做**。它存在的唯一目的是把触摸消费掉，让它到不了下层的列表——
+    /// 否则点弹层后面另一条随想会把它打开（用户报的缺陷）。要让「点外面就关掉」生效，把方法体换成
+    /// <see cref="CloseDetail"/> 即可。
+    /// </summary>
+    private void OnBackdropTapped(object? sender, TappedEventArgs e)
+    {
+    }
 
     private async void OnDetailPlayPauseClicked(object? sender, EventArgs e) => await GuardAsync(async () =>
     {
@@ -428,7 +447,7 @@ public partial class CalendarPage : ContentPage
         }
 
         var confirmed = await DisplayAlertAsync(
-            "删除这段录音？",
+            "删除这段随想？",
             "只删本机的这一份。服务器上已经上传的内容不受影响，也不会被一起删除。",
             "删除",
             "取消");

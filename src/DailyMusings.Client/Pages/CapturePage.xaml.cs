@@ -331,7 +331,8 @@ public partial class CapturePage : ContentPage
             _ => ColorFromResource("TextSecondary", Colors.Gray),
         };
 
-        DeleteButton.Text = capture.IsVoice ? "删除这段录音" : "删除这条记录";
+        // 录音与手写用同一句：动作是同一个（删掉本机这一条），措辞不该按类型分叉。
+        DeleteButton.Text = "删除这段随想";
 
         // Playback is only offered for a recording that is still on this device.
         var playable = capture.IsVoice && capture.LocalAudioPath is { Length: > 0 } path && File.Exists(path);
@@ -651,7 +652,7 @@ public partial class CapturePage : ContentPage
         }
 
         var confirmed = await DisplayAlertAsync(
-            capture.IsVoice ? "删除这段录音？" : "删除这条记录？",
+            "删除这段随想？",
             "只删本机的这一份。服务器上已经上传的内容不受影响，也不会被一起删除。",
             "删除",
             "取消");

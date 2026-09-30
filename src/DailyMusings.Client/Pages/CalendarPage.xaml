@@ -66,8 +66,17 @@
             </VerticalStackLayout>
         </ScrollView>
 
-        <!-- The detail sheet. It sits outside the ScrollView so it covers the whole screen rather than scrolling with it. -->
-        <Grid x:Name="DetailOverlay" IsVisible="False" BackgroundColor="#D9000000">
+        <!-- The detail sheet. It sits outside the ScrollView so it covers the whole screen rather than scrolling with it.
+
+             背板是一个填满整屏、并且挂了 TapGestureRecognizer 的 BoxView。只给 Grid 一个 BackgroundColor 时，
+             MAUI 不保证它挡住下层 CollectionView 的点击——于是点弹层后面另一条随想会真的把它打开（用户报的
+             缺陷）。挂上手势之后这一层才消费触摸。 -->
+        <Grid x:Name="DetailOverlay" IsVisible="False">
+            <BoxView Color="#D9000000">
+                <BoxView.GestureRecognizers>
+                    <TapGestureRecognizer Tapped="OnBackdropTapped" />
+                </BoxView.GestureRecognizers>
+            </BoxView>
             <Border
                 Style="{StaticResource Card}"
                 Margin="16"
@@ -125,7 +134,7 @@
                     <Button
                         x:Name="DetailDeleteButton"
                         Style="{StaticResource DangerButton}"
-                        Text="删除这段录音"
+                        Text="删除这段随想"
                         Clicked="OnDeleteDetailClicked" />
                 </VerticalStackLayout>
             </Border>
