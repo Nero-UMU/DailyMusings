@@ -24,6 +24,10 @@
     --head-bg: #2C2C2E;         /* 表头 / 分组表头 / 次级面板 */
     --logo-bg: #FFFFFF;         /* logo 位图本身是白底，给它一块白瓷砖 */
 
+    /* 毛玻璃面板的底：同样是 --card 那个色，但带透明度，好让 backdrop-filter 有东西可糊 */
+    --glass: rgba(28, 28, 30, 0.72);
+    --glass-strong: rgba(28, 28, 30, 0.82);  /* 折叠成顶部菜单后要压在滚动内容之上，更实一点 */
+
     /* ── 分隔线 ── */
     --border: rgba(84, 84, 88, 0.65);
     --border-strong: #48484A;
@@ -208,8 +212,11 @@ pre code {
     min-height: 100vh;
 }
 
+/* 侧栏：iOS 的毛玻璃面板 —— 半透明 + 背景模糊 + 1px 分隔线，不用投影。 */
 .sidebar {
-    background: var(--card);
+    background: var(--glass);
+    backdrop-filter: saturate(180%) blur(20px);
+    -webkit-backdrop-filter: saturate(180%) blur(20px);
     border-right: 1px solid var(--border);
     display: flex;
     flex: 0 0 var(--sidebar-w);
@@ -495,7 +502,11 @@ pre code {
     margin-bottom: 1rem;
 }
 
+/* 大标题：iOS 的 Large Title 观感。桌面管理页取 26px，比手机上小一档。 */
 .page-head .page-title {
+    font-size: 1.625rem;
+    font-weight: 700;
+    letter-spacing: -0.028em;
     margin: 0;
 }
 
@@ -691,6 +702,12 @@ button.btn-danger {
     color: var(--text);
 }
 
+/* 按下是「变暗」，不是放大 —— 放大在密集的表单里会让整行跳动。 */
+button:active:not([disabled]),
+.btn:active:not([disabled]) {
+    filter: brightness(0.85);
+}
+
 .btn-sm {
     font-size: 0.8125rem;
     height: 28px;
@@ -730,7 +747,7 @@ label {
 input,
 select,
 textarea {
-    background: var(--card);
+    background: var(--card-2);
     border: 1px solid var(--border-strong);
     border-radius: var(--radius-sm);
     color: var(--text);
@@ -945,7 +962,7 @@ label.checkbox input {
 }
 
 .badge {
-    background: var(--bg);
+    background: var(--card-2);
     border: 1px solid var(--border-strong);
     border-radius: 999px;
     color: var(--muted);
@@ -976,7 +993,7 @@ label.checkbox input {
 }
 
 .badge-muted {
-    background: var(--bg);
+    background: var(--card-2);
     border-color: var(--border-strong);
     color: var(--muted);
 }
@@ -1016,12 +1033,24 @@ label.checkbox input {
     white-space: nowrap;
 }
 
-.table tbody tr:last-child td {
+/* iOS 分组列表的内缩分隔线：线从文字左边缘起（左边留出与单元格内边距等宽的空档），不顶到
+   卡片边缘。用背景图画线，因为 border 只能横跨整个盒子，做不出这个内缩。 */
+.table tbody td {
     border-bottom: 0;
+    background-image: linear-gradient(var(--border), var(--border));
+    background-repeat: no-repeat;
+    background-position: 0.75rem 100%;
+    background-size: calc(100% - 0.75rem) 1px;
 }
 
+/* 组内最后一行不画线：分组的边界已经由卡片边缘表达了。 */
+.table tbody tr:last-child td {
+    background-image: none;
+}
+
+/* 悬停只改底色。写成 background 简写会把 background-image 一起清掉，那根内缩的线就没了。 */
 .table tbody tr:hover td {
-    background: var(--card-2);
+    background-color: var(--card-2);
 }
 
 .table td .actions {
@@ -1144,9 +1173,13 @@ label.checkbox input {
     font-weight: 600;
 }
 
-/* 手写一条：高度 = --cell-h（默认 64px）。 */
+/* 手写一条：高度 = --cell-h（默认 64px）。分隔线与表格行一样内缩。 */
 .data-row {
-    border-bottom: 1px solid var(--border);
+    background-image: linear-gradient(var(--border), var(--border));
+    background-repeat: no-repeat;
+    background-position: 0.9rem 100%;
+    background-size: calc(100% - 0.9rem) 1px;
+    border-bottom: 0;
     min-height: var(--cell-h);
 }
 
@@ -1156,11 +1189,11 @@ label.checkbox input {
 }
 
 .data-row:last-child {
-    border-bottom: 0;
+    background-image: none;
 }
 
 .data-row:hover {
-    background: var(--card-2);
+    background-color: var(--card-2);
 }
 
 .data-cell {
@@ -1246,13 +1279,20 @@ label.checkbox input {
         flex-direction: column;
     }
 
+    /* 折叠成顶部菜单之后它真的会盖住滚动的内容，所以这里的毛玻璃是有作用的：导航条下面
+       滚过的表格被糊掉，而不是被一块实心色挡死。 */
     .sidebar {
+        background: var(--glass-strong);
+        backdrop-filter: saturate(180%) blur(20px);
+        -webkit-backdrop-filter: saturate(180%) blur(20px);
         border-bottom: 1px solid var(--border);
         border-right: 0;
         flex: 0 0 auto;
         height: auto;
-        position: static;
+        position: sticky;
+        top: 0;
         width: 100%;
+        z-index: 20;
     }
 
     .brand {
@@ -1368,16 +1408,16 @@ label.checkbox input {
 
 /* Content library */
 .library-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .8rem; margin-bottom: 1rem; }
-.library-summary div { padding: 1rem; border: 1px solid var(--border); border-radius: .9rem; background: var(--card-2); }
+.library-summary div { padding: 1rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--card-2); }
 .library-summary strong { display: block; font-size: 1.55rem; }
 .library-summary span { color: var(--muted); font-size: .82rem; }
 .library-toolbar { display: flex; justify-content: space-between; gap: 1rem; align-items: center; margin-bottom: 1rem; }
-.segmented { display: flex; padding: .2rem; border-radius: .65rem; background: var(--card-2); }
-.segmented button { border: 0; background: transparent; padding: .55rem .85rem; border-radius: .5rem; }
+.segmented { display: flex; padding: .2rem; border-radius: var(--radius-sm); background: var(--card-2); }
+.segmented button { border: 0; background: transparent; padding: .55rem .85rem; border-radius: calc(var(--radius-sm) - 2px); }
 .segmented button.active { background: var(--card-3); font-weight: 600; }
 .library-search { max-width: 22rem; }
 .article-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 26rem), 1fr)); gap: .8rem; }
-.article-card { border: 1px solid var(--border); border-radius: .85rem; overflow: hidden; }
+.article-card { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
 .article-card.selected { border-color: var(--primary); box-shadow: 0 0 0 2px var(--ring); }
 .article-open { display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; width: 100%; height: auto; min-height: 8.5rem; border: 0; background: transparent; text-align: left; white-space: normal; padding: 1rem; color: inherit; }
 .article-open h2 { width: 100%; font-size: 1.05rem; margin: .3rem 0; overflow-wrap: anywhere; white-space: normal; }
@@ -1391,19 +1431,19 @@ label.checkbox input {
 .reader-card h2 { margin: .25rem 0; }
 .reader-card .card-head h2 { overflow-wrap: anywhere; }
 .reader-card .card-head button { flex: 0 0 auto; }
-.continuation-zone { display: flex; justify-content: space-between; gap: 1rem; align-items: center; margin-top: 1.25rem; padding: 1rem; border: 1px solid var(--primary-border); border-radius: .8rem; background: var(--primary-soft); }
+.continuation-zone { display: flex; justify-content: space-between; gap: 1rem; align-items: center; margin-top: 1.25rem; padding: 1rem; border: 1px solid var(--primary-border); border-radius: var(--radius-sm); background: var(--primary-soft); }
 .continuation-zone p { margin: .25rem 0 0; }
 .continuation-zone > button, .continuation-zone > .actions { flex: 0 0 auto; }
-.reader-document { max-width: 56rem; margin: 1.4rem auto 0; padding: 1.5rem clamp(1rem, 3vw, 2.25rem); border: 1px solid var(--border); border-radius: .85rem; background: var(--card); }
+.reader-document { max-width: 56rem; margin: 1.4rem auto 0; padding: 1.5rem clamp(1rem, 3vw, 2.25rem); border: 1px solid var(--border); border-radius: var(--radius); background: var(--card); }
 .article-summary { font-size: 1.05rem; line-height: 1.7; color: var(--muted); border-left: 3px solid var(--primary); margin: 0 0 1.5rem; padding-left: 1rem; }
 .article-body { overflow-wrap: anywhere; white-space: pre-wrap; line-height: 1.9; }
-.topic-editor { margin-top: 1.25rem; padding: 1.25rem; border: 1px solid var(--border); border-radius: .85rem; background: var(--head-bg); }
+.topic-editor { margin-top: 1.25rem; padding: 1.25rem; border: 1px solid var(--border); border-radius: var(--radius); background: var(--head-bg); }
 .topic-editor h3 { margin-bottom: .2rem; }
 .topic-picker { display: flex; flex-wrap: wrap; gap: .55rem; margin: .8rem 0 1rem; }
-.topic-option { display: grid; grid-template-columns: auto 1fr; gap: .15rem .45rem; align-items: center; padding: .55rem .7rem; border: 1px solid var(--border); border-radius: .7rem; }
+.topic-option { display: grid; grid-template-columns: auto 1fr; gap: .15rem .45rem; align-items: center; padding: .55rem .7rem; border: 1px solid var(--border); border-radius: var(--radius-sm); }
 .topic-option input { grid-row: 1 / 3; width: auto; }
 .topic-option small { color: var(--muted); }
-.danger-zone { display: flex; justify-content: space-between; gap: 1rem; align-items: center; margin-top: 1rem; padding: 1rem; border: 1px solid var(--danger-border); border-radius: .8rem; background: var(--danger-soft); }
+.danger-zone { display: flex; justify-content: space-between; gap: 1rem; align-items: center; margin-top: 1rem; padding: 1rem; border: 1px solid var(--danger-border); border-radius: var(--radius-sm); background: var(--danger-soft); }
 .danger-zone p { margin: .25rem 0 0; }
 .topic-create { display: grid; grid-template-columns: 1fr auto; gap: .7rem; margin-bottom: 1rem; }
 .topic-list { display: grid; }
