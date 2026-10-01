@@ -182,6 +182,12 @@ public sealed class SqliteReflectionRepository : IReflectionRepository
             cancellationToken,
             ("$day", SqliteValues.ContentDay(contentDate))).ConfigureAwait(false);
 
+    public async Task ClearDeletionAsync(ContentDate contentDate, CancellationToken cancellationToken) =>
+        await _accessor.ExecuteAsync(
+            "DELETE FROM deleted_reflection WHERE content_date = $day;",
+            cancellationToken,
+            ("$day", SqliteValues.ContentDay(contentDate))).ConfigureAwait(false);
+
     public async Task DeleteAsync(
         Reflection reflection,
         DateTimeOffset deletedAtUtc,

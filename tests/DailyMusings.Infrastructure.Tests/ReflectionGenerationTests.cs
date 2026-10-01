@@ -195,8 +195,10 @@ public class ReflectionGenerationTests
     }
 
     [TestMethod]
-    public async Task A_confirmed_day_is_not_regenerated()
+    public async Task A_confirmed_day_can_be_regenerated_when_the_user_asks_it()
     {
+        // A.21 的「同一天已有正式稿后再生成新稿」靠这条才走得到：新稿只进工作槽，旧正式稿继续对外，
+        // 直到用户再按「继续发布 → 确认替换并发布」（A.40）。
         await using var context = await ReflectionTestContext.CreateAsync();
         await context.CaptureTextAsync("今天试着记录了一点东西。");
         await context.SeedDraftAsync(context.Today, ReflectionStatus.Confirmed);
@@ -206,7 +208,45 @@ public class ReflectionGenerationTests
             new ReflectionGenerationPayload(false, GenerationReason.Manual, false),
             CancellationToken.None);
 
+        Assert.AreEqual(ReflectionGenerationOutcome.Generated, result.Outcome);
+    }
+
+    [TestMethod]
+    public async Task A_confirmed_day_is_not_regenerated_by_an_automatic_run()
+    {
+        // 用户本人的请求可以推翻已确认的稿子，定时任务永远不行。
+        await using var context = await ReflectionTestContext.CreateAsync();
+        await context.CaptureTextAsync("今天试着记录了一点东西。");
+        await context.SeedDraftAsync(context.Today, ReflectionStatus.Confirmed);
+
+        var result = await context.Generate.ExecuteAsync(
+            context.Today,
+            new ReflectionGenerationPayload(false, GenerationReason.Scheduled, false),
+            CancellationToken.None);
+
         Assert.AreEqual(ReflectionGenerationOutcome.SkippedAlreadyConfirmed, result.Outcome);
+    }
+
+    /// <summary>
+    /// 用户实际点的是发布设置页的「立即生成稿件」，它走的是请求用例（准入规则）而不是作业处理端。
+    /// 两层都要放行，否则用户在弹窗里看到的是拒绝。
+    /// </summary>
+    [TestMethod]
+    public async Task The_generate_button_may_ask_for_a_confirmed_day_again()
+    {
+        await using var context = await ReflectionTestContext.CreateAsync();
+        await context.CaptureTextAsync("今天试着记录了一点东西。");
+        await context.SeedDraftAsync(context.Today, ReflectionStatus.Confirmed);
+
+        var request = await context.RequestGeneration.ExecuteAsync(
+            context.Today,
+            manual: true,
+            ignoreTranscriptionFailures: true,
+            allowOverwriteOfManualEdits: false,
+            CancellationToken.None);
+
+        Assert.IsTrue(request.Decision.Allowed, request.Decision.Detail);
+        Assert.IsNotNull(request.Job);
     }
 
     /// <summary>

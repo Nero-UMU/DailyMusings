@@ -85,17 +85,17 @@ public static class GenerationRules
             // userConfirmedOverwrite when the working version carries hand edits.
             case ReflectionStatus.ReviewRequired:
             case ReflectionStatus.StaleByLateInput:
+
+            // 已确认（很可能已发布）的日子同样允许用户主动重来一次——这正是 A.21 定好的
+            // 「同一天已有正式稿后再生成新稿」：新稿只进工作槽，旧正式稿继续对外，直到用户再按
+            // 「继续发布 → 确认替换并发布」。定时任务那边仍然拒绝（见 ForScheduledRun）。
+            case ReflectionStatus.Confirmed:
                 return GenerationDecision.Permit();
 
             case ReflectionStatus.Generating:
                 return GenerationDecision.Block(
                     "reflection.generation.in_progress",
                     "This day is already being generated.");
-
-            case ReflectionStatus.Confirmed:
-                return GenerationDecision.Block(
-                    "reflection.generation.already_confirmed",
-                    "This day's draft was already confirmed.");
 
             default:
                 return GenerationDecision.Block(

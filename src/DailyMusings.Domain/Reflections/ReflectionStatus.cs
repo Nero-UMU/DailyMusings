@@ -68,9 +68,12 @@ public static class ReflectionStatusTransitions
             ReflectionStatus.StaleByLateInput,
         ],
 
-        // Confirmed has exactly one outgoing edge (A.3): the whole point is that a confirmed draft is
-        // not silently invalidated by anything other than new same-day material.
-        [ReflectionStatus.Confirmed] = [ReflectionStatus.StaleByLateInput],
+        // Confirmed 有两条出边：新的当日素材让它失效（→ StaleByLateInput），或者**用户自己**要求重新生成
+        // （→ Generating）。后者是 A.21 的「已有正式稿后再生成新稿」，2026-10-01 才真正打通（A.40）：
+        // 在那之前这条边不存在，于是「发布之后再生成」在实现上根本走不到。
+        // 关键在于**没有自动路径**能走这条边：ForScheduledRun 仍然拒绝已确认的稿件，所以确认过的稿子
+        // 只会被用户本人推翻，不会被定时任务悄悄换掉——A.3 那条不变量的本意保住了。
+        [ReflectionStatus.Confirmed] = [ReflectionStatus.StaleByLateInput, ReflectionStatus.Generating],
 
         // A stale draft can be regenerated, or the user can simply accept it as it stands.
         [ReflectionStatus.StaleByLateInput] = [ReflectionStatus.Generating, ReflectionStatus.Confirmed],

@@ -122,7 +122,7 @@
             </div>
 
             <div class="danger-zone">
-                <div><strong>删除这篇稿件</strong><p class="hint">正文、历史版本和发布记录将永久删除，这一天也不会自动重新生成。已输出的文件会保留。</p></div>
+                <div><strong>删除这篇稿件</strong><p class="hint">正文、历史版本和发布记录将永久删除，这一天也不会自动重新生成（你手动点「立即生成稿件」仍然可以）。已输出的文件会保留。</p></div>
                 @if (_confirmDeleteArticle == selected.Id)
                 {
                     <div class="actions"><button class="btn-danger" @onclick="DeleteArticleAsync" disabled="@_busy">确认永久删除</button>
@@ -343,7 +343,7 @@
         await services.GetRequiredService<DeleteReflectionUseCase>().ExecuteAsync(_selected.Id, CancellationToken.None);
         _selected = null; _confirmDeleteArticle = null; _selectedTopicIds.Clear();
         await LoadAsync();
-    }, "稿件已删除，自动任务不会重新生成这一天。");
+    }, "稿件已删除，自动任务不会重新生成这一天；你手动生成仍然可以。");
 
     private async Task ReloadAsync() => await RunAsync(async _ => await LoadAsync(), "内容已刷新。");
 

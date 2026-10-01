@@ -85,11 +85,19 @@ public sealed class RequestReflectionGenerationUseCase
 
         if (reflection is null && await _reflections.IsDeletedAsync(contentDate, cancellationToken).ConfigureAwait(false))
         {
-            return new ReflectionGenerationRequestResult(
-                contentDate,
-                GenerationDecision.Block("reflection.deleted", "这一天的稿件已被你删除，不会自动重新生成。"),
-                null,
-                null);
+            // 墓碑的本意是「别让定时任务把你删掉的那天自己长回来」，不是「你也不许再要它」。所以自动运行照旧
+            // 被挡，而**用户亲手点的这一次**放行，并把墓碑清掉——这一天从此恢复成普通日子，夜间的自动生成也
+            // 不会再跳过它。原文案只提「不会自动重新生成」，却出现在手动请求上，正是用户报的那句话（A.40）。
+            if (!manual)
+            {
+                return new ReflectionGenerationRequestResult(
+                    contentDate,
+                    GenerationDecision.Block("reflection.deleted", "这一天的稿件已被你删除，不会自动重新生成。"),
+                    null,
+                    null);
+            }
+
+            await _reflections.ClearDeletionAsync(contentDate, cancellationToken).ConfigureAwait(false);
         }
 
         var status = reflection?.Status;
@@ -172,7 +180,10 @@ public enum ReflectionGenerationOutcome
     /// <summary>The day has nothing to write about. Counted as success: retrying would find the same nothing.</summary>
     SkippedNoMaterial = 1,
 
-    /// <summary>The day was confirmed, so §6.3's state machine has no edge back into generation.</summary>
+    /// <summary>
+    /// The day was confirmed and this run was not a manual request, so it is left alone. A manual request may
+    /// regenerate it (A.40); the scheduled run never may, so a confirmed draft is only ever replaced by the user.
+    /// </summary>
     SkippedAlreadyConfirmed = 2,
 
     /// <summary>
@@ -265,7 +276,10 @@ public sealed class GenerateReflectionUseCase
 
         var reflection = await _reflections.FindByContentDateAsync(contentDate, cancellationToken).ConfigureAwait(false);
 
-        if (reflection?.Status == ReflectionStatus.Confirmed)
+        // 只有自动化路径在这里停下：确认过（很可能已发布）的稿子不能被定时任务悄悄换掉。用户自己点的那次
+        // 是另一回事——A.21 的「已有正式稿后再生成新稿」正是靠它才走得到，新稿只进工作槽，旧正式稿继续对外，
+        // 直到用户再按「继续发布 → 确认替换并发布」（A.40）。
+        if (reflection?.Status == ReflectionStatus.Confirmed && payload.Reason != GenerationReason.Manual)
         {
             return new ReflectionGenerationResult(
                 ReflectionGenerationOutcome.SkippedAlreadyConfirmed,

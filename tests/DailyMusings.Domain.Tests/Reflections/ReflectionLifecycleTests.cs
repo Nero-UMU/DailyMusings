@@ -27,6 +27,13 @@ public class ReflectionLifecycleTests
         return reflection;
     }
 
+    private static Reflection Confirmed()
+    {
+        var reflection = InReview();
+        reflection.Confirm(reflection.WorkingVersionId!.Value, TestFactory.Noon);
+        return reflection;
+    }
+
     [TestMethod]
     public void A_new_day_starts_waiting_for_inputs()
     {
@@ -111,26 +118,27 @@ public class ReflectionLifecycleTests
     }
 
     [TestMethod]
-    public void A_confirmed_draft_can_only_leave_confirmed_because_of_late_input()
+    public void A_confirmed_draft_leaves_confirmed_for_late_input_or_when_the_user_asks_again()
     {
-        var reflection = InReview();
-        reflection.Confirm(reflection.WorkingVersionId!.Value, TestFactory.Noon);
-
-        // Regenerating a finished day is exactly what §7 forbids; the only permitted way out of
-        // Confirmed is the late-input path.
+        // 两条出边：新的当日素材让它失效，或者**用户自己**要求重新生成（A.21 / A.40）。
+        // 挡住自动运行的从来不是这张表，而是 ForScheduledRun——它至今仍然拒绝已确认的稿件。
         var exits = ReflectionStatusTransitions.From(ReflectionStatus.Confirmed);
-        CollectionAssert.AreEqual(new[] { ReflectionStatus.StaleByLateInput }, exits.ToArray());
+        CollectionAssert.AreEqual(
+            new[] { ReflectionStatus.StaleByLateInput, ReflectionStatus.Generating },
+            exits.ToArray());
 
-        TestFactory.ThrowsDomain(
-            "reflection.status.illegal_transition",
-            () => reflection.BeginGeneration(GenerationReason.Manual, TestFactory.Noon));
+        var asked = Confirmed();
+        asked.BeginGeneration(GenerationReason.Manual, TestFactory.Noon);
+        Assert.AreEqual(ReflectionStatus.Generating, asked.Status);
+        Assert.AreEqual(GenerationReason.Manual, asked.GenerationReason);
 
-        reflection.MarkStaleByLateInput(TestFactory.Noon);
-        Assert.AreEqual(ReflectionStatus.StaleByLateInput, reflection.Status);
+        var wentStale = Confirmed();
+        wentStale.MarkStaleByLateInput(TestFactory.Noon);
+        Assert.AreEqual(ReflectionStatus.StaleByLateInput, wentStale.Status);
 
-        reflection.BeginGeneration(GenerationReason.LateInputRegeneration, TestFactory.Noon);
-        Assert.AreEqual(ReflectionStatus.Generating, reflection.Status);
-        Assert.AreEqual(GenerationReason.LateInputRegeneration, reflection.GenerationReason);
+        wentStale.BeginGeneration(GenerationReason.LateInputRegeneration, TestFactory.Noon);
+        Assert.AreEqual(ReflectionStatus.Generating, wentStale.Status);
+        Assert.AreEqual(GenerationReason.LateInputRegeneration, wentStale.GenerationReason);
     }
 
     [TestMethod]

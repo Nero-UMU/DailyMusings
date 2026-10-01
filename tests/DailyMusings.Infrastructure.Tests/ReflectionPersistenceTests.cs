@@ -29,15 +29,28 @@ public class ReflectionPersistenceTests
         Assert.IsNull(await context.Reflections.FindVersionAsync(version.Id, CancellationToken.None));
         Assert.IsTrue(await context.Reflections.IsDeletedAsync(context.Today, CancellationToken.None));
 
-        var regeneration = await context.RequestGeneration.ExecuteAsync(
+        // 自动运行仍然被墓碑挡住：删掉的那天不会自己长回来。这条断言同时钉住失败原因必须是墓碑，
+        // 而不是「生成时刻还没到」之类的另一条理由。
+        var automatic = await context.RequestGeneration.ExecuteAsync(
+            context.Today,
+            manual: false,
+            ignoreTranscriptionFailures: false,
+            allowOverwriteOfManualEdits: false,
+            CancellationToken.None);
+
+        Assert.IsFalse(automatic.Decision.Allowed);
+        Assert.AreEqual("reflection.deleted", automatic.Decision.Code);
+
+        // 而用户亲手点的那一次放行，并顺手把墓碑清掉——这一天从此恢复成普通日子（A.40）。
+        var manual = await context.RequestGeneration.ExecuteAsync(
             context.Today,
             manual: true,
             ignoreTranscriptionFailures: true,
             allowOverwriteOfManualEdits: false,
             CancellationToken.None);
 
-        Assert.IsFalse(regeneration.Decision.Allowed);
-        Assert.AreEqual("reflection.deleted", regeneration.Decision.Code);
+        Assert.IsTrue(manual.Decision.Allowed);
+        Assert.IsFalse(await context.Reflections.IsDeletedAsync(context.Today, CancellationToken.None));
     }
 
     [TestMethod]

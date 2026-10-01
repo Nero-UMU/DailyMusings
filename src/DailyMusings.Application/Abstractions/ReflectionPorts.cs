@@ -178,6 +178,15 @@ public interface IReflectionRepository
     /// <summary>Whether a user explicitly removed this content day. Tombstones prevent the scheduler recreating it.</summary>
     Task<bool> IsDeletedAsync(ContentDate contentDate, CancellationToken cancellationToken);
 
+    /// <summary>
+    /// Removes the tombstone, so the day counts as an ordinary one again.
+    /// <para>
+    /// Called when the user asks for generation themselves: the tombstone exists to keep the scheduler from
+    /// resurrecting a day the user deleted, not to keep the user from asking for it back (A.40).
+    /// </para>
+    /// </summary>
+    Task ClearDeletionAsync(ContentDate contentDate, CancellationToken cancellationToken);
+
     /// <summary>Deletes the article and all versions/publications, while retaining a content-date tombstone.</summary>
     Task DeleteAsync(Reflection reflection, DateTimeOffset deletedAtUtc, CancellationToken cancellationToken);
 
