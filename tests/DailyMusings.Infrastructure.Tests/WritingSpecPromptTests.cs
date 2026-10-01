@@ -2,6 +2,7 @@ using System.Net;
 using System.Text;
 using System.Text.Json;
 using DailyMusings.Application.Abstractions;
+using DailyMusings.Domain.Common;
 using DailyMusings.Domain.Inputs;
 using DailyMusings.Domain.Reflections;
 using DailyMusings.Domain.Retrieval;
@@ -99,6 +100,49 @@ public sealed class WritingSpecPromptTests
         StringAssert.Contains(prompt, "不要超出这个范围", "关掉公差要把范围说死。");
         StringAssert.Contains(prompt, "第一人称");
         Assert.IsFalse(prompt.Contains("行文风格：", StringComparison.Ordinal), $"删空的清单不该又冒出默认条目：\n{prompt}");
+    }
+
+    /// <summary>
+    /// 历史素材只能"提一嘴"，不能喧宾夺主 —— 用户 2026-10-01 报的现象是：昨天的整件事被今天的稿子整段复述了。
+    /// <para>
+    /// 这条只能在这一层守：它是提示词里的话，不是任何数据或状态，库表与界面都看不出它还在不在。
+    /// </para>
+    /// </summary>
+    [TestMethod]
+    public async Task The_system_rules_keep_history_to_one_line_and_today_as_the_subject()
+    {
+        var handler = new CapturingHandler();
+        var client = new OpenAiCompatibleGenerationClient(
+            new HttpClient(handler),
+            TestSecretStore.With("test-key", "not-a-real-secret"),
+            new EnabledSettings(),
+            NullLogger<OpenAiCompatibleGenerationClient>.Instance);
+
+        var today = ContentDate.From(new DateOnly(2026, 10, 2));
+        var dayEntry = InputEntry.CreateText(
+            InputEntryId.New(), DateTimeOffset.UnixEpoch, 480, today, "今天吃了海鲜自助，很满意。");
+        var historyEntry = InputEntry.CreateText(
+            InputEntryId.New(), DateTimeOffset.UnixEpoch, 480, today.AddDays(-30), "上个月吃过一次海鲜自助，马马虎虎。");
+
+        await client.GenerateAsync(
+            new GenerationRequest(
+                today,
+                [dayEntry],
+                [new RetrievedMaterial(historyEntry, 0.9, "同为主题", true)],
+                new WritingSettings(100, 400, 0, WritingPerson.First, []),
+                "generation-v2",
+                Array.Empty<string>()),
+            CancellationToken.None);
+
+        // 主体必须是今天：写进不可覆盖的系统规则，用户自己的写作规范改不掉它。
+        StringAssert.Contains(handler.System, "正文的主体必须是", "今天的素材要被指明为正文主体。");
+        StringAssert.Contains(handler.System, "提一嘴", "历史素材的用法要比「写成回忆」更紧：只能一句带过。");
+        StringAssert.Contains(handler.System, "不得单独成段", "「不喧宾夺主」的可执行形式就是不许成段。");
+        StringAssert.Contains(handler.System, "宁可写得短", "当天素材少时不许拿历史素材填篇幅。");
+
+        // 素材区块的标题也要同一条口径，否则模型会在两处读到两种要求。
+        StringAssert.Contains(handler.Prompt, "今天的素材（正文主体", "当天素材的标签要说明它是主体。");
+        StringAssert.Contains(handler.Prompt, "不得成段", "历史素材区块的标题也要写出这个限制。");
     }
 
     private sealed class EnabledSettings : IGenerationSettingsProvider

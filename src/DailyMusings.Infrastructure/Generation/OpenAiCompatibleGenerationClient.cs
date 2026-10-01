@@ -44,11 +44,14 @@ public sealed class OpenAiCompatibleGenerationClient : IReflectionGenerationClie
 
         不可违反的规则：
         1. 只能使用下方提供的素材内容。不得添加任何素材中不存在的事实、人名、时间、地点、数字或因果。
-        2. 历史素材必须写成回忆或延续（例如"前些天""之前提过"），绝不能写成当天发生的事。
-        3. 每条"引用"必须逐字摘自你写出的正文，且必须标注它来自哪几条素材。
-        4. 正文用空行分段，不要使用 Markdown 标题或列表。
-        5. 只输出一个 JSON 对象，不要输出解释文字或代码块。
-        6. 主题方面：优先从"已有主题"里挑 1–3 个最贴切的，并原样回抄它们的写法；同义概念不要另造新名。
+        2. 正文的主体必须是"今天的素材"里的事：今天做了什么、当时什么感觉。当天素材少，正文就写短一点，
+           宁可写得短，也不要用历史素材把篇幅填满。
+        3. 历史素材只能"提一嘴"：用一句以内的呼应、对比或回忆带过（例如"比上个月那家好很多""之前提过"），
+           不得单独成段，不得展开叙述它的经过，更不能写成当天发生的事。
+        4. 每条"引用"必须逐字摘自你写出的正文，且必须标注它来自哪几条素材。
+        5. 正文用空行分段，不要使用 Markdown 标题或列表。
+        6. 只输出一个 JSON 对象，不要输出解释文字或代码块。
+        7. 主题方面：优先从"已有主题"里挑 1–3 个最贴切的，并原样回抄它们的写法；同义概念不要另造新名。
            只有当已有主题确实都不合适时，才在 newTopics 里提出简短的候选名（每个不超过 12 字）。
            无论如何都不能一个主题都不给：要么给 topics，要么给 newTopics。
         """;
@@ -369,7 +372,7 @@ public sealed class OpenAiCompatibleGenerationClient : IReflectionGenerationClie
 
         builder.AppendLine();
 
-        builder.AppendLine("今天的素材（按记录时间排序）：");
+        builder.AppendLine("今天的素材（正文主体，按记录时间排序）：");
         foreach (var entry in request.DayInputs)
         {
             builder.AppendLine(CultureInfo.InvariantCulture, $"[{byInput[entry.Id]}] {entry.TranscriptForGeneration}");
@@ -379,7 +382,7 @@ public sealed class OpenAiCompatibleGenerationClient : IReflectionGenerationClie
 
         if (request.HistoricalMaterial.Count > 0)
         {
-            builder.AppendLine("可以引用的历史素材（这些不是今天发生的事，只能作为回忆或延续来写）：");
+            builder.AppendLine("可以引用的历史素材（不是今天发生的事；只能一句带过作呼应或对比，不得成段）：");
             foreach (var material in request.HistoricalMaterial)
             {
                 builder.AppendLine(CultureInfo.InvariantCulture,
