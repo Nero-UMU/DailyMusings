@@ -28,14 +28,14 @@
 		<ApplicationId>dev.dailymusings.client</ApplicationId>
 
 		<!-- 这两个是**本地开发用**的默认值，取「最近一次发布」的版本号。发布时由 release.yml 从 tag 推导
-		     并覆盖：v1.3.0 → ApplicationDisplayVersion=1.3.0、ApplicationVersion=10300（major*10000+minor*100+patch）。
+		     并覆盖：v1.4.0 → ApplicationDisplayVersion=1.4.0、ApplicationVersion=10400（major*10000+minor*100+patch）。
 
 		     这里必须跟着发布更新，不能留在某个固定值上：versionCode 要随每次发布**单调递增**，否则手机会
 		     拒绝覆盖安装（表现为「应用未安装」）。1.0.3 那一轮修的就是它——此前一直写死 1，所有发布的 APK
 		     都装不上已装的旧版。反过来说，本地构建的 versionCode 若低于手机上已装的发布版，同样装不上去，
 		     所以默认值取最近一次发布的值而不是 1。 -->
-		<ApplicationDisplayVersion>1.3.0</ApplicationDisplayVersion>
-		<ApplicationVersion>10300</ApplicationVersion>
+		<ApplicationDisplayVersion>1.4.0</ApplicationDisplayVersion>
+		<ApplicationVersion>10400</ApplicationVersion>
 
 		<!-- Android 8.0 / API 26, per decision A.11: the runtime permission model is settled by then and it avoids
 		     the legacy storage-permission branches that older targets drag in. -->
