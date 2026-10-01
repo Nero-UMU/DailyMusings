@@ -38,6 +38,7 @@ public sealed class WritingSpecPromptTests
                 ContentDate.From(new DateOnly(2026, 9, 29)),
                 Array.Empty<InputEntry>(),
                 Array.Empty<RetrievedMaterial>(),
+                Array.Empty<PublishedArticle>(),
                 new WritingSettings(
                     100,
                     420,
@@ -88,6 +89,7 @@ public sealed class WritingSpecPromptTests
                 ContentDate.From(new DateOnly(2026, 9, 29)),
                 Array.Empty<InputEntry>(),
                 Array.Empty<RetrievedMaterial>(),
+                Array.Empty<PublishedArticle>(),
                 new WritingSettings(300, 400, 0, WritingPerson.First, []),
                 "generation-v2",
                 Array.Empty<string>()),
@@ -138,6 +140,7 @@ public sealed class WritingSpecPromptTests
                 today,
                 [dayEntry],
                 [new RetrievedMaterial(historyEntry, 0.9, "同为主题", true)],
+                [new PublishedArticle(today.AddDays(-1), "昨天那篇", "昨天的正文。")],
                 new WritingSettings(100, 400, 0, WritingPerson.First, []),
                 "generation-v2",
                 Array.Empty<string>()),
@@ -157,6 +160,12 @@ public sealed class WritingSpecPromptTests
         StringAssert.Contains(handler.Prompt, "内容日期：2026-10-02（周五）", "要给出当天的日期与星期。");
         StringAssert.Contains(handler.Prompt, "[S1] (01:17)", "当天素材要带它自己的时刻。");
         StringAssert.Contains(handler.Prompt, "[S2] (2026-09-02 19:30)", "历史素材要带日期与时刻。");
+
+        // 往日的成稿是第三块：用来接上行文与延续，受同一条「提一嘴」规则约束。
+        StringAssert.Contains(handler.Prompt, "近几天的成稿", "成稿块要出现在提示词里。");
+        StringAssert.Contains(handler.Prompt, "(2026-10-01) 昨天那篇", "成稿要带日期与标题。");
+        StringAssert.Contains(handler.Prompt, "昨天的正文。", "成稿的正文要原样带上。");
+        StringAssert.Contains(handler.System, "近几天的成稿", "不可覆盖的系统规则也要覆盖成稿块。");
     }
 
     private sealed class EnabledSettings : IGenerationSettingsProvider

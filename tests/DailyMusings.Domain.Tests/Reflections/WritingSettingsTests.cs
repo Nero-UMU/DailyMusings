@@ -38,6 +38,33 @@ public sealed class WritingSettingsTests
         Assert.AreEqual(0, settings.Rules.Count);
     }
 
+    /// <summary>
+    /// 成稿窗口：默认 7 天（用户要的「近几天的成稿一并提交」），0 是合法值（不发），越界要当场拒绝。
+    /// </summary>
+    [TestMethod]
+    public void The_recent_article_window_defaults_to_seven_days_and_rejects_nonsense()
+    {
+        Assert.AreEqual(
+            7,
+            WritingSettings.DefaultRecentArticleDays,
+            "默认把最近 7 天的成稿交给模型。");
+        Assert.AreEqual(
+            7,
+            new WritingSettings(50, 300, 20, WritingPerson.First, []).RecentArticleDays,
+            "不显式传时用默认值，既有调用点因此不必改。");
+
+        new WritingSettings(50, 300, 20, WritingPerson.First, [], 0).Validate();
+
+        TestFactory.ThrowsDomain(
+            "writing.recent_articles.out_of_range",
+            () => new WritingSettings(50, 300, 20, WritingPerson.First, [], -1).Validate());
+
+        TestFactory.ThrowsDomain(
+            "writing.recent_articles.out_of_range",
+            () => new WritingSettings(
+                50, 300, 20, WritingPerson.First, [], WritingSettings.MaxRecentArticleDays + 1).Validate());
+    }
+
     [TestMethod]
     public void A_null_rule_list_becomes_empty_instead_of_staying_null()
     {

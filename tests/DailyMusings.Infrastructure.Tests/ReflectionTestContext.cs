@@ -189,6 +189,8 @@ internal sealed class ReflectionTestContext : IAsyncDisposable
         Inputs = new SqliteInputEntryRepository(accessor);
         Jobs = new SqliteJobRepository(accessor);
         Reflections = new SqliteReflectionRepository(accessor);
+        Publications = new SqlitePublicationRepository(accessor);
+        Targets = new SqlitePublishTargetRepository(accessor);
         Topics = new SqliteTopicRepository(accessor);
         EmbeddingIndex = new SqliteEmbeddingIndexRepository(accessor);
         Settings = new SqliteAppSettingStore(accessor, clock);
@@ -237,7 +239,8 @@ internal sealed class ReflectionTestContext : IAsyncDisposable
                 new TestSmtpSettings { Settings = SmtpSettings.Default },
                 Enqueuer),
             Topics,
-            ResolveArticleTopics);
+            ResolveArticleTopics,
+            Publications);
 
         Check = new RunUnsourcedStatementCheckUseCase(Reflections, Inputs, client, clock);
         GetReflection = new GetReflectionUseCase(Reflections, ThisRetrieval, Topics);
@@ -289,6 +292,10 @@ internal sealed class ReflectionTestContext : IAsyncDisposable
     public SqliteJobRepository Jobs { get; }
 
     public SqliteReflectionRepository Reflections { get; }
+
+    public SqlitePublicationRepository Publications { get; }
+
+    public SqlitePublishTargetRepository Targets { get; }
 
     public SqliteTopicRepository Topics { get; }
 

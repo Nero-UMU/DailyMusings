@@ -1,6 +1,7 @@
 using DailyMusings.Domain.Common;
 using DailyMusings.Domain.Publishing;
 using DailyMusings.Domain.Reflections;
+using DailyMusings.Domain.Time;
 
 namespace DailyMusings.Application.Abstractions;
 
@@ -45,6 +46,18 @@ public interface IPublicationRepository
     Task<IReadOnlyList<Publication>> ListOutstandingAsync(int limit, CancellationToken cancellationToken);
 
     Task<IReadOnlyList<Publication>> ListRecentAsync(int limit, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// 已经发表的成稿正文，供生成时当"延续"的参照（§8.4，附录 A.41 续记）。闭区间，新的一天在前。
+    /// <para>
+    /// 只取当前处于 <see cref="PublicationStatus.Published"/> 的那一版：被 <c>Superseded</c> 的不算博客上的
+    /// 内容。同一天理论上只有一条 Published（A.21），万一有，取排在最前的那条。
+    /// </para>
+    /// </summary>
+    Task<IReadOnlyList<PublishedArticle>> ListPublishedArticlesAsync(
+        ContentDate from,
+        ContentDate to,
+        CancellationToken cancellationToken);
 
     Task AddAsync(Publication publication, CancellationToken cancellationToken);
 

@@ -111,6 +111,12 @@
                    @oninput="e => _writingToleranceCharacters = (string?)e.Value ?? string.Empty" />
             <span class="hint">开启后，生成的字数可在上下限外各浮动这么多字。</span>
         </label>
+        <label>一并提交近几天的成稿
+            <input type="number" min="0" max="@WritingSettings.MaxRecentArticleDays"
+                   value="@_writingRecentArticleDays"
+                   @oninput="e => _writingRecentArticleDays = (string?)e.Value ?? string.Empty" />
+            <span class="hint">把最近这些天已发布的随想正文一起发给模型，让它接得上前后。填 0 表示不发。</span>
+        </label>
     </div>
 
     <div class="writing-rules">
@@ -178,6 +184,7 @@
     private string _writingMaxCharacters = WritingSettings.DefaultMaxCharacters.ToString(CultureInfo.InvariantCulture);
     private string _writingToleranceCharacters = WritingSettings.DefaultCharacterTolerance.ToString(CultureInfo.InvariantCulture);
     private bool _writingToleranceEnabled = true;
+    private string _writingRecentArticleDays = WritingSettings.DefaultRecentArticleDays.ToString(CultureInfo.InvariantCulture);
     private string _writingPerson = ContentSettings.FormatPerson(WritingSettings.Default.Person);
     private List<WritingRule> _writingRules = [.. WritingSettings.DefaultRules];
     private bool _automaticPublish;
@@ -211,6 +218,7 @@
         _writingMaxCharacters = settings.Writing.MaxCharacters.ToString(CultureInfo.InvariantCulture);
         _writingToleranceCharacters = settings.Writing.CharacterTolerance.ToString(CultureInfo.InvariantCulture);
         _writingToleranceEnabled = settings.Writing.AllowsTolerance;
+        _writingRecentArticleDays = settings.Writing.RecentArticleDays.ToString(CultureInfo.InvariantCulture);
         _writingPerson = ContentSettings.FormatPerson(settings.Writing.Person);
         _writingRules = [.. settings.Writing.Rules];
         var targets = await services.GetRequiredService<ListPublishTargetsUseCase>().ExecuteAsync(CancellationToken.None);
@@ -271,11 +279,14 @@
         if (!ContentSettings.TryParsePerson(_writingPerson, out var writingPerson))
             throw new UseCaseException("writing.person.invalid", "人称只能是第一、第二或第三人称。");
 
+        if (!int.TryParse(_writingRecentArticleDays, out var recentArticleDays))
+            throw new UseCaseException("writing.recent_articles.invalid", "成稿天数必须是数字。");
+
         await services.GetRequiredService<UpdateContentSettingsUseCase>().ExecuteAsync(
             new ContentSettingsUpdate(
                 null, generation, publish, null, null, null, _draftDirectory, _publishedDirectory, _hexoTemplate,
                 minCharacters, maxCharacters, _writingToleranceEnabled ? toleranceCharacters : 0,
-                writingPerson, CollectWritingRules()),
+                writingPerson, CollectWritingRules(), recentArticleDays),
             CancellationToken.None);
         await EnsurePublicTargetAsync(services);
         await services.GetRequiredService<UpdatePublishTargetUseCase>().ExecuteAsync(

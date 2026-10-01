@@ -44,27 +44,45 @@ public sealed record WritingSettings
     /// <summary>默认公差 20 个字：允许模型按素材多少在区间外浮动这么多（<c>0</c> = 严格落在区间内）。</summary>
     public const int DefaultCharacterTolerance = 20;
 
+    /// <summary>
+    /// 默认把最近 7 天的成稿一并交给模型。用户要的是「延续感」——今天这篇接得上前几天写的，
+    /// 而不是从原始随想里把旧事重新组织一遍（附录 A.41 续记）。<c>0</c> 表示不交。
+    /// </summary>
+    public const int DefaultRecentArticleDays = 7;
+
     public const int MinAllowedCharacters = 1;
     public const int MaxAllowedCharacters = 5000;
     public const int MaxAllowedTolerance = 500;
     public const int MaxRules = 20;
+    public const int MaxRecentArticleDays = 60;
 
     public WritingSettings(
         int minCharacters,
         int maxCharacters,
         int characterTolerance,
         WritingPerson person,
-        IReadOnlyList<WritingRule>? rules = null)
+        IReadOnlyList<WritingRule>? rules = null,
+        int recentArticleDays = DefaultRecentArticleDays)
     {
         MinCharacters = minCharacters;
         MaxCharacters = maxCharacters;
         CharacterTolerance = characterTolerance;
         Person = person;
+        RecentArticleDays = recentArticleDays;
 
         // Never null: a spec with no rules is a legitimate choice (the user deleted every default), but a null
         // list would turn that choice into a crash the first time something enumerated it.
         Rules = rules ?? [];
     }
+
+    /// <summary>
+    /// 把最近多少天的成稿（已发布的博客正文）一并发给模型；<c>0</c> 表示不发。
+    /// <para>
+    /// 与 §8.3 的历史检索是两回事：检索给的是往日的**原始随想**，这里给的是往日的**成稿**。前者用来
+    /// 呼应具体的事，后者用来接上行文与延续。两者都只能提一嘴（附录 A.41）。
+    /// </para>
+    /// </summary>
+    public int RecentArticleDays { get; init; }
 
     /// <summary>Lower bound of the body length in Chinese characters, Markdown markers excluded.</summary>
     public int MinCharacters { get; init; }
@@ -161,6 +179,13 @@ public sealed record WritingSettings
             throw new DomainException(
                 "writing.tolerance.out_of_range",
                 $"公差必须在 0 到 {MaxAllowedTolerance} 之间（0 表示不允许浮动）。");
+        }
+
+        if (RecentArticleDays is < 0 or > MaxRecentArticleDays)
+        {
+            throw new DomainException(
+                "writing.recent_articles.out_of_range",
+                $"成稿天数必须在 0 到 {MaxRecentArticleDays} 之间（0 表示不把往日的成稿发给模型）。");
         }
 
         if (!Enum.IsDefined(Person))

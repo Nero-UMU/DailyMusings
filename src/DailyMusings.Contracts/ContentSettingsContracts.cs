@@ -42,7 +42,10 @@ public sealed record ContentSettingsDto(
     string WritingPerson,
 
     /// <summary>The user's rules, in the order they arranged them. Empty is a valid choice.</summary>
-    IReadOnlyList<WritingRuleDto> WritingRules);
+    IReadOnlyList<WritingRuleDto> WritingRules,
+
+    /// <summary>How many days of already-published articles are handed to the model as continuity; 0 = none.</summary>
+    int WritingRecentArticleDays);
 
 public sealed record UpdateContentSettingsRequest(
     string? TimeZoneId,
@@ -63,4 +66,7 @@ public sealed record UpdateContentSettingsRequest(
     /// Absent means "leave the rules alone"; an empty array means "the user deleted every rule", which is a real
     /// choice and must not be turned back into the defaults.
     /// </summary>
-    IReadOnlyList<WritingRuleDto>? WritingRules = null);
+    IReadOnlyList<WritingRuleDto>? WritingRules = null,
+
+    /// <summary>把最近多少天的成稿一并交给模型；<c>0</c> 表示不发，缺省表示不改。</summary>
+    int? WritingRecentArticleDays = null);

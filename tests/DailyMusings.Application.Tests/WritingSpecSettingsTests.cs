@@ -117,6 +117,7 @@ public sealed class WritingSpecSettingsTests
         Assert.AreEqual("50", values[ContentSettings.WritingMinCharactersKey]);
         Assert.AreEqual("300", values[ContentSettings.WritingMaxCharactersKey]);
         Assert.AreEqual("20", values[ContentSettings.WritingToleranceKey]);
+        Assert.AreEqual("7", values[ContentSettings.WritingRecentArticleDaysKey], "成稿窗口默认 7 天，落库为可读的数字。");
         Assert.IsTrue(ContentSettings.TryParsePerson("Third", out var person));
         Assert.AreEqual(WritingPerson.Third, person, "解析要么写死小写，要么大小写无关；这里是后者。");
         Assert.IsFalse(ContentSettings.TryParsePerson("fourth", out _));

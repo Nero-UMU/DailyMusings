@@ -47,8 +47,9 @@ public sealed class OpenAiCompatibleGenerationClient : IReflectionGenerationClie
         1. 只能使用下方提供的素材内容。不得添加任何素材中不存在的事实、人名、时间、地点、数字或因果。
         2. 正文的主体必须是"今天的素材"里的事：今天做了什么、当时什么感觉。当天素材少，正文就写短一点，
            宁可写得短，也不要用历史素材把篇幅填满。
-        3. 历史素材只能"提一嘴"：用一句以内的呼应、对比或回忆带过（例如"比上个月那家好很多""之前提过"），
-           不得单独成段，不得展开叙述它的经过，更不能写成当天发生的事。
+        3. 历史素材与"近几天的成稿"都不是今天发生的事，只能"提一嘴"：用一句以内的呼应、对比或回忆带过
+           （例如"比上个月那家好很多""前几天也写过"），不得单独成段，不得展开叙述它们的经过，更不能写成
+           当天发生的事。
         4. 每条"引用"必须逐字摘自你写出的正文，且必须标注它来自哪几条素材。
         5. 正文用空行分段，不要使用 Markdown 标题或列表。
         6. 只输出一个 JSON 对象，不要输出解释文字或代码块。
@@ -397,6 +398,22 @@ public sealed class OpenAiCompatibleGenerationClient : IReflectionGenerationClie
         else
         {
             builder.AppendLine("没有可引用的历史素材。");
+        }
+
+        builder.AppendLine();
+
+        // 往日的成稿（已发布的博客全文）。与历史素材的区别是：历史素材是原始随想，用来呼应具体的事；
+        // 成稿是写好的文章，用来接上行文与延续。两者都受第 3 条约束，只能提一嘴。
+        if (request.RecentArticles.Count > 0)
+        {
+            builder.AppendLine("近几天的成稿（已经发表过的全文；只用来看行文与延续，不得成段复述）：");
+
+            foreach (var article in request.RecentArticles)
+            {
+                builder.AppendLine(CultureInfo.InvariantCulture, $"({article.ContentDate}) {article.Title}");
+                builder.AppendLine(article.Body);
+                builder.AppendLine();
+            }
         }
 
         builder.AppendLine();

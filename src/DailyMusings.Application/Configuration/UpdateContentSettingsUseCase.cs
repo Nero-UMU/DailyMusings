@@ -52,7 +52,8 @@ public sealed class UpdateContentSettingsUseCase
                 update.WritingMaxCharacters ?? current.Writing.MaxCharacters,
                 update.WritingTolerance ?? current.Writing.CharacterTolerance,
                 update.WritingPerson ?? current.Writing.Person,
-                update.WritingRules ?? current.Writing.Rules));
+                update.WritingRules ?? current.Writing.Rules,
+                update.WritingRecentArticleDays ?? current.Writing.RecentArticleDays));
 
         Validate(next);
 
@@ -136,4 +137,7 @@ public sealed record ContentSettingsUpdate(
     int? WritingMaxCharacters = null,
     int? WritingTolerance = null,
     WritingPerson? WritingPerson = null,
-    IReadOnlyList<WritingRule>? WritingRules = null);
+    IReadOnlyList<WritingRule>? WritingRules = null,
+
+    /// <summary>把最近多少天的成稿一并交给模型；<c>0</c> 表示不发，缺省表示不改。</summary>
+    int? WritingRecentArticleDays = null);

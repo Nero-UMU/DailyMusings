@@ -106,7 +106,8 @@ public static class ContentSettingsEndpointRouteBuilderExtensions
                         request.WritingMaxCharacters,
                         request.WritingTolerance,
                         person,
-                        rules),
+                        rules,
+                        request.WritingRecentArticleDays),
                     cancellationToken)
                 .ConfigureAwait(false);
 
@@ -146,5 +147,6 @@ public static class ContentSettingsEndpointRouteBuilderExtensions
         settings.Writing.MaxCharacters,
         settings.Writing.CharacterTolerance,
         ContentSettings.FormatPerson(settings.Writing.Person),
-        settings.Writing.Rules.Select(rule => new WritingRuleDto(rule.Title, rule.Instruction)).ToArray());
+        settings.Writing.Rules.Select(rule => new WritingRuleDto(rule.Title, rule.Instruction)).ToArray(),
+        settings.Writing.RecentArticleDays);
 }

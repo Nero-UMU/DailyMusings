@@ -1,6 +1,7 @@
 using DailyMusings.Application.Abstractions;
 using DailyMusings.Domain.Common;
 using DailyMusings.Domain.Publishing;
+using DailyMusings.Domain.Time;
 using Microsoft.Data.Sqlite;
 
 namespace DailyMusings.Infrastructure.Persistence.Repositories;
@@ -186,6 +187,46 @@ public sealed class SqlitePublicationRepository : IPublicationRepository
             Map,
             cancellationToken,
             ("$limit", limit)).ConfigureAwait(false);
+
+    public async Task<IReadOnlyList<PublishedArticle>> ListPublishedArticlesAsync(
+        ContentDate from,
+        ContentDate to,
+        CancellationToken cancellationToken)
+    {
+        var rows = await _accessor.QueryAsync(
+            """
+            SELECT r.content_date, v.title, v.body
+              FROM publication p
+              JOIN reflection r ON r.id = p.reflection_id
+              JOIN reflection_version v ON v.id = p.reflection_version_id
+             WHERE p.status = $published
+               AND r.content_date >= $from
+               AND r.content_date <= $to
+             ORDER BY r.content_date DESC, p.scheduled_at_utc DESC;
+            """,
+            reader => (
+                Day: reader.GetString(0),
+                Title: reader.GetString(1),
+                Body: reader.GetString(2)),
+            cancellationToken,
+            ("$published", (int)PublicationStatus.Published),
+            ("$from", SqliteValues.ContentDay(from)),
+            ("$to", SqliteValues.ContentDay(to))).ConfigureAwait(false);
+
+        // 同一天只留第一条：A.21 保证一天只有一份正式稿，这里只是不把那条保证当成前提。
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var articles = new List<PublishedArticle>();
+
+        foreach (var row in rows)
+        {
+            if (seen.Add(row.Day) && ContentDate.TryParse(row.Day, out var day))
+            {
+                articles.Add(new PublishedArticle(day, row.Title, row.Body));
+            }
+        }
+
+        return articles;
+    }
 
     public async Task AddAsync(Publication publication, CancellationToken cancellationToken) =>
         await _accessor.ExecuteAsync(

@@ -225,6 +225,7 @@ public sealed class GenerateReflectionUseCase
     private readonly Notifications.QueueNotificationUseCase _notifications;
     private readonly ITopicRepository _topics;
     private readonly Topics.ResolveArticleTopicsUseCase _resolveTopics;
+    private readonly IPublicationRepository _publications;
 
     public GenerateReflectionUseCase(
         IInputEntryRepository inputs,
@@ -239,7 +240,8 @@ public sealed class GenerateReflectionUseCase
         JobEnqueuer jobs,
         Notifications.QueueNotificationUseCase notifications,
         ITopicRepository topics,
-        Topics.ResolveArticleTopicsUseCase resolveTopics)
+        Topics.ResolveArticleTopicsUseCase resolveTopics,
+        IPublicationRepository publications)
     {
         _inputs = inputs;
         _reflections = reflections;
@@ -254,6 +256,7 @@ public sealed class GenerateReflectionUseCase
         _notifications = notifications;
         _topics = topics;
         _resolveTopics = resolveTopics;
+        _publications = publications;
     }
 
     public async Task<ReflectionGenerationResult> ExecuteAsync(
@@ -335,6 +338,17 @@ public sealed class GenerateReflectionUseCase
         var writing = payload.Settings
             ?? (await _contentSettings.GetAsync(cancellationToken).ConfigureAwait(false)).Writing;
 
+        // 往日的成稿（已发布的博客正文）作为"延续"的参照一起交给模型（§8.4，附录 A.41 续记）。
+        // 窗口由用户自己的写作规范决定：0 就不发。只取这一天之前的，今天这篇不在其中。
+        var recentArticles = writing.RecentArticleDays > 0
+            ? await _publications
+                .ListPublishedArticlesAsync(
+                    contentDate.AddDays(-writing.RecentArticleDays),
+                    contentDate.AddDays(-1),
+                    cancellationToken)
+                .ConfigureAwait(false)
+            : [];
+
         // The vocabulary the model may choose from. Only active topics: a merged one is a tombstone and must
         // never attract new material (A.9), and offering it would invite exactly that.
         var knownTopics = (await _topics.ListAsync(includeMerged: false, cancellationToken).ConfigureAwait(false))
@@ -347,6 +361,7 @@ public sealed class GenerateReflectionUseCase
                     contentDate,
                     material,
                     retrieval.Materials,
+                    recentArticles,
                     writing,
                     settings.PromptVersion,
                     knownTopics),

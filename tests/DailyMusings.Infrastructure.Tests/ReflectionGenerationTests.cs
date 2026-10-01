@@ -1,8 +1,10 @@
 using DailyMusings.Application.Abstractions;
+using DailyMusings.Application.Configuration;
 using DailyMusings.Application.Reflections;
 using DailyMusings.Domain.Common;
 using DailyMusings.Domain.Inputs;
 using DailyMusings.Domain.Jobs;
+using DailyMusings.Domain.Publishing;
 using DailyMusings.Domain.Reflections;
 using DailyMusings.Domain.Reflections.Sources;
 using DailyMusings.Domain.Time;
@@ -225,6 +227,101 @@ public class ReflectionGenerationTests
             CancellationToken.None);
 
         Assert.AreEqual(ReflectionGenerationOutcome.SkippedAlreadyConfirmed, result.Outcome);
+    }
+
+    /// <summary>
+    /// 往日的成稿随生成请求一起交给模型（§8.4，附录 A.41 续记）：窗口内**已发布**的那一版给，没发布的不给。
+    /// <para>
+    /// 这条只能在用例这一层验：窗口由用户的写作规范决定，取的是 publication 的 Published 状态，
+    /// 而"到底交给了模型什么"只有 FakeGenerationClient 的 LastRequest 知道。
+    /// </para>
+    /// </summary>
+    [TestMethod]
+    public async Task Published_articles_inside_the_window_are_handed_to_the_model()
+    {
+        await using var context = await ReflectionTestContext.CreateAsync();
+        var yesterday = context.Today.AddDays(-1);
+
+        // 昨天要有输入，SeedDraftAsync 的来源映射才落得下去（它按内容日找输入）。
+        await context.CaptureTextAsync("昨天试着记录了一点东西。", yesterday);
+        var (yesterdayReflection, yesterdayVersion) =
+            await context.SeedDraftAsync(yesterday, ReflectionStatus.Confirmed);
+
+        var target = PublishTarget.Create(PublishTargetId.New(), "hexo", PublishTargetType.Markdown, "posts");
+        await context.Targets.AddAsync(target, CancellationToken.None);
+
+        var publication = Publication.Create(
+            PublicationId.New(),
+            yesterdayReflection.Id,
+            yesterdayVersion.Id,
+            target.Id,
+            PublicationTrigger.Automatic,
+            context.Clock.UtcNow,
+            PublicationVisibility.Public);
+
+        await context.Publications.AddAsync(publication, CancellationToken.None);
+        publication.Begin("system:scheduler", context.Clock.UtcNow);
+        publication.CompleteAsPublished("2026-10-01-标题.md", "hash", context.Clock.UtcNow);
+        await context.Publications.UpdateAsync(publication, CancellationToken.None);
+
+        // 没有这一条素材就不会走到生成（当天无输入不得创建空文章）。
+        await context.CaptureTextAsync("今天试着记录了一点东西。");
+
+        var result = await context.Generate.ExecuteAsync(
+            context.Today,
+            new ReflectionGenerationPayload(false, GenerationReason.Manual, false),
+            CancellationToken.None);
+
+        Assert.AreEqual(ReflectionGenerationOutcome.Generated, result.Outcome);
+
+        var articles = context.Client.LastRequest!.RecentArticles;
+        Assert.AreEqual(1, articles.Count, "窗口内只有昨天那一篇已发布的成稿。");
+        Assert.AreEqual(yesterday, articles[0].ContentDate);
+        Assert.AreEqual("标题", articles[0].Title);
+        Assert.AreEqual("第一段内容。\n\n第二段内容。", articles[0].Body);
+    }
+
+    /// <summary>窗口设成 0 就一篇都不给：用户可以只要"今天只写今天"。</summary>
+    [TestMethod]
+    public async Task A_zero_window_hands_the_model_no_previous_articles()
+    {
+        // 窗口来自用户的写作规范，所以直接把它设成 0 建上下文；生成用例读的就是这个提供者。
+        var content = ContentSettings.Default with
+        {
+            Writing = ContentSettings.Default.Writing with { RecentArticleDays = 0 },
+        };
+
+        await using var context = await ReflectionTestContext.CreateAsync(content: content);
+
+        await context.CaptureTextAsync("昨天试着记录了一点东西。", context.Today.AddDays(-1));
+        var (reflection, version) = await context.SeedDraftAsync(context.Today.AddDays(-1), ReflectionStatus.Confirmed);
+
+        var target = PublishTarget.Create(PublishTargetId.New(), "hexo", PublishTargetType.Markdown, "posts");
+        await context.Targets.AddAsync(target, CancellationToken.None);
+
+        var publication = Publication.Create(
+            PublicationId.New(),
+            reflection.Id,
+            version.Id,
+            target.Id,
+            PublicationTrigger.Automatic,
+            context.Clock.UtcNow,
+            PublicationVisibility.Public);
+
+        await context.Publications.AddAsync(publication, CancellationToken.None);
+        publication.Begin("system:scheduler", context.Clock.UtcNow);
+        publication.CompleteAsPublished("2026-10-01-标题.md", "hash", context.Clock.UtcNow);
+        await context.Publications.UpdateAsync(publication, CancellationToken.None);
+
+        await context.CaptureTextAsync("今天试着记录了一点东西。");
+
+        var result = await context.Generate.ExecuteAsync(
+            context.Today,
+            new ReflectionGenerationPayload(false, GenerationReason.Manual, false),
+            CancellationToken.None);
+
+        Assert.AreEqual(ReflectionGenerationOutcome.Generated, result.Outcome);
+        Assert.AreEqual(0, context.Client.LastRequest!.RecentArticles.Count, "窗口为 0 时一条成稿都不发。");
     }
 
     /// <summary>

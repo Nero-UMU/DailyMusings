@@ -40,6 +40,9 @@ public sealed record ContentSettings
     public const string WritingPersonKey = "writing.person";
     public const string WritingRulesKey = "writing.rules";
 
+    /// <summary>把最近多少天的成稿一并交给模型（0 = 不发）。见附录 A.41 续记。</summary>
+    public const string WritingRecentArticleDaysKey = "writing.recentArticleDays";
+
     /// <summary>
     /// 旧键（单一「目标字数」）。只读，不再写：A.28 把「一个目标值」换成了区间加公差，但已经存过 300 的实例
     /// 不该在看到新界面时被打回默认值——读到它就把它当作**最多字数**（旧的 300 立刻变成「最少 50、最多 300」）。
@@ -179,7 +182,8 @@ public sealed record ContentSettings
                 ReadMaxCharacters(values),
                 ReadInt(values, WritingToleranceKey, WritingSettings.DefaultCharacterTolerance),
                 ReadPerson(values),
-                ReadRules(values)));
+                ReadRules(values),
+                ReadInt(values, WritingRecentArticleDaysKey, WritingSettings.DefaultRecentArticleDays)));
     }
 
     public IReadOnlyDictionary<string, string> ToValues() => new Dictionary<string, string>(StringComparer.Ordinal)
@@ -198,6 +202,7 @@ public sealed record ContentSettings
         [WritingToleranceKey] = Writing.CharacterTolerance.ToString(CultureInfo.InvariantCulture),
         [WritingPersonKey] = FormatPerson(Writing.Person),
         [WritingRulesKey] = JsonSerializer.Serialize(Writing.Rules, RuleJson),
+        [WritingRecentArticleDaysKey] = Writing.RecentArticleDays.ToString(CultureInfo.InvariantCulture),
     };
 
     /// <summary>

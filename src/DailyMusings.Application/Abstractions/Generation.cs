@@ -76,9 +76,22 @@ public sealed record GeneratedDraft(
     IReadOnlyList<string> Topics,
     IReadOnlyList<string> NewTopics);
 
+/// <summary>
+/// 一篇已经发表过的成稿，给生成时当"延续"的参照（§8.4）。
+/// <para>
+/// 与 <see cref="RetrievedMaterial"/> 不是一回事：那个是往日的**原始随想**，用来呼应具体的事；
+/// 这个是往日的**成稿**，用来接上行文与延续。两者都只能提一嘴（附录 A.41）。
+/// </para>
+/// </summary>
+public sealed record PublishedArticle(ContentDate ContentDate, string Title, string Body);
+
 /// <summary>Everything a generation run is allowed to know.</summary>
 /// <param name="DayInputs">The day's own inputs, already in capture order.</param>
 /// <param name="HistoricalMaterial">Selected past material, oldest first, each flagged as historical.</param>
+/// <param name="RecentArticles">
+/// Already-published articles from the days just before this one, newest first — empty when the user set the
+/// window to 0.
+/// </param>
 /// <param name="KnownTopics">
 /// The topic vocabulary the model may pick from (§6.2 as revised). Supplied as names because that is what the
 /// prompt can carry; the mapping back to real topics happens afterwards, in the application layer, so a model
@@ -88,6 +101,7 @@ public sealed record GenerationRequest(
     ContentDate ContentDate,
     IReadOnlyList<InputEntry> DayInputs,
     IReadOnlyList<RetrievedMaterial> HistoricalMaterial,
+    IReadOnlyList<PublishedArticle> RecentArticles,
     WritingSettings Settings,
     string PromptVersion,
     IReadOnlyList<string> KnownTopics);
