@@ -10,6 +10,7 @@ using DailyMusings.Domain.Common;
 using DailyMusings.Domain.Inputs;
 using DailyMusings.Domain.Reflections;
 using DailyMusings.Domain.Retrieval;
+using DailyMusings.Domain.Time;
 using Microsoft.Extensions.Logging;
 
 namespace DailyMusings.Infrastructure.Generation;
@@ -362,7 +363,8 @@ public sealed class OpenAiCompatibleGenerationClient : IReflectionGenerationClie
         var byInput = labels.ToDictionary(pair => pair.Value, pair => pair.Key);
         var builder = new StringBuilder();
 
-        builder.AppendLine(CultureInfo.InvariantCulture, $"内容日期：{request.ContentDate}");
+        builder.AppendLine(CultureInfo.InvariantCulture,
+            $"内容日期：{request.ContentDate}（{WeekdayName(request.ContentDate)}），这就是要写的那一天，正文里称它为「今天」。");
         builder.AppendLine();
 
         // The writing spec comes before the material on purpose (decision A.24). These are the standing rules for
@@ -372,21 +374,24 @@ public sealed class OpenAiCompatibleGenerationClient : IReflectionGenerationClie
 
         builder.AppendLine();
 
-        builder.AppendLine("今天的素材（正文主体，按记录时间排序）：");
+        // 每条素材都带上它自己的时间。当天的时间交给模型，它才写得出「凌晨」「晚上」这类判断，也才
+        // 排得对先后；历史素材带日期与时间，它才说得出「上个月」而不是编一个时间出来。时间用它被记录时
+        // 的时区偏移渲染（§7 记的就是这个偏移），也就是用户当时看到的那一刻。
+        builder.AppendLine("今天的素材（正文主体，按时间排序。方括号后是当天的时间）：");
         foreach (var entry in request.DayInputs)
         {
-            builder.AppendLine(CultureInfo.InvariantCulture, $"[{byInput[entry.Id]}] {entry.TranscriptForGeneration}");
+            builder.AppendLine(CultureInfo.InvariantCulture, $"[{byInput[entry.Id]}] ({ClockOf(entry)}) {entry.TranscriptForGeneration}");
         }
 
         builder.AppendLine();
 
         if (request.HistoricalMaterial.Count > 0)
         {
-            builder.AppendLine("可以引用的历史素材（不是今天发生的事；只能一句带过作呼应或对比，不得成段）：");
+            builder.AppendLine("可以引用的历史素材（不是今天发生的事；只能一句带过作呼应或对比，不得成段。方括号后是它发生的日期与时间）：");
             foreach (var material in request.HistoricalMaterial)
             {
                 builder.AppendLine(CultureInfo.InvariantCulture,
-                    $"[{byInput[material.Entry.Id]}] ({material.Entry.ContentDate}) {material.Entry.TranscriptForGeneration}");
+                    $"[{byInput[material.Entry.Id]}] ({MaterialStamp(material.Entry)}) {material.Entry.TranscriptForGeneration}");
             }
         }
         else
@@ -416,6 +421,33 @@ public sealed class OpenAiCompatibleGenerationClient : IReflectionGenerationClie
 
         return builder.ToString();
     }
+
+    /// <summary>
+    /// 一条素材被记录时的当地时刻，用它自己的时区偏移渲染（§7 记录的正是这个偏移），格式 <c>HH:mm</c>。
+    /// 当天素材只用时刻：这一块的整体日期已经由上面的「内容日期」说清了，再写一遍反而啰嗦。
+    /// </summary>
+    private static string ClockOf(InputEntry entry) =>
+        entry.CreatedAtUtc
+            .ToOffset(TimeSpan.FromMinutes(entry.CreatedOffsetMinutes))
+            .ToString("HH:mm", CultureInfo.InvariantCulture);
+
+    /// <summary>
+    /// 历史素材的日期与时刻，<c>yyyy-MM-dd HH:mm</c>。日期是它属于哪个内容日，时刻是它被记录的那一刻 ——
+    /// 模型要说出「上个月」「昨天晚上」这类话，靠的就是这两个值，而不是自己推算。
+    /// </summary>
+    private static string MaterialStamp(InputEntry entry) =>
+        $"{entry.ContentDate} {ClockOf(entry)}";
+
+    private static string WeekdayName(ContentDate contentDate) => contentDate.Value.DayOfWeek switch
+    {
+        DayOfWeek.Monday => "周一",
+        DayOfWeek.Tuesday => "周二",
+        DayOfWeek.Wednesday => "周三",
+        DayOfWeek.Thursday => "周四",
+        DayOfWeek.Friday => "周五",
+        DayOfWeek.Saturday => "周六",
+        _ => "周日",
+    };
 
     private static string BuildCheckPrompt(
         UnsourcedCheckRequest request,

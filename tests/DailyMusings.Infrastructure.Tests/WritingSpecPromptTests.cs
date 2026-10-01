@@ -119,10 +119,19 @@ public sealed class WritingSpecPromptTests
             NullLogger<OpenAiCompatibleGenerationClient>.Instance);
 
         var today = ContentDate.From(new DateOnly(2026, 10, 2));
+        var shanghai = TimeSpan.FromHours(8);
         var dayEntry = InputEntry.CreateText(
-            InputEntryId.New(), DateTimeOffset.UnixEpoch, 480, today, "今天吃了海鲜自助，很满意。");
+            InputEntryId.New(),
+            new DateTimeOffset(2026, 10, 2, 1, 17, 0, shanghai),
+            480,
+            today,
+            "今天吃了海鲜自助，很满意。");
         var historyEntry = InputEntry.CreateText(
-            InputEntryId.New(), DateTimeOffset.UnixEpoch, 480, today.AddDays(-30), "上个月吃过一次海鲜自助，马马虎虎。");
+            InputEntryId.New(),
+            new DateTimeOffset(2026, 9, 2, 19, 30, 0, shanghai),
+            480,
+            today.AddDays(-30),
+            "上个月吃过一次海鲜自助，马马虎虎。");
 
         await client.GenerateAsync(
             new GenerationRequest(
@@ -143,6 +152,11 @@ public sealed class WritingSpecPromptTests
         // 素材区块的标题也要同一条口径，否则模型会在两处读到两种要求。
         StringAssert.Contains(handler.Prompt, "今天的素材（正文主体", "当天素材的标签要说明它是主体。");
         StringAssert.Contains(handler.Prompt, "不得成段", "历史素材区块的标题也要写出这个限制。");
+
+        // 时间要说清楚：模型得知道这是哪一天、每条素材发生在几点，才不会把日期和先后写错。
+        StringAssert.Contains(handler.Prompt, "内容日期：2026-10-02（周五）", "要给出当天的日期与星期。");
+        StringAssert.Contains(handler.Prompt, "[S1] (01:17)", "当天素材要带它自己的时刻。");
+        StringAssert.Contains(handler.Prompt, "[S2] (2026-09-02 19:30)", "历史素材要带日期与时刻。");
     }
 
     private sealed class EnabledSettings : IGenerationSettingsProvider
