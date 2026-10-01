@@ -131,6 +131,16 @@
                         </ScrollView>
                     </Border>
 
+                    <!-- 显式上传：只有未上传 / 失败的条目才显示。日历列得出全部记录，所以每一条都可达
+                         ——这是今日随想页补不上的那块（那里一次只显示一条）。 -->
+                    <Button
+                        x:Name="DetailUploadButton"
+                        Style="{StaticResource SuccessButton}"
+                        Text="上传这条随想"
+                        Clicked="OnUploadDetailClicked" />
+
+                    <Label x:Name="DetailStatus" Style="{StaticResource CaptionLabel}" IsVisible="False" />
+
                     <Button
                         x:Name="DetailDeleteButton"
                         Style="{StaticResource DangerButton}"

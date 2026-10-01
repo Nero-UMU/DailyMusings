@@ -39,6 +39,7 @@ public partial class CalendarPage : ContentPage
     private readonly ClientSettings _settings;
     private readonly CaptureController _controller;
     private readonly IAudioPlayer _player;
+    private readonly SecureDeviceTokenProvider _tokens;
 
     private readonly ObservableCollection<CalendarRow> _rows = [];
 
@@ -50,13 +51,23 @@ public partial class CalendarPage : ContentPage
     private bool _updatingSlider;
     private bool _busy;
 
-    public CalendarPage(ClientSettings settings, CaptureController controller, IAudioPlayer player)
+    /// <summary>True when the address is set and the device is paired — the two conditions an upload needs.
+    /// 与今日随想页同一判据；它只看「配置 + 配对」，不看此刻是否可达，所以断网时按钮仍可点，
+    /// 点完由失败码说明原因。</summary>
+    private bool _canUpload;
+
+    public CalendarPage(
+        ClientSettings settings,
+        CaptureController controller,
+        IAudioPlayer player,
+        SecureDeviceTokenProvider tokens)
     {
         InitializeComponent();
 
         _settings = settings;
         _controller = controller;
         _player = player;
+        _tokens = tokens;
 
         RecordList.ItemsSource = _rows;
     }
@@ -70,6 +81,8 @@ public partial class CalendarPage : ContentPage
         // Nothing in an async void handler may throw.
         try
         {
+            _canUpload = _settings.IsConfigured && await _tokens.HasTokenAsync(CancellationToken.None);
+
             await LoadAsync();
             await BackfillTranscriptsAsync();
         }
@@ -260,6 +273,10 @@ public partial class CalendarPage : ContentPage
         _detail = capture;
         RenderDetail();
 
+        // 每次打开都从干净的状态开始，免得看见上一条留下的结果。
+        DetailStatus.Text = string.Empty;
+        DetailStatus.IsVisible = false;
+
         DetailOverlay.IsVisible = true;
     });
 
@@ -279,6 +296,9 @@ public partial class CalendarPage : ContentPage
         var playable = capture.IsVoice && capture.LocalAudioPath is { Length: > 0 } path && File.Exists(path);
 
         DetailPlayback.IsVisible = playable;
+
+        // 上传按钮只在还没传上去的条目上出现——已上传的没有可做的事。
+        DetailUploadButton.IsVisible = capture.NeedsUpload;
 
         // 删除按钮对录音与手写都显示。底层 DeleteAsync 是类型无关的：先删记录，再按 {id}.* 扫音频文件，
         // 手写没有匹配的音频，那个循环自然什么都不做。此前这里是 IsVisible = capture.IsVoice，
@@ -438,6 +458,65 @@ public partial class CalendarPage : ContentPage
 
         DetailPosition.Text = $"{Clock(position)} / {Clock(duration)}";
     }
+
+    /// <summary>
+    /// 日历详情里的显式上传（用户要求补的重新上传入口）。做法与今日随想页一致：上传是显式动作，
+    /// 只在用户按下时发生（§正文：不做后台自动上传）。
+    /// </summary>
+    private async void OnUploadDetailClicked(object? sender, EventArgs e) => await GuardAsync(async () =>
+    {
+        if (_detail is not { } capture)
+        {
+            return;
+        }
+
+        if (!_canUpload)
+        {
+            DetailStatus.Text = _settings.IsConfigured
+                ? "尚未配对。请到设置页输入配对码后再上传。"
+                : "尚未填写服务器地址。请到设置页填写后再上传。";
+            DetailStatus.IsVisible = true;
+            return;
+        }
+
+        DetailStatus.Text = "正在上传…";
+        DetailStatus.IsVisible = true;
+        DetailUploadButton.IsEnabled = false;
+
+        try
+        {
+            var outcome = await _controller.UploadAsync(capture.Id, CancellationToken.None);
+
+            // 录音的识别结果有时晚一步。成功但还没有文字时顺手取一次；取不到就交给日历下次进来时的
+            // 批量补取（BackfillTranscriptsAsync），不在这里轮询——用户在弹层里等不了十几秒。
+            if (outcome.Uploaded && capture.IsVoice && string.IsNullOrWhiteSpace(outcome.Transcript))
+            {
+                await _controller.RefreshFromServerAsync(capture.Id, CancellationToken.None);
+            }
+
+            _all = await _controller.ListLocalAsync(CancellationToken.None);
+
+            // 用重新读回来的那一份重绘：标题里的状态、正文里的识别文字、按钮的显隐都跟着变。
+            _detail = _all.FirstOrDefault(item => item.Id == capture.Id) ?? capture;
+            RenderDetail();
+            ApplyFilter();
+
+            DetailStatus.Text = outcome.Uploaded
+                ? "已上传。"
+                : $"上传失败：{UploadFailureText.Describe(outcome.FailureCode)}。记录仍在本机，可以再试。";
+            DetailStatus.IsVisible = true;
+
+            if (outcome.Uploaded)
+            {
+                StatusLabel.Text = "已上传。";
+            }
+        }
+        finally
+        {
+            DetailUploadButton.IsEnabled = true;
+            RenderDetail();
+        }
+    });
 
     private async void OnDeleteDetailClicked(object? sender, EventArgs e) => await GuardAsync(async () =>
     {

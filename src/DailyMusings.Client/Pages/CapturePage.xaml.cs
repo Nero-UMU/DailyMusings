@@ -126,9 +126,13 @@ public partial class CapturePage : ContentPage
         if (_current is null)
         {
             // Coming back to a screen that was killed mid-capture: show the one still waiting to go out, so a
-            // thought that never reached the server is not invisible.
+            // thought that never reached the server is not invisible. Oldest first, the same order SyncAsync uses
+            // — thoughts should reach the server in the order they were had.
             var local = await _controller.ListLocalAsync(CancellationToken.None);
-            _current = local.FirstOrDefault(capture => capture.NeedsUpload);
+            _current = local
+                .Where(capture => capture.NeedsUpload)
+                .OrderBy(capture => capture.CreatedAtUtc)
+                .FirstOrDefault();
         }
 
         RenderUploadAvailability();
@@ -430,7 +434,7 @@ public partial class CapturePage : ContentPage
 
             if (!outcome.Uploaded)
             {
-                UploadStatus.Text = $"上传失败：{DescribeFailure(outcome.FailureCode)}。记录仍在本机，可以再试。";
+                UploadStatus.Text = $"上传失败：{UploadFailureText.Describe(outcome.FailureCode)}。记录仍在本机，可以再试。";
                 return;
             }
 
@@ -440,17 +444,52 @@ public partial class CapturePage : ContentPage
                 UploadStatus.Text = capture.IsVoice
                     ? "已上传，识别完成。"
                     : "已上传。";
-                return;
+            }
+            else
+            {
+                UploadStatus.Text = "已上传到服务器，正在等待识别结果…";
+
+                // 先等识别结果再往前走：轮询依赖 _current 停在这一条上，提前换人就拿不到文字。
+                await PollTranscriptionAsync(capture.Id);
             }
 
-            UploadStatus.Text = "已上传到服务器，正在等待识别结果…";
-            await PollTranscriptionAsync(capture.Id);
+            // 再推进到下一条待上传的，否则有两条以上时后面那些在界面上没有入口。
+            await ShowNextPendingAsync();
         }
         finally
         {
             SetBusy(false);
         }
     });
+
+    /// <summary>
+    /// 传完一条之后，把界面推进到下一条仍在等上传的记录（按时间从旧到新，与 <c>SyncAsync</c> 的顺序一致）。
+    /// <para>
+    /// 此前 <see cref="LoadAsync"/> 只在 <c>_current</c> 为 null 时才去挑待上传的第一条，而上传成功后
+    /// <c>_current</c> 仍停在刚传完的那条——于是一旦有两条以上没传成功，第二条在界面上就没有任何入口，
+    /// 只能删掉当前这条、或者重启 App 才找得回来。没有下一条时保留当前这条，让用户看得见刚上传的结果。
+    /// </para>
+    /// </summary>
+    private async Task ShowNextPendingAsync()
+    {
+        var local = await _controller.ListLocalAsync(CancellationToken.None);
+        var pending = local
+            .Where(capture => capture.NeedsUpload)
+            .OrderBy(capture => capture.CreatedAtUtc)
+            .ToArray();
+
+        if (pending.Length == 0)
+        {
+            return;
+        }
+
+        _current = pending[0];
+        RenderUploadAvailability();
+        RenderCurrent();
+
+        // 放在渲染之后：那两个方法在「没有当前条目」等分支里会改写 UploadStatus。
+        UploadStatus.Text = $"还有 {pending.Length} 条待上传，这是最早的一条。";
+    }
 
     /// <summary>
     /// The second half of §0.1's contract: the server recognises voice inline, but when it hands back a pending
@@ -696,23 +735,6 @@ public partial class CapturePage : ContentPage
             UploadStatus.Text = "操作没有完成，请稍后重试。";
         }
     }
-
-    private static string DescribeFailure(string? failureCode) => failureCode switch
-    {
-        "client.network_unreachable" => "连不上服务器",
-        "client.timeout" => "服务器响应超时",
-        "client.upload_failed" => "上传失败，稍后再试",
-        "client.not_configured" => "未配置服务器",
-        "client.not_paired" => "设备未配对",
-        "auth.device_token_rejected" or "auth.unauthenticated" => "设备令牌已失效，需要重新配对",
-        "client.audio_missing" => "本地录音已丢失",
-        "transcription.public_audio_url_required" => "当前语音配置需要公网音频 URL，请让管理员改用文件上传或 Chat 音频协议",
-        "transcription.api_type_invalid" => "语音模型的 API 类型无效，请让管理员重新配置",
-        "transcription.request_rejected" => "转写服务拒绝了录音，请让管理员检查模型名称和接口地址",
-        "transcription.timeout" => "转写服务响应超时，可以稍后重试",
-        null => "未知原因",
-        _ => "服务器暂时无法完成这个请求",
-    };
 
     private static Color ColorFromResource(string key, Color fallback) =>
         Application.Current?.Resources.TryGetValue(key, out var value) == true && value is Color color
