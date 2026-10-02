@@ -325,6 +325,83 @@ public class ReflectionGenerationTests
     }
 
     /// <summary>
+    /// 判出流水账就带着明确的改写要求**重来一次**（附录 A.41 续记三）——这是「在代码层面强制」的那一半。
+    /// <para>
+    /// 只能在用例这一层验：FakeGenerationClient 能按「有没有改写要求」返回不同的稿子，并记下调用次数。
+    /// </para>
+    /// </summary>
+    [TestMethod]
+    public async Task An_inventory_shaped_draft_is_rewritten_once_with_an_explicit_instruction()
+    {
+        await using var context = await ReflectionTestContext.CreateAsync();
+
+        var first = await context.CaptureTextAsync("第一件事。");
+        var second = await context.CaptureTextAsync("第二件事。");
+        var third = await context.CaptureTextAsync("第三件事。");
+
+        const string inventory = "第一件事。\n\n第二件事。\n\n第三件事。";
+        const string woven = "第一件事和第二件事挤在同一段里。\n\n第三件事是另一条线。";
+
+        context.Client.Override = request => request.StructureCorrection is null
+            ? Draft(inventory, ("第一件事。", [first]), ("第二件事。", [second]), ("第三件事。", [third]))
+            : Draft(woven, ("第一件事和第二件事挤在同一段里。", [first, second]), ("第三件事是另一条线。", [third]));
+
+        var result = await context.Generate.ExecuteAsync(
+            context.Today,
+            new ReflectionGenerationPayload(false, GenerationReason.Manual, false),
+            CancellationToken.None);
+
+        Assert.AreEqual(ReflectionGenerationOutcome.Generated, result.Outcome);
+        Assert.AreEqual(2, context.Client.GenerateCalls, "判出流水账才重写，且只重写一次。");
+        Assert.IsTrue(result.StructureRewritten);
+        Assert.IsFalse(result.Structure!.LooksLikeInventory, "重写后的那一版不该还判成流水账。");
+        Assert.AreEqual(woven, result.Version!.Body, "采用的是重写后的那一版。");
+        StringAssert.Contains(context.Client.LastRequest!.StructureCorrection!, "一篇文章");
+    }
+
+    /// <summary>形状本来就对的稿子不该被重写：多一次模型调用就是白花的钱。</summary>
+    [TestMethod]
+    public async Task A_woven_draft_is_not_rewritten()
+    {
+        await using var context = await ReflectionTestContext.CreateAsync();
+
+        var first = await context.CaptureTextAsync("第一件事。");
+        var second = await context.CaptureTextAsync("第二件事。");
+        var third = await context.CaptureTextAsync("第三件事。");
+
+        context.Client.Override = _ => Draft(
+            "第一件事和第二件事挤在同一段里。\n\n第三件事是另一条线。",
+            ("第一件事和第二件事挤在同一段里。", [first, second]),
+            ("第三件事是另一条线。", [third]));
+
+        var result = await context.Generate.ExecuteAsync(
+            context.Today,
+            new ReflectionGenerationPayload(false, GenerationReason.Manual, false),
+            CancellationToken.None);
+
+        Assert.AreEqual(ReflectionGenerationOutcome.Generated, result.Outcome);
+        Assert.AreEqual(1, context.Client.GenerateCalls, "合格就不该再调一次模型。");
+        Assert.IsFalse(result.StructureRewritten);
+    }
+
+    private static GeneratedDraft Draft(string body, params (string Quote, InputEntry[] Inputs)[] citations) =>
+        new(
+            "标题",
+            "摘要",
+            body,
+            ["记录"],
+            ["随想"],
+            [
+                .. citations.Select(citation => new GeneratedCitation(
+                    citation.Quote,
+                    [.. citation.Inputs.Select(input => input.Id)],
+                    0.9,
+                    "测试用例")),
+            ],
+            [],
+            []);
+
+    /// <summary>
     /// 用户实际点的是发布设置页的「立即生成稿件」，它走的是请求用例（准入规则）而不是作业处理端。
     /// 两层都要放行，否则用户在弹窗里看到的是拒绝。
     /// </summary>

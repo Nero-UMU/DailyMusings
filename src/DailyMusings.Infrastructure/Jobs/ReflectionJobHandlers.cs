@@ -88,6 +88,22 @@ public sealed class ReflectionGenerationJobHandler : IJobHandler
                         "Generated reflection for {ContentDate} with {UnresolvedCitationCount} unlocated citation(s).",
                         contentDate,
                         result.UnresolvedCitations);
+
+                    // 结构判定的数字也记下来（A.41 续记三）：流水账判据调过之后，运维要能看出它为什么这么判，
+                    // 以及重写有没有把形状改过来。同样不含正文。
+                    if (result.Structure is { } structure)
+                    {
+                        _logger.LogInformation(
+                            "Structure for {ContentDate}: paragraphs={Paragraphs}, withSources={WithSources}, "
+                            + "singleSource={SingleSource}, looksLikeInventory={LooksLikeInventory}, rewritten={Rewritten}.",
+                            contentDate,
+                            structure.Paragraphs,
+                            structure.ParagraphsWithSources,
+                            structure.SingleSourceParagraphs,
+                            structure.LooksLikeInventory,
+                            result.StructureRewritten);
+                    }
+
                     return JobOutcome.Completed;
 
                 case ReflectionGenerationOutcome.SkippedManualEditsProtected:

@@ -198,7 +198,9 @@ public sealed record ReflectionGenerationResult(
     Reflection? Reflection,
     ReflectionVersion? Version,
     int UnresolvedCitations,
-    ProcessingJob? CheckJob);
+    ProcessingJob? CheckJob,
+    ArticleStructureAssessment? Structure = null,
+    bool StructureRewritten = false);
 
 /// <summary>
 /// Writes one day's reflection: builds the request from the day's material plus retrieved history, installs the
@@ -368,6 +370,35 @@ public sealed class GenerateReflectionUseCase
                 cancellationToken)
             .ConfigureAwait(false);
 
+        // 提示词里那几条「不许一段对一条素材」是软约束；这里是硬的那一半（附录 A.41 续记三）。
+        // 判出流水账就带着明确的改写要求**重来一次**——只一次：不能让一版稿子变成无限次的模型调用。
+        var sameDayInputs = material.Select(entry => entry.Id).ToArray();
+        var structure = ArticleStructurePolicy.Assess(draft.Body, draft.Citations, sameDayInputs);
+        var structureRewritten = false;
+
+        if (structure.LooksLikeInventory)
+        {
+            var rewritten = await _client
+                .GenerateAsync(
+                    new GenerationRequest(
+                        contentDate,
+                        material,
+                        retrieval.Materials,
+                        recentArticles,
+                        writing,
+                        settings.PromptVersion,
+                        knownTopics,
+                        ArticleStructurePolicy.RewriteInstruction),
+                    cancellationToken)
+                .ConfigureAwait(false);
+
+            // 采用重写的那一版：它是带着明确要求做出来的。它若仍然像流水账，两次的数字都留在结果里，
+            // 由作业处理器记进日志——判据调过之后要能看出它为什么这么判。
+            draft = rewritten;
+            structure = ArticleStructurePolicy.Assess(draft.Body, draft.Citations, sameDayInputs);
+            structureRewritten = true;
+        }
+
         // §6.2 as revised: the article's topics come from the model's answer, resolved against the real
         // vocabulary. Failures here are swallowed on purpose — a topic that could not be filed is a missing
         // label, whereas a failed generation is a day with no draft at all, and the second is far worse than
@@ -451,7 +482,9 @@ public sealed class GenerateReflectionUseCase
             reflection,
             version,
             unresolved,
-            checkJob);
+            checkJob,
+            structure,
+            structureRewritten);
     }
 
     /// <summary>

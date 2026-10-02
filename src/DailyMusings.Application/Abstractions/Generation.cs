@@ -104,7 +104,8 @@ public sealed record GenerationRequest(
     IReadOnlyList<PublishedArticle> RecentArticles,
     WritingSettings Settings,
     string PromptVersion,
-    IReadOnlyList<string> KnownTopics);
+    IReadOnlyList<string> KnownTopics,
+    string? StructureCorrection = null);
 
 /// <summary>
 /// Writes a day's reflection against an OpenAI-compatible endpoint. Implementations must never log the prompt
