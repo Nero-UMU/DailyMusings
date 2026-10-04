@@ -373,10 +373,10 @@ public sealed class GenerateReflectionUseCase
         // 提示词里那几条「不许一段对一条素材」是软约束；这里是硬的那一半（附录 A.41 续记三）。
         // 判出流水账就带着明确的改写要求**重来一次**——只一次：不能让一版稿子变成无限次的模型调用。
         var sameDayInputs = material.Select(entry => entry.Id).ToArray();
-        var structure = ArticleStructurePolicy.Assess(draft.Body, draft.Citations, sameDayInputs);
+        var structure = ArticleStructurePolicy.Assess(draft.Title, draft.Body, draft.Citations, sameDayInputs);
         var structureRewritten = false;
 
-        if (structure.LooksLikeInventory)
+        if (structure.NeedsRewrite)
         {
             var rewritten = await _client
                 .GenerateAsync(
@@ -392,10 +392,10 @@ public sealed class GenerateReflectionUseCase
                     cancellationToken)
                 .ConfigureAwait(false);
 
-            // 采用重写的那一版：它是带着明确要求做出来的。它若仍然像流水账，两次的数字都留在结果里，
+            // 采用重写的那一版：它是带着明确要求做出来的。它若仍然不合规，两次的数字都留在结果里，
             // 由作业处理器记进日志——判据调过之后要能看出它为什么这么判。
             draft = rewritten;
-            structure = ArticleStructurePolicy.Assess(draft.Body, draft.Citations, sameDayInputs);
+            structure = ArticleStructurePolicy.Assess(draft.Title, draft.Body, draft.Citations, sameDayInputs);
             structureRewritten = true;
         }
 

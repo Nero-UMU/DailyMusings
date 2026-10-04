@@ -23,7 +23,7 @@ public static class ArticleStructurePolicy
     public const int MinimumMaterialCount = 3;
 
     /// <summary>
-    /// 判出流水账之后追加给模型的话。刻意写得具体——指出上一版哪里不合格、这一版必须怎么改，而不是把
+    /// 判出形状不合规之后追加给模型的话。刻意写得具体——指出上一版哪里不合格、这一版必须怎么改，而不是把
     /// 系统规则再念一遍。
     /// </summary>
     public const string RewriteInstruction = """
@@ -32,27 +32,32 @@ public static class ArticleStructurePolicy
         - 先定一条贯穿全文的线索——一个感受、一个念头，或这一天里最让你停了一下的那一点，所有素材都服务于它；
         - 重新组织结构，不要按素材出现的时间顺序逐条铺开；几件事可以合在一段里写，一件事也可以分两段；
         - 段落数与素材条数无关；段落之间不要用「然后」「接着」把素材串成流水；
+        - 标题必须原样取自正文里的一句话（6 到 16 个字），不许把当天两件事用逗号并成行程表、不许概括全天；
         - 仍然只能使用给定的素材，不得添加素材里没有的事实。
         """;
 
     /// <summary>
-    /// 结构判定。<paramref name="sameDayInputs"/> 是当天素材的那几条输入 id——用它区分「引用的是当天的素材」
+    /// 形状判定。<paramref name="sameDayInputs"/> 是当天素材的那几条输入 id——用它区分「引用的是当天的素材」
     /// 与「引用的是检索出来的历史素材」。
     /// </summary>
     public static ArticleStructureAssessment Assess(
+        string title,
         string body,
         IReadOnlyList<GeneratedCitation> citations,
         IReadOnlyCollection<InputEntryId> sameDayInputs)
     {
+        ArgumentNullException.ThrowIfNull(title);
         ArgumentNullException.ThrowIfNull(body);
         ArgumentNullException.ThrowIfNull(citations);
         ArgumentNullException.ThrowIfNull(sameDayInputs);
+
+        var (titleFromBody, titleLooksConstructed) = AssessTitle(title, body);
 
         var paragraphs = ParagraphSplitter.Split(body).Count;
 
         if (sameDayInputs.Count < MinimumMaterialCount || paragraphs == 0)
         {
-            return new ArticleStructureAssessment(false, paragraphs, 0, 0);
+            return new ArticleStructureAssessment(false, paragraphs, 0, 0, titleFromBody, titleLooksConstructed);
         }
 
         var day = sameDayInputs.ToHashSet();
@@ -89,15 +94,55 @@ public static class ArticleStructurePolicy
             withSources >= sameDayInputs.Count && singleSource == withSources,
             paragraphs,
             withSources,
-            singleSource);
+            singleSource,
+            titleFromBody,
+            titleLooksConstructed);
     }
+
+    /// <summary>
+    /// 标题的两个信号。判据同样是「宁可漏判不可误判」：
+    /// <list type="bullet">
+    /// <item><c>TitleFromBody</c>：标题去空白与句末标点后，能在正文里原样找到——这正是「标题必须原样取自正文
+    /// 里的一句话」那条规则的可计算形式。</item>
+    /// <item><c>TitleLooksConstructed</c>：既**不在正文里**，又**把两件事用逗号/顿号/和/与并起来**——用户报的
+    /// 「凌晨改代码，中午去婚礼」那一类。两条同时成立才判，所以「改了字的单个意象」不会触发（那是措辞问题，
+    /// 不值得为它重写一整篇）。</item>
+    /// </list>
+    /// </summary>
+    private static (bool FromBody, bool LooksConstructed) AssessTitle(string title, string body)
+    {
+        var trimmed = title.Trim();
+
+        if (trimmed.Length == 0)
+        {
+            return (false, false);
+        }
+
+        // 只去掉空白与句末标点：正文里的一句话常常带逗号，标题截取时可以把它去掉，所以比较两边的「无标点」形式。
+        var bare = new string(trimmed.Where(character => !char.IsWhiteSpace(character) && !Endings.Contains(character)).ToArray());
+        var bareBody = new string(body.Where(character => !char.IsWhiteSpace(character)).ToArray());
+
+        var fromBody = bare.Length > 0 && bareBody.Contains(bare, StringComparison.Ordinal);
+        var joinsTwoThings = trimmed.Any(character => character is '，' or '、' or '和' or '与' || character is ',');
+
+        return (fromBody, !fromBody && joinsTwoThings);
+    }
+
+    private const string Endings = "。！？!?";
 }
 
 /// <summary>
-/// 结构判定的结果。数字都留着，好写进日志与断言，而不是只给一个是非——判据调过之后要能看出它为什么判成这样。
+/// 形状判定的结果。数字与两个标题信号都留着，好写进日志与断言，而不是只给一个是非——判据调过之后要能看出
+/// 它为什么判成这样。
 /// </summary>
 public sealed record ArticleStructureAssessment(
     bool LooksLikeInventory,
     int Paragraphs,
     int ParagraphsWithSources,
-    int SingleSourceParagraphs);
+    int SingleSourceParagraphs,
+    bool TitleFromBody,
+    bool TitleLooksConstructed)
+{
+    /// <summary>是否该带着改写要求重来一次：流水账，或者标题是把两件事并起来的行程表。</summary>
+    public bool NeedsRewrite => LooksLikeInventory || TitleLooksConstructed;
+}

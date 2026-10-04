@@ -343,8 +343,8 @@ public class ReflectionGenerationTests
         const string woven = "第一件事和第二件事挤在同一段里。\n\n第三件事是另一条线。";
 
         context.Client.Override = request => request.StructureCorrection is null
-            ? Draft(inventory, ("第一件事。", [first]), ("第二件事。", [second]), ("第三件事。", [third]))
-            : Draft(woven, ("第一件事和第二件事挤在同一段里。", [first, second]), ("第三件事是另一条线。", [third]));
+            ? Draft("第一件事", inventory, ("第一件事。", [first]), ("第二件事。", [second]), ("第三件事。", [third]))
+            : Draft("第一件事和第二件事挤在同一段里", woven, ("第一件事和第二件事挤在同一段里。", [first, second]), ("第三件事是另一条线。", [third]));
 
         var result = await context.Generate.ExecuteAsync(
             context.Today,
@@ -370,6 +370,7 @@ public class ReflectionGenerationTests
         var third = await context.CaptureTextAsync("第三件事。");
 
         context.Client.Override = _ => Draft(
+            "第一件事和第二件事挤在同一段里",
             "第一件事和第二件事挤在同一段里。\n\n第三件事是另一条线。",
             ("第一件事和第二件事挤在同一段里。", [first, second]),
             ("第三件事是另一条线。", [third]));
@@ -384,9 +385,44 @@ public class ReflectionGenerationTests
         Assert.IsFalse(result.StructureRewritten);
     }
 
-    private static GeneratedDraft Draft(string body, params (string Quote, InputEntry[] Inputs)[] citations) =>
+    /// <summary>
+    /// 形状对、只是标题不合格，也同样触发重写（附录 A.41 续记四）——用户报的另一半正是标题。
+    /// </summary>
+    [TestMethod]
+    public async Task A_constructed_agenda_title_triggers_the_rewrite_too()
+    {
+        await using var context = await ReflectionTestContext.CreateAsync();
+
+        var first = await context.CaptureTextAsync("第一件事。");
+        var second = await context.CaptureTextAsync("第二件事。");
+        var third = await context.CaptureTextAsync("第三件事。");
+
+        const string body = "第一件事和第二件事挤在同一段里。\n\n第三件事是另一条线。";
+        var citations = new (string Quote, InputEntry[] Inputs)[]
+        {
+            ("第一件事和第二件事挤在同一段里。", [first, second]),
+            ("第三件事是另一条线。", [third]),
+        };
+
+        context.Client.Override = request => request.StructureCorrection is null
+            ? Draft("第一件事，第三件事", body, citations)
+            : Draft("第三件事是另一条线", body, citations);
+
+        var result = await context.Generate.ExecuteAsync(
+            context.Today,
+            new ReflectionGenerationPayload(false, GenerationReason.Manual, false),
+            CancellationToken.None);
+
+        Assert.AreEqual(2, context.Client.GenerateCalls, "标题是行程表也要重写。");
+        Assert.IsTrue(result.StructureRewritten);
+        Assert.IsFalse(result.Structure!.LooksLikeInventory, "这一版的形状本来就对，触发重写的是标题。");
+        Assert.IsFalse(result.Structure.TitleLooksConstructed, "重写后标题原样取自正文。");
+        Assert.AreEqual("第三件事是另一条线", result.Version!.Title);
+    }
+
+    private static GeneratedDraft Draft(string title, string body, params (string Quote, InputEntry[] Inputs)[] citations) =>
         new(
-            "标题",
+            title,
             "摘要",
             body,
             ["记录"],

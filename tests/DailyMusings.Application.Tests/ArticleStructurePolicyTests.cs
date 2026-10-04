@@ -39,6 +39,7 @@ public sealed class ArticleStructurePolicyTests
             """;
 
         var assessment = ArticleStructurePolicy.Assess(
+            "凌晨改代码，中午去婚礼",
             body,
             [
                 Cite("凌晨一点多，我又改了一遍每日随想的代码。", A),
@@ -52,6 +53,11 @@ public sealed class ArticleStructurePolicyTests
         Assert.AreEqual(4, assessment.Paragraphs);
         Assert.AreEqual(4, assessment.ParagraphsWithSources);
         Assert.AreEqual(4, assessment.SingleSourceParagraphs);
+
+        // 这个标题本身就是用户抱怨的另一种形状：不在正文里，还把两件事用逗号并成了行程表。
+        Assert.IsFalse(assessment.TitleFromBody);
+        Assert.IsTrue(assessment.TitleLooksConstructed);
+        Assert.IsTrue(assessment.NeedsRewrite);
     }
 
     /// <summary>用户选定的结构：三段落，每段把两件事缝在一起——判据必须放过它。</summary>
@@ -67,6 +73,7 @@ public sealed class ArticleStructurePolicyTests
             """;
 
         var assessment = ArticleStructurePolicy.Assess(
+            "一天里最沉的其实不在代码里",
             body,
             [
                 Cite("凌晨一点多，把每日随想的代码又改了一版", A, B),
@@ -77,6 +84,8 @@ public sealed class ArticleStructurePolicyTests
         Assert.IsFalse(
             assessment.LooksLikeInventory,
             "段落数少于素材数、且每段都不止一条素材，这正是要的形状，不该被判流水账。");
+        Assert.IsTrue(assessment.TitleFromBody, "标题原样取自正文，就不该被标题那条判违规。");
+        Assert.IsFalse(assessment.NeedsRewrite);
     }
 
     /// <summary>三条素材以下不判：两三件事写成两段本来就正常。</summary>
@@ -84,6 +93,7 @@ public sealed class ArticleStructurePolicyTests
     public void Two_material_days_are_never_judged()
     {
         var assessment = ArticleStructurePolicy.Assess(
+            "第一件事",
             "第一件事。\n\n第二件事。",
             [Cite("第一件事。", A), Cite("第二件事。", B)],
             [A, B]);
@@ -96,11 +106,39 @@ public sealed class ArticleStructurePolicyTests
     public void Quotes_that_cannot_be_located_do_not_count()
     {
         var assessment = ArticleStructurePolicy.Assess(
+            "第一件事",
             "第一件事。\n\n第二件事。\n\n第三件事。",
             [Cite("这句话不在正文里。", A, B, C)],
             [A, B, C]);
 
         Assert.IsFalse(assessment.LooksLikeInventory);
         Assert.AreEqual(0, assessment.ParagraphsWithSources);
+    }
+
+    /// <summary>
+    /// 标题的两个信号。判据保守的方向要写清楚：**改了字的单个意象不触发**（那是措辞问题，不值得为它重写
+    /// 一整篇），只有「不在正文里 + 把两件事并起来」这一种形状才触发。
+    /// </summary>
+    [TestMethod]
+    public void A_constructed_agenda_title_is_flagged_but_a_reworded_image_is_not()
+    {
+        const string body = "放假之后就不怎么看时间了，几点睡全凭什么时候觉得困。";
+
+        var agenda = ArticleStructurePolicy.Assess("玩到快三点，他还在设想游戏", body, [], [A, B, C]);
+
+        Assert.IsFalse(agenda.TitleFromBody);
+        Assert.IsTrue(agenda.TitleLooksConstructed, "不在正文里、又用逗号并了两件事 —— 正是用户抱怨的形状。");
+        Assert.IsTrue(agenda.NeedsRewrite);
+
+        var reworded = ArticleStructurePolicy.Assess("睡不睡全看困不困", body, [], [A, B, C]);
+
+        Assert.IsFalse(reworded.TitleFromBody, "改了字，所以不算原样取自正文。");
+        Assert.IsFalse(reworded.TitleLooksConstructed, "但它不是行程表，不该为它重写一整篇。");
+        Assert.IsFalse(reworded.NeedsRewrite);
+
+        var verbatim = ArticleStructurePolicy.Assess("几点睡全凭什么时候觉得困", body, [], [A, B, C]);
+
+        Assert.IsTrue(verbatim.TitleFromBody, "原样截取正文里的一句话，合格。");
+        Assert.IsFalse(verbatim.NeedsRewrite);
     }
 }
